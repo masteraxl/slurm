@@ -82,7 +82,6 @@ typedef struct {
  * 
  */
 typedef struct {
-	char *save_name;
 	int geometry[PA_SYSTEM_DIMENSIONS];
 	int size; 
 	int conn_type;
@@ -181,7 +180,10 @@ typedef struct {
  * 
  * return success of allocation/validation of params
  */
-int new_pa_request(pa_request_t* pa_request);
+int new_pa_request(pa_request_t* pa_request, 
+		    int geometry[PA_SYSTEM_DIMENSIONS], int size, 
+		    bool rotate, bool elongate, 
+		    bool force_contig, bool co_proc, int conn_type);
 
 /**
  * delete a partition request 
@@ -230,7 +232,7 @@ int allocate_part(pa_request_t* pa_request, List results);
  * Admin wants to remove a previous allocation.
  * will allow Admin to delete a previous allocation retrival by letter code.
  */
-int remove_part(List nodes);
+int remove_part();
 
 /** 
  * Admin wants to change something about a previous allocation. 
@@ -238,14 +240,14 @@ int remove_part(List nodes);
  * letter code for the allocation and the variable to alter
  *
  */
-int alter_part(List nodes, int conn_type);
+int alter_part();
 
 /** 
  * After a partition is deleted or altered following allocations must
  * be redone to make sure correct path will be used in the real system
  *
  */
-int redo_part(List nodes, int conn_type);
+int redo_part();
 
 void init_grid(node_info_msg_t *node_info_ptr);
 

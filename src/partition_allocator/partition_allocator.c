@@ -71,7 +71,7 @@ void _set_external_wires(int dim, int count, pa_node_t* source,
 			 pa_node_t* target_1, pa_node_t* target_2, 
 			 pa_node_t* target_first, pa_node_t* target_second);
 /* */
-char *_set_internal_wires(List nodes, int size, int conn_type);
+int _set_internal_wires(List nodes, int size, int conn_type);
 /* */
 int _set_internal_port(pa_switch_t *curr_switch, int check_port, int *coord, int dim);
 /* */
@@ -100,20 +100,28 @@ int _set_one_dim(int *start, int *end, int *coord);
  * 
  * return SUCCESS of operation.
  */
-int new_pa_request(pa_request_t* pa_request)
+int new_pa_request(pa_request_t* pa_request, 
+		   int geometry[PA_SYSTEM_DIMENSIONS], int size, 
+		   bool rotate, bool elongate, 
+		   bool force_contig, bool co_proc, int conn_type)
 {
 	int i, i2, i3, picked, total_sz=1 , size2, size3;
 	float sz=1;
 	int checked[8];
 	
 	/* size will be overided by geometry size if given */
-	if (pa_request->geometry[0] != -1){
+	if (geometry[0] != -1){
 		for (i=0; i<PA_SYSTEM_DIMENSIONS; i++){
-			if (pa_request->geometry[i] < 1 || pa_request->geometry[i] > DIM_SIZE[i]){
+			if (geometry[i] < 1 || geometry[i] > DIM_SIZE[i]){
 				printf("new_pa_request Error, request geometry is invalid\n"); 
 				return 0;
 			}
 		}
+
+		for (i=0; i<PA_SYSTEM_DIMENSIONS; i++){
+			pa_request->geometry[i] = geometry[i];
+		}
+
 	} else {
 		/* decompose the size into a cubic geometry */
 		
@@ -122,10 +130,10 @@ int new_pa_request(pa_request_t* pa_request)
 			pa_request->geometry[i] = 1;
 		}
 	
-		if(pa_request->size==1)
+		if(size==1)
 			goto endit;
 		
-		if(pa_request->size>total_sz || pa_request->size<1) {
+		if(size>total_sz || size<1) {
 			printf("new_pa_request ERROR, requested size must be\ngreater than 0 and less than %d.\n",total_sz);
 			return 0;			
 		}
@@ -136,11 +144,11 @@ int new_pa_request(pa_request_t* pa_request)
 			checked[i]=0;
 		/* see if We can find a cube or square root of the size to make an easy cube */
 		for(i=0;i<PA_SYSTEM_DIMENSIONS-1;i++) {
-			sz = powf((float)pa_request->size,(float)1/(PA_SYSTEM_DIMENSIONS-i));
-			if(pow(sz,(PA_SYSTEM_DIMENSIONS-i))==pa_request->size)
+			sz = powf((float)size,(float)1/(PA_SYSTEM_DIMENSIONS-i));
+			if(pow(sz,(PA_SYSTEM_DIMENSIONS-i))==size)
 				break;
 		}
-		size3=pa_request->size;
+		size3=size;
 		if(i<PA_SYSTEM_DIMENSIONS-1) {
 			i3=i;
 			/* we found something that looks like a cube! */
@@ -155,10 +163,10 @@ int new_pa_request(pa_request_t* pa_request)
 		} else {
 			picked=0;
 		tryagain:	
-			if(size3!=pa_request->size)
+			if(size3!=size)
 				size2=size3;
 			else
-				size2=pa_request->size;
+				size2=size;
 			//messedup:
 			for (i=picked; i<PA_SYSTEM_DIMENSIONS; i++) { 
 				if(size2<=1) 
@@ -188,7 +196,7 @@ int new_pa_request(pa_request_t* pa_request)
 						}		
 					}				
 					if(i2==1) {
-						pa_request->size +=1;
+						size +=1;
 						goto startagain;
 					}
 						
@@ -208,9 +216,14 @@ endit:
 	
 	//printf("geometry: %d %d %d size = %d\n", pa_request->geometry[0],pa_request->geometry[1],pa_request->geometry[2], pa_request->size);
 		
+	pa_request->conn_type = conn_type;
 	pa_request->rotate_count= 0;
+	pa_request->rotate = rotate;
 	pa_request->elongate_count = 0;
-		
+	pa_request->elongate = elongate;
+	pa_request->force_contig = force_contig;
+	pa_request->co_proc = co_proc;
+	
 	return 1;
 }
 
@@ -219,8 +232,6 @@ endit:
  */
 void delete_pa_request(pa_request_t *pa_request)
 {
-	if(pa_request->save_name!=NULL)
-		xfree(pa_request->save_name);
 	xfree(pa_request);
 }
 
@@ -385,7 +396,7 @@ int allocate_part(pa_request_t* pa_request, List results)
 		//printf("hey I am returning 1\n");
 		return 1;
 	} else {
-		//printf("hey I am returning 0\n");
+		printf("hey I am returning 0\n");
 		return 0;
 	}
 }
@@ -441,7 +452,7 @@ int remove_part(List nodes)
 			}
 		}
 	}
-				
+	
 	return 1;
 }
 
@@ -451,32 +462,9 @@ int remove_part(List nodes)
  *
  * returns SLURM_SUCCESS if undo was successful.
  */
-int alter_part(List nodes, int conn_type)
+int alter_part(List nodes)
 {
-	int dim;
-	pa_node_t* pa_node;
-	pa_switch_t *curr_switch; 
-	int size=0;
-	ListIterator results_i;		
-
-	results_i = list_iterator_create(nodes);
-	while ((pa_node = list_next(results_i)) != NULL) {
-		pa_node->used = false;
-		
-		for(dim=0;dim<PA_SYSTEM_DIMENSIONS;dim++) {
-			curr_switch = &pa_node->axis_switch[dim];
-			if(curr_switch->int_wire[0].used) {
-				_reset_the_path(curr_switch, 0, 1, dim);
-			}
-			
-			if(curr_switch->int_wire[1].used) {
-				_reset_the_path(curr_switch, 1, 0, dim);
-			}
-		}
-		size++;
-	}
-	list_iterator_destroy(results_i);
-	_set_internal_wires(nodes, size, conn_type);
+//	_set_internal_wires(nodes, size, conn_type);
 
 	return 1;
 }
@@ -486,35 +474,11 @@ int alter_part(List nodes, int conn_type)
  * be redone to make sure correct path will be used in the real system
  *
  */
-int redo_part(List nodes, int conn_type)
+int redo_part(List nodes)
 {
-	int dim;
-	pa_node_t* pa_node;
-	pa_switch_t *curr_switch; 
-	int size=0;
-	char *name;
-	ListIterator results_i;		
-
-	results_i = list_iterator_create(nodes);
-	while ((pa_node = list_next(results_i)) != NULL) {
-		pa_node->used = false;
-		
-		for(dim=0;dim<PA_SYSTEM_DIMENSIONS;dim++) {
-			curr_switch = &pa_node->axis_switch[dim];
-			if(curr_switch->int_wire[0].used) {
-				_reset_the_path(curr_switch, 0, 1, dim);
-			}
-			
-			if(curr_switch->int_wire[1].used) {
-				_reset_the_path(curr_switch, 1, 0, dim);
-			}
-		}
-		size++;
-	}
 	
-	list_iterator_destroy(results_i);
-	name = _set_internal_wires(nodes, size, conn_type);
-	xfree(name);
+//	_set_internal_wires(nodes, size, conn_type);
+	
 	return 1;
 }
 
@@ -688,7 +652,6 @@ int _find_match(pa_request_t *pa_request, List results)
 	int find_x=0, find_y=0, find_z=0;
 	pa_node_t* pa_node;
 	int found_one=0;
-	char *name=NULL;
 
 start_again:
 	//printf("starting looking for a grid of %d%d%d\n",pa_request->geometry[X],pa_request->geometry[Y],pa_request->geometry[Z]);
@@ -797,15 +760,10 @@ start_again:
 		/** THIS IS where we might should call the graph
 		 * solver to see if the allocation can be wired,
 		 * before returning a definitive TRUE */
-		if(pa_request->conn_type==TORUS)
-			name = _set_internal_wires(results, pa_request->size, TORUS);
-		else
-			name = _set_internal_wires(results, pa_request->size, MESH);
-		
-		if(name!=NULL)
-			pa_request->save_name = name;
-		else
-			return 0;
+	if(pa_request->conn_type==TORUS)
+		_set_internal_wires(results, pa_request->size, TORUS);
+	else
+		_set_internal_wires(results, pa_request->size, MESH);
 	} else {
 		printf("couldn't find it 2\n");
 		return 0;
@@ -974,18 +932,17 @@ void _set_external_wires(int dim, int count, pa_node_t* source, pa_node_t* targe
 	}	
 }
 
-char *_set_internal_wires(List nodes, int size, int conn_type)
+int _set_internal_wires(List nodes, int size, int conn_type)
 {
-	pa_node_t* pa_node[size+1];
+	pa_node_t* pa_node[size];
 	//pa_switch_t *next_switch; 
-	int count=0, i, set=0;
+	int count=0, i;
+	int *coord;
 	int *start;
 	int *end;
-	char *name = (char *) xmalloc(sizeof(char)*8);
 	static int part_count=0;
 	ListIterator itr;
-
-	memset(name,0,8);		
+	
 	itr = list_iterator_create(nodes);
 	while((pa_node[count] = (pa_node_t*) list_next(itr))) {
 		count++;
@@ -994,32 +951,30 @@ char *_set_internal_wires(List nodes, int size, int conn_type)
 		
 	start = pa_node[0]->coord;
 	end = pa_node[count-1]->coord;	
-	//printf("hey %d\n",count);
-	sprintf(name, "%d%d%dx%d%d%d",start[0],start[1],start[2],end[0],end[1],end[2]);
-	//printf("the name = %s\n",name);
-		
+
+	itr = list_iterator_create(nodes);
+	
 	for(i=0;i<count;i++) {
-		if(!pa_node[i]->used) {
-			if(size!=1)
-				_configure_dims(pa_node[i]->coord, end);
-			pa_node[i]->used=1;
+		coord = pa_node[i]->coord;		
+		if(!pa_system_ptr->grid[coord[X]][coord[Y]][coord[Z]].used) {	
+			if(size!=1) 
+				_configure_dims(coord, end);
+			pa_system_ptr->grid[coord[X]][coord[Y]][coord[Z]].used=1;
+			if(conn_type==TORUS) 
+				pa_system_ptr->
+					grid[coord[X]][coord[Y]][coord[Z]].letter = 
+					pa_system_ptr->fill_in_value[part_count].letter;
+			else 
+				pa_system_ptr->
+					grid[coord[X]][coord[Y]][coord[Z]].letter = 
+					pa_system_ptr->fill_in_value[part_count+32].letter;
 			
-			if(pa_node[i]->letter == '.') {
-				if(conn_type==TORUS) 
-					pa_node[i]->letter =
-						pa_system_ptr->fill_in_value[part_count].letter;
-				
-				else 
-					pa_node[i]->letter =
-						pa_system_ptr->fill_in_value[part_count+32].letter;
-				
-				pa_node[i]->color =
-					pa_system_ptr->fill_in_value[part_count].color;
-				set=1;
-			}
+			pa_system_ptr->grid[coord[X]][coord[Y]][coord[Z]].color = 
+				pa_system_ptr->fill_in_value[part_count].color;
+			
 		} else {
 			printf("AHHHHHHH I can't do it in _set_internal_wires\n");
-			return NULL;
+			return 0;	
 		}
 	}
 
@@ -1027,8 +982,7 @@ char *_set_internal_wires(List nodes, int size, int conn_type)
 	for(i=0;i<count;i++) {
 		_set_one_dim(start, end, pa_node[i]->coord);
 	}
-	if(set)
-		part_count++;		
+	part_count++;		
 /* 	int i; */
 /* 	itr = list_iterator_create(nodes); */
 /* 	while((pa_node = (pa_node_t*) list_next(itr))){ */
@@ -1043,7 +997,7 @@ char *_set_internal_wires(List nodes, int size, int conn_type)
 /* 	} */
 /* 	list_iterator_destroy(itr); */
 
-	return name;
+	return 1;
 }				
 
 int _set_internal_port(pa_switch_t *curr_switch, int check_port, int *coord, int dim) 
@@ -1255,6 +1209,7 @@ int _configure_dims(int *coord, int *end)
 {
 	pa_switch_t *curr_switch; 
 	int dim;
+	int j;
 			
 	int target[PA_SYSTEM_DIMENSIONS] = {0,0,0};
 	int target2[PA_SYSTEM_DIMENSIONS] = {0,0,0};
@@ -1354,19 +1309,20 @@ int _set_one_dim(int *start, int *end, int *coord)
 /** */
 int main(int argc, char** argv)
 {
-	pa_request_t *request = (pa_request_t*) xmalloc(sizeof(pa_request_t)); 
+	int geo[3] = {-1,-1,-1};
+	bool rotate = true;
+	bool elongate = true;
+	bool force_contig = true;
+	bool co_proc = true;
+	pa_request_t *request; 
 	int error_code;
 	time_t start, end;
 	node_info_msg_t * node_info_ptr;
 	List results;
 	List results2;
 //	int i,j;
-	
-	request->rotate = true;
-	request->elongate = true;
-	request->force_contig = true;
-	request->co_proc = true;
-	request->geometry[0]=-1;
+	request = (pa_request_t*) xmalloc(sizeof(pa_request_t));
+		
 	//printf("geometry: %d %d %d size = %d\n", request->geometry[0], request->geometry[1], request->geometry[2], request->size);
 #ifdef HAVE_BGL
 	error_code = slurm_load_node((time_t) NULL, &node_info_ptr, 0);
@@ -1382,23 +1338,23 @@ int main(int argc, char** argv)
 #endif
 	
 	results = list_create(NULL);
-	request->geometry[0] = 2;
-	request->geometry[1] = 2;
-	request->geometry[2] = 2;	
-	request->size = -1; //atoi(argv[1]);
-	new_pa_request(request);
+	geo[0] = 2;
+	geo[1] = 1;
+	geo[2] = 1;	
+	int size = atoi(argv[1]);
+	new_pa_request(request, geo, size, rotate, elongate, force_contig, co_proc, SELECT_TORUS);
 	time(&start);
 	print_pa_request(request);
 	allocate_part(request, results);
 	time(&end);
 	//printf("allocate_part: %ld\n", (end-start));
 	//list_destroy(results);
-	printf("name = %s\n",request->save_name);		
+			
 	results2 = list_create(NULL);
-	request->geometry[0] = 3;
-	request->geometry[1] = 1;
-	request->geometry[2] = 1;
-	new_pa_request(request);
+	geo[0] = 3;
+	geo[1] = 1;
+	geo[2] = 1;
+	new_pa_request(request, geo, -1, rotate, elongate, force_contig, co_proc, SELECT_TORUS);
 	time(&start);
 	print_pa_request(request);
 	allocate_part(request, results2);
@@ -1406,7 +1362,6 @@ int main(int argc, char** argv)
 	//printf("allocate_part: %ld\n", (end-start));
 	//list_destroy(results);
 	remove_part(results);
-	redo_part(results2, request->conn_type);
 /* 	results = list_create(NULL); */
 /* 	geo[0] = 2; */
 /* 	geo[1] = 2; */
@@ -1454,7 +1409,7 @@ int main(int argc, char** argv)
 	for(x=startx;x<=endx;x++) {
 		for(y=starty;y<=endy;y++) {
 			for(z=startz;z<=endz;z++) {
-				printf("Node %d%d%d Used = %d Letter = %c\n",x,y,z,pa_system_ptr->grid[x][y][z].used,pa_system_ptr->grid[x][y][z].letter);
+				printf("Node %d%d%d Used = %d\n",x,y,z,pa_system_ptr->grid[x][y][z].used);
 				for(dim=0;dim<1;dim++) {
 					printf("Dim %d\n",dim);
 					pa_switch_t *wire = &pa_system_ptr->grid[x][y][z].axis_switch[dim];
