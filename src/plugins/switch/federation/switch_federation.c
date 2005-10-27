@@ -357,7 +357,8 @@ int switch_p_build_jobinfo(switch_jobinfo_t switch_job, char *nodelist,
 		       "no network tables allocated");
 		return SLURM_SUCCESS;
 	} else {
-		list = hostlist_create(nodelist);
+		list = hostlist_create(nodelist);		
+		
 		if(!list)
 			fatal("hostlist_create(%s): %m", nodelist);
 

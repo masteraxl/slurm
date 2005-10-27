@@ -506,6 +506,7 @@ step_create ( job_step_create_request_msg_t *step_specs,
 	bitstr_t *nodeset;
 	int node_count;
 	time_t now = time(NULL);
+	char *nodelist = NULL;
 
 	*new_step_record = NULL;
 	job_ptr = find_job_record (step_specs->job_id);
@@ -533,6 +534,7 @@ step_create ( job_step_create_request_msg_t *step_specs,
 	job_ptr->kill_on_step_done = kill_job_when_step_done;
 
 	job_ptr->time_last_active = now;
+		
 	nodeset = _pick_step_nodes (job_ptr, step_specs);
 	if (nodeset == NULL)
 		return ESLURM_REQUESTED_NODE_CONFIG_UNAVAILABLE ;
@@ -553,7 +555,13 @@ step_create ( job_step_create_request_msg_t *step_specs,
 		fatal ("create_step_record failed with no memory");
 
 	/* set the step_record values */
-	step_ptr->step_node_list = bitmap2node_name(nodeset);
+	//step_ptr->step_node_list = bitmap2node_name(nodeset);
+	/* Here is where the node list is set for the job */
+	
+	step_ptr->step_node_list = xstrdup(step_specs->node_list); 
+	
+	info("node_list here %s %d", step_ptr->step_node_list, 
+	       step_specs->num_tasks);
 	step_ptr->step_node_bitmap = nodeset;
 	step_ptr->cyclic_alloc = 
 		(uint16_t) (step_specs->task_dist == SLURM_DIST_CYCLIC);
@@ -588,10 +596,10 @@ step_create ( job_step_create_request_msg_t *step_specs,
 			fatal ("step_create: switch_alloc_jobinfo error");
 		
 		if (switch_build_jobinfo(step_ptr->switch_job, 
-					step_ptr->step_node_list,
-					tasks_per_node, 
-					step_ptr->cyclic_alloc,
-					step_ptr->network) < 0) {
+					 step_ptr->step_node_list,
+					 tasks_per_node, 
+					 step_ptr->cyclic_alloc,
+					 step_ptr->network) < 0) {
 			error("switch_build_jobinfo: %m");
 			xfree(tasks_per_node);
 			delete_step_record (job_ptr, step_ptr->step_id);

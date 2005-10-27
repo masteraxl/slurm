@@ -143,7 +143,6 @@ slurm_step_ctx_create (job_step_create_request_msg_t *step_req)
 	rc->task_dist	= step_req->task_dist;
 	rc->step_resp	= step_resp;
 	rc->alloc_resp	= alloc_resp;
-
 	rc->hl		= hostlist_create(rc->step_resp->node_list);
 	rc->nhosts	= hostlist_count(rc->hl);
 	(void) _task_layout(rc);

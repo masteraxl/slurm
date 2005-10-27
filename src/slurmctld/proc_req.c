@@ -438,7 +438,7 @@ static void _slurm_rpc_allocate_resources(slurm_msg_t * msg)
 		error("Security violation, RESOURCE_ALLOCATE from uid=%u",
 		      (unsigned int) uid);
 	}
-
+	
 	if (error_code == SLURM_SUCCESS) {
 		do_unlock = true;
 		lock_slurmctld(job_write_lock);
@@ -447,7 +447,7 @@ static void _slurm_rpc_allocate_resources(slurm_msg_t * msg)
 		/* unlock after finished using the job structure data */
 		END_TIMER;
 	}
-
+			
 	/* return result */
 	if ((error_code == SLURM_SUCCESS) ||
 	    ((immediate == 0) && 
@@ -1066,8 +1066,8 @@ static void _slurm_rpc_job_step_create(slurm_msg_t * msg)
 		job_step_resp.job_step_id = step_rec->step_id;
 		job_step_resp.node_list   = xstrdup(step_rec->step_node_list);
 		job_step_resp.cred        = slurm_cred;
-		job_step_resp.switch_job  = switch_copy_jobinfo(
-						step_rec->switch_job);
+		job_step_resp.switch_job  = 
+			switch_copy_jobinfo(step_rec->switch_job);
 		unlock_slurmctld(job_write_lock);
 		resp.address = msg->address;
 		resp.msg_type = RESPONSE_JOB_STEP_CREATE;
@@ -1262,10 +1262,10 @@ static void _slurm_rpc_old_job_alloc(slurm_msg_t * msg)
 		NO_LOCK, READ_LOCK, READ_LOCK, NO_LOCK };
 	uid_t uid;
 	bool do_unlock = false;
-
+	
 	START_TIMER;
 	debug2("Processing RPC: REQUEST_OLD_JOB_RESOURCE_ALLOCATION");
-
+	
 	/* do RPC call */
 	uid = g_slurm_auth_get_uid(msg->cred);
 	if ( (uid != job_desc_msg->uid) && (!_is_super_user(uid)) ) {
@@ -1280,7 +1280,6 @@ static void _slurm_rpc_old_job_alloc(slurm_msg_t * msg)
 					  job_desc_msg->job_id, &job_ptr);
 		END_TIMER;
 	}
-
 	/* return result */
 	if (error_code || (job_ptr == NULL)) {
 		if (do_unlock)
@@ -1290,9 +1289,8 @@ static void _slurm_rpc_old_job_alloc(slurm_msg_t * msg)
 			slurm_strerror(error_code));
 		slurm_send_rc_msg(msg, error_code);
 	} else {
-		debug2("_slurm_rpc_old_job_alloc JobId=%u NodeList=%s %s",
+		info("_slurm_rpc_old_job_alloc JobId=%u NodeList=%s %s",
 			job_desc_msg->job_id, job_ptr->nodes, TIME_STR);
-
 		/* send job_ID  and node_name_ptr */
 		alloc_msg.cpu_count_reps = xmalloc(sizeof(uint32_t) *
 				job_ptr->num_cpu_groups);
@@ -1306,9 +1304,9 @@ static void _slurm_rpc_old_job_alloc(slurm_msg_t * msg)
 		alloc_msg.error_code     = error_code;
 		alloc_msg.job_id         = job_desc_msg->job_id;
 		alloc_msg.node_addr      = xmalloc(sizeof(slurm_addr) *
-				job_ptr->node_cnt);
+						   job_ptr->node_cnt);
 		memcpy(alloc_msg.node_addr, job_ptr->node_addr,
-				(sizeof(slurm_addr) * job_ptr->node_cnt));
+		       (sizeof(slurm_addr) * job_ptr->node_cnt));
 		alloc_msg.node_cnt       = job_ptr->node_cnt;
 		alloc_msg.node_list      = xstrdup(job_ptr->nodes);
 		alloc_msg.num_cpu_groups = job_ptr->num_cpu_groups;
@@ -2164,4 +2162,3 @@ int _launch_batch_step(job_desc_msg_t *job_desc_msg, uid_t uid,
 
 	return SLURM_SUCCESS;
 }
-

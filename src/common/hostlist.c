@@ -2077,6 +2077,7 @@ void hostlist_uniq(hostlist_t hl)
 {
 	int i = 1;
 	hostlist_iterator_t hli;
+
 	LOCK_HOSTLIST(hl);
 	if (hl->nranges <= 1) {
 		UNLOCK_HOSTLIST(hl);

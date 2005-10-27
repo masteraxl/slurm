@@ -1757,6 +1757,7 @@ fed_build_jobinfo(fed_jobinfo_t *jp, hostlist_t hl, int nprocs,
 				hostlist_iterator_reset(hi);
 				host = hostlist_next(hi);
 			}
+			info("host %s", host);
 			rc = _allocate_windows(jp->tables_per_task,
 					       jp->tableinfo,
 					       host, proc_cnt);
