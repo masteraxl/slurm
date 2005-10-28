@@ -521,7 +521,7 @@ _job_create_internal(allocation_info_t *info)
 			cpu_cnt = 0;
 		}
 	}
-
+	
 #ifdef HAVE_FRONT_END
 		job->ntask = (int *) xmalloc(sizeof(int *));
 		job->ntask[0] = opt.nprocs;

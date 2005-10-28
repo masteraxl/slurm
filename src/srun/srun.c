@@ -257,6 +257,7 @@ int srun(int ac, char **av)
 		env->select_jobinfo = job->select_jobinfo;
 		env->nhosts = job->nhosts;
 		env->nodelist = job->nodelist;
+		printf("nodelist = %s\n",job->nodelist);
 		env->task_count = _task_count_string (job);
 		env->jobid = job->jobid;
 		env->stepid = job->stepid;

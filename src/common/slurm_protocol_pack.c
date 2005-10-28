@@ -2174,6 +2174,7 @@ _pack_old_job_desc_msg(old_job_alloc_msg_t * job_desc_ptr, Buf buffer)
 	/* load the data values */
 	pack32(job_desc_ptr->job_id, buffer);
 	pack32(job_desc_ptr->uid, buffer);
+	packstr(job_desc_ptr->req_nodes, buffer);	
 }
 
 static int
@@ -2181,6 +2182,7 @@ _unpack_old_job_desc_msg(old_job_alloc_msg_t **
 			 job_desc_buffer_ptr, Buf buffer)
 {
 	old_job_alloc_msg_t *job_desc_ptr;
+	uint16_t uint16_tmp;
 
 	/* alloc memory for structure */
 	assert(job_desc_buffer_ptr != NULL);
@@ -2190,6 +2192,7 @@ _unpack_old_job_desc_msg(old_job_alloc_msg_t **
 	/* load the data values */
 	safe_unpack32(&job_desc_ptr->job_id, buffer);
 	safe_unpack32(&job_desc_ptr->uid, buffer);
+	safe_unpackstr_xmalloc(&job_desc_ptr->req_nodes, &uint16_tmp, buffer);
 	return SLURM_SUCCESS;
 
       unpack_error:

@@ -517,6 +517,7 @@ create_job_step(srun_job_t *job)
 		error ("Unable to allocate step request message");
 		return -1;
 	}
+	
 	if ((slurm_job_step_create(req, &resp) < 0) || (resp == NULL)) { 
 		error ("Unable to create job step: %m");
 		return -1;
@@ -525,6 +526,8 @@ create_job_step(srun_job_t *job)
 	job->stepid  = resp->job_step_id;
 	job->cred    = resp->cred;
 	job->switch_job = resp->switch_job;
+	xfree(job->nodelist);
+	job->nodelist = xstrdup(resp->node_list);
 	/* 
 	 * Recreate filenames which may depend upon step id
 	 */

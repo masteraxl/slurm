@@ -79,6 +79,7 @@ int *distribute_tasks(const char *mlist, uint16_t num_cpu_groups,
 		fatal("hostlist_create error for %s: %m", tlist);
 
 	nnodes = hostlist_count(task_hl);
+	info("nnodes %d",nnodes);
 	ntask = (int *) xmalloc(sizeof(int *) * nnodes);
 	if (!ntask) {
 		hostlist_destroy(master_hl);
@@ -91,13 +92,14 @@ int *distribute_tasks(const char *mlist, uint16_t num_cpu_groups,
 	count = 1;
 	i = 0;
 	ncpus = 0;
-	while ((this_node_name = hostlist_shift(master_hl))) {
+	while ((this_node_name = hostlist_shift(task_hl))) {
 
-		if (hostlist_find(task_hl, this_node_name) >= 0) {
+		if (hostlist_find(master_hl, this_node_name) >= 0) {
 			if (i >= nnodes) { 
   				fatal("Internal error: duplicate nodes? " 
 				      "(%s)(%s):%m", mlist, tlist); 
   			} 
+			info("add one to %s = %d",this_node_name, i);
 			ntask[i++] = cpus_per_node[index];
 			ncpus += cpus_per_node[index];
 		}
@@ -110,7 +112,8 @@ int *distribute_tasks(const char *mlist, uint16_t num_cpu_groups,
 	}
 	hostlist_destroy(master_hl);
 	hostlist_destroy(task_hl);
-
+	info("%d %d", num_tasks, ncpus);
+	
 	if (num_tasks >= ncpus) {
 		/*
 		 * Evenly overcommit tasks over the hosts

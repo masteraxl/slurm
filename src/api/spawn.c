@@ -347,9 +347,12 @@ extern int slurm_spawn (slurm_step_ctx ctx, int *fd_array)
 	spawn_task_request_msg_t *msg_array_ptr;
 	int *sock_array;
 	slurm_msg_t *req_array_ptr;
-	int i, rc = SLURM_SUCCESS;
+	int i, j, rc = SLURM_SUCCESS;
 	uint16_t slurmd_debug = 0;
 	char *env_var;
+	hostlist_t hostlist = NULL;
+	hostlist_iterator_t itr = NULL;
+	char *host = NULL;
 
 	if ((ctx == NULL) ||
 	    (ctx->magic != STEP_CTX_MAGIC) ||
@@ -368,7 +371,7 @@ extern int slurm_spawn (slurm_step_ctx ctx, int *fd_array)
 		if (i >= 0)
 			slurmd_debug = i;
 	}
-
+	printf("hey I am setting the ports!!!!! %d\n", ctx->nhosts);
 	/* validate fd_array and bind them to ports */
 	sock_array = xmalloc(ctx->nhosts * sizeof(int));
 	for (i=0; i<ctx->nhosts; i++) {
@@ -389,6 +392,8 @@ extern int slurm_spawn (slurm_step_ctx ctx, int *fd_array)
 	msg_array_ptr = xmalloc(sizeof(spawn_task_request_msg_t) *
 			ctx->nhosts);
 	req_array_ptr = xmalloc(sizeof(slurm_msg_t) * ctx->nhosts);
+	hostlist = hostlist_create(ctx->alloc_resp->node_list);
+	itr = hostlist_iterator_create(hostlist);
 	for (i=0; i<ctx->nhosts; i++) {
 		spawn_task_request_msg_t *r = &msg_array_ptr[i];
 		slurm_msg_t              *m = &req_array_ptr[i];
@@ -407,21 +412,31 @@ extern int slurm_spawn (slurm_step_ctx ctx, int *fd_array)
 		r->nprocs	= ctx->num_tasks;
 		r->switch_job	= ctx->step_resp->switch_job; 
 		r->slurmd_debug	= slurmd_debug;
-
+		j=0;
+		while(host = hostlist_next(itr)) {
+			if(!strcmp(host,ctx->host[i]))
+				break;
+			j++;
+		}
+		printf("using %d %s\n",j, ctx->host[j]);
+		hostlist_iterator_reset(itr);
+		printf("node_list %s\n",ctx->step_resp->node_list);
 		/* Task specific message contents */
-		r->global_task_id	= ctx->tids[i][0];
-		r->cpus_allocated	= ctx->cpus[i];
-		r->srun_node_id	= (uint32_t) i;
-		r->io_port	= ntohs(sock_array[i]);
+		r->global_task_id	= ctx->tids[j][0];
+		r->cpus_allocated	= ctx->cpus[j];
+		r->srun_node_id	= (uint32_t) j;
+		r->io_port	= ntohs(sock_array[j]);
 		m->msg_type	= REQUEST_SPAWN_TASK;
 		m->data		= r;
-		memcpy(&m->address, &ctx->alloc_resp->node_addr[i], 
+		
+		memcpy(&m->address, &ctx->alloc_resp->node_addr[j], 
 			sizeof(slurm_addr));
 #if		_DEBUG
 		printf("tid=%d, fd=%d, port=%u, node_id=%u\n",
 			ctx->tids[i][0], fd_array[i], r->io_port, i);
 #endif
 	}
+	hostlist_iterator_destroy(itr);
 
 	rc = _p_launch(req_array_ptr, ctx);
 

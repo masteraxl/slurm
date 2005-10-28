@@ -1132,7 +1132,7 @@ extern void build_node_details(struct job_record *job_ptr)
         int error_code = SLURM_SUCCESS, cr_enabled = 0;
 	int node_inx = 0, cpu_inx = -1;
         int cr_count = 0;
-
+	
 	if ((job_ptr->node_bitmap == NULL) || (job_ptr->nodes == NULL)) {
 		/* No nodes allocated, we're done... */
 		job_ptr->num_cpu_groups = 0;
@@ -1154,7 +1154,12 @@ extern void build_node_details(struct job_record *job_ptr)
 	xrealloc(job_ptr->node_addr, 
 		(sizeof(slurm_addr) * job_ptr->node_cnt));
 	/* Use hostlist here to insure ordering of info matches that of srun */
-	if ((host_list = hostlist_create(job_ptr->nodes)) == NULL)
+	if(job_ptr->req_nodes)
+		this_node_name = job_ptr->req_nodes;
+	else
+		this_node_name = job_ptr->nodes;
+	
+	if ((host_list = hostlist_create(this_node_name)) == NULL)
 		fatal("hostlist_create error for %s: %m", job_ptr->nodes);
 
         job_ptr->ntask_cnt = 0;
@@ -1170,9 +1175,11 @@ extern void build_node_details(struct job_record *job_ptr)
 		if (node_ptr) {
 			int usable_cpus = 0;
                         if (cr_enabled) {
-                          error_code = select_g_get_extra_jobinfo (node_ptr, job_ptr, 
-                                                                   SELECT_CR_USABLE_CPUS, 
-                                                                   &usable_cpus);
+				error_code = 
+					select_g_get_extra_jobinfo (
+						node_ptr, job_ptr, 
+						SELECT_CR_USABLE_CPUS, 
+						&usable_cpus);
                           job_ptr->ntask[cr_count++] = usable_cpus;
                           if(error_code != SLURM_SUCCESS) {
                                    if (job_ptr->ntask) {

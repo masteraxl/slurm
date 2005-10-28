@@ -1062,7 +1062,6 @@ static void _slurm_rpc_job_step_create(slurm_msg_t * msg)
 	} else {
 		info("_slurm_rpc_job_step_create: StepId=%u.%u %s",
 		     step_rec->job_ptr->job_id, step_rec->step_id, TIME_STR);
-
 		job_step_resp.job_step_id = step_rec->step_id;
 		job_step_resp.node_list   = xstrdup(step_rec->step_node_list);
 		job_step_resp.cred        = slurm_cred;
@@ -1262,7 +1261,7 @@ static void _slurm_rpc_old_job_alloc(slurm_msg_t * msg)
 		NO_LOCK, READ_LOCK, READ_LOCK, NO_LOCK };
 	uid_t uid;
 	bool do_unlock = false;
-	
+	char *node_list;
 	START_TIMER;
 	debug2("Processing RPC: REQUEST_OLD_JOB_RESOURCE_ALLOCATION");
 	
@@ -1289,8 +1288,14 @@ static void _slurm_rpc_old_job_alloc(slurm_msg_t * msg)
 			slurm_strerror(error_code));
 		slurm_send_rc_msg(msg, error_code);
 	} else {
+		if(job_desc_msg->req_nodes) {
+			node_list = job_desc_msg->req_nodes;
+			job_ptr->req_nodes = xstrdup(node_list);
+			build_node_details(job_ptr);
+		} else
+			node_list = job_ptr->nodes;
 		info("_slurm_rpc_old_job_alloc JobId=%u NodeList=%s %s",
-			job_desc_msg->job_id, job_ptr->nodes, TIME_STR);
+			job_desc_msg->job_id, node_list, TIME_STR);
 		/* send job_ID  and node_name_ptr */
 		alloc_msg.cpu_count_reps = xmalloc(sizeof(uint32_t) *
 				job_ptr->num_cpu_groups);
@@ -1308,9 +1313,10 @@ static void _slurm_rpc_old_job_alloc(slurm_msg_t * msg)
 		memcpy(alloc_msg.node_addr, job_ptr->node_addr,
 		       (sizeof(slurm_addr) * job_ptr->node_cnt));
 		alloc_msg.node_cnt       = job_ptr->node_cnt;
-		alloc_msg.node_list      = xstrdup(job_ptr->nodes);
+		alloc_msg.node_list      = xstrdup(node_list);
 		alloc_msg.num_cpu_groups = job_ptr->num_cpu_groups;
-		alloc_msg.select_jobinfo = select_g_copy_jobinfo(job_ptr->select_jobinfo);
+		alloc_msg.select_jobinfo =
+			select_g_copy_jobinfo(job_ptr->select_jobinfo);
 		unlock_slurmctld(job_read_lock);
 
 		response_msg.msg_type    = RESPONSE_RESOURCE_ALLOCATION;
@@ -2094,7 +2100,7 @@ int _launch_batch_step(job_desc_msg_t *job_desc_msg, uid_t uid,
 		delete_step_record(job_ptr, step_rec->step_id);
 		return ESLURM_INVALID_JOB_ID;
 	}
-
+	
 	/* Initialization of data structures */
 	launch_msg_ptr =
 	    (batch_job_launch_msg_t *)

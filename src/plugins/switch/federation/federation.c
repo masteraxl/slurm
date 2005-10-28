@@ -1456,7 +1456,6 @@ _allocate_windows(int adapter_cnt, fed_tableinfo_t *tableinfo,
 		table->task_id = task_id;
 		table->lid = adapter->lid;
 		table->window_id = window->id;
-
 		strncpy(tableinfo[i].adapter_name, adapter->name,
 			FED_ADAPTERNAME_LEN);
 	}
@@ -1703,7 +1702,7 @@ fed_build_jobinfo(fed_jobinfo_t *jp, hostlist_t hl, int nprocs,
 	assert(jp);
 	assert(jp->magic == FED_JOBINFO_MAGIC);
 	assert(!hostlist_is_empty(hl));
-
+	//cyclic = 0;
 	if(nprocs <= 0)
 		slurm_seterrno_ret(EINVAL);
 
@@ -1732,7 +1731,7 @@ fed_build_jobinfo(fed_jobinfo_t *jp, hostlist_t hl, int nprocs,
 	} else {
 		jp->tables_per_task = 1;
 	}
-
+	
 	/* Allocate memory for each fed_tableinfo_t */
 	jp->tableinfo = (fed_tableinfo_t *) xmalloc(jp->tables_per_task
 						    * sizeof(fed_tableinfo_t));
@@ -1779,7 +1778,8 @@ fed_build_jobinfo(fed_jobinfo_t *jp, hostlist_t hl, int nprocs,
 		full_node_cnt = nprocs % nnodes;
 		min_procs_per_node = nprocs / nnodes;
 		max_procs_per_node = (nprocs + nnodes - 1) / nnodes;
-	
+		//max_procs_per_node = 2;
+		info("max procs %d",max_procs_per_node);
 		proc_cnt = 0;
 		_lock();
 		for  (i = 0; i < nnodes; i++) {

@@ -557,14 +557,13 @@ step_create ( job_step_create_request_msg_t *step_specs,
 	/* set the step_record values */
 	//step_ptr->step_node_list = bitmap2node_name(nodeset);
 	/* Here is where the node list is set for the job */
-	
 	step_ptr->step_node_list = xstrdup(step_specs->node_list); 
 	
 	info("node_list here %s %d", step_ptr->step_node_list, 
 	       step_specs->num_tasks);
 	step_ptr->step_node_bitmap = nodeset;
-	step_ptr->cyclic_alloc = 
-		(uint16_t) (step_specs->task_dist == SLURM_DIST_CYCLIC);
+	step_ptr->cyclic_alloc = 0;
+	//(uint16_t) (step_specs->task_dist == SLURM_DIST_CYCLIC);
 	step_ptr->num_tasks = step_specs->num_tasks;
 	step_ptr->time_last_active = now;
 	step_ptr->port = step_specs->port;
@@ -584,14 +583,17 @@ step_create ( job_step_create_request_msg_t *step_specs,
 
 	/* a batch script does not need switch info */
 	if (!batch_step) {
-		int *tasks_per_node;
-		tasks_per_node = distribute_tasks(job_ptr->nodes,
-						  job_ptr->num_cpu_groups,
-						  job_ptr->cpus_per_node,
-						  job_ptr->cpu_count_reps,
-						  step_ptr->step_node_list,
-						  step_ptr->num_tasks);
-
+		int *tasks_per_node, i;
+/*  		tasks_per_node = distribute_tasks(job_ptr->nodes, */
+/*  						  job_ptr->num_cpu_groups, */
+/*  						  job_ptr->cpus_per_node, */
+/*  						  job_ptr->cpu_count_reps, */
+/*  						  step_ptr->step_node_list, */
+/*  						  step_ptr->num_tasks); */
+		tasks_per_node = xmalloc(sizeof(int)*step_specs->num_tasks); 
+  		for(i=0;i<step_specs->num_tasks;i++) { 
+  			tasks_per_node[i] = 1; 
+  		} 
 		if (switch_alloc_jobinfo (&step_ptr->switch_job) < 0)
 			fatal ("step_create: switch_alloc_jobinfo error");
 		

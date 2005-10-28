@@ -286,6 +286,7 @@ struct job_record {
 					 * in progress */
 	select_jobinfo_t select_jobinfo;	/* opaque data */
 	char *nodes;			/* list of nodes allocated to job */
+	char *req_nodes;		/* node list of reqested nodes */
 	bitstr_t *node_bitmap;		/* bitmap of nodes allocated to job */
 	uint32_t num_procs;		/* count of required/allocated processors */
 	uint32_t time_limit;		/* time_limit minutes or INFINITE,

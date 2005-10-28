@@ -70,7 +70,10 @@ void slurm_free_shutdown_msg(shutdown_msg_t * msg)
 
 void slurm_free_old_job_alloc_msg(old_job_alloc_msg_t * msg)
 {
-	xfree(msg);
+	if(msg) {
+		xfree(msg->req_nodes);
+		xfree(msg);
+	}
 }
 
 void slurm_free_return_code_msg(return_code_msg_t * msg)

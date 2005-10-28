@@ -215,9 +215,9 @@ slurm_job_step_create (job_step_create_request_msg_t *req,
 	req_msg.msg_type = REQUEST_JOB_STEP_CREATE;
 	req_msg.data     = req; 
 
-	if((count = _nodelist_from_hostfile(req)) == 0)
-		error("nodelist was NULL");
-		
+	/*  if((count = _nodelist_from_hostfile(req)) == 0) */
+/*  		error("nodelist was NULL");  */
+	
 	if (slurm_send_recv_controller_msg(&req_msg, &resp_msg) < 0)
 		return SLURM_ERROR;
 
@@ -252,12 +252,18 @@ slurm_confirm_allocation (old_job_alloc_msg_t *req,
 {
 	slurm_msg_t req_msg;
 	slurm_msg_t resp_msg;
-	char *nodelist = NULL;
+	
+	job_step_create_request_msg_t *step_req =  
+  		xmalloc(sizeof(job_step_create_request_msg_t)); 
 
 	req_msg.msg_type = REQUEST_OLD_JOB_RESOURCE_ALLOCATION;
 	req_msg.data     = req; 
 	
-	
+	if(_nodelist_from_hostfile(step_req) == 0) 
+  		error("nodelist was NULL");  
+	req->req_nodes = (char *)xstrdup(step_req->node_list);
+	xfree(step_req->node_list);
+	xfree(step_req);
 	if (slurm_send_recv_controller_msg(&req_msg, &resp_msg) < 0)
 		return SLURM_ERROR;
 
@@ -270,6 +276,7 @@ slurm_confirm_allocation (old_job_alloc_msg_t *req,
 		break;
 	case RESPONSE_RESOURCE_ALLOCATION:
 		*resp = (resource_allocation_response_msg_t *) resp_msg.data;
+		
 		return SLURM_PROTOCOL_SUCCESS;
 		break;
 	default:
@@ -352,6 +359,8 @@ static int _nodelist_from_hostfile(job_step_create_request_msg_t *req)
 			
 			len += strlen(in_line)+1;
 			hostlist_push(hostlist,in_line);	
+			/*  if(req->num_tasks && (line_num+1)>req->num_tasks) */
+/*  				break; */
 		}
 		fclose (hostfilep);
 		
