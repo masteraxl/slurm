@@ -1,9 +1,10 @@
 /*****************************************************************************\
- *  bgl_part_info.h - header for blue gene partition information.
+ *  bg_job_place.h - header for blue gene job placement (e.g. base partition 
+ *  selection) functions. 
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
- *  Written by Danny Auble <da@llnl.gov>
+ *  Written by Dan Phung <phung4@llnl.gov> et. al.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -23,14 +24,21 @@
  *  59 Temple Place, Suite 330, Boston, MA  02111-1307  USA.
 \*****************************************************************************/
 
-#ifndef _BGL_PART_INFO_H_
-#define _BGL_PART_INFO_H_
+#ifndef _BG_JOB_PLACE_H_
+#define _BG_JOB_PLACE_H_
 
-#include "bluegene.h"
+#include "src/slurmctld/slurmctld.h"
 
-/*****************************************************/
-extern int part_ready(struct job_record *job_ptr);
-extern void pack_partition(bgl_record_t *bgl_record, Buf buffer);
-extern int unpack_partition(bgl_info_record_t *bgl_info_record, Buf buffer);
-extern int update_partition_list();
-#endif /* _BGL_PART_INFO_H_ */
+/*
+ * Try to find resources for a given job request
+ * IN job_ptr - pointer to job record in slurmctld
+ * IN/OUT bitmap - nodes availble for assignment to job, clear those not to 
+ *	be used
+ * IN min_nodes, max_nodes  - minimum and maximum number of nodes to allocate 
+ *	to this job (considers slurm partition limits)
+ * RET - SLURM_SUCCESS if job runnable now, error code otherwise 
+ */
+extern int submit_job(struct job_record *job_ptr, bitstr_t *bitmap,
+	       int min_nodes, int max_nodes);
+
+#endif /* _BG_JOB_PLACE_H_ */

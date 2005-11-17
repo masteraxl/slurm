@@ -100,7 +100,7 @@ LDFLAGS="$LDFLAGS "
 CFLAGS="$CFLAGS $PTHREAD_CFLAGS"
 LIBS="$PTHREAD_LIBS $LIBS"
 
-X_AC_BGL
+X_AC_BLUEGENE
 X_AC_SLURM_SEMAPHORE
 
 X_AC_NCURSES
@@ -197,7 +197,7 @@ AC_CONFIG_FILES([Makefile
 		 src/squeue/Makefile
 		 src/sinfo/Makefile
 		 src/smap/Makefile
-		 src/partition_allocator/Makefile
+		 src/bgl_block_allocator/Makefile
 		 src/plugins/Makefile
 		 src/plugins/auth/Makefile
 		 src/plugins/auth/authd/Makefile

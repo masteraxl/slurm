@@ -64,7 +64,7 @@
 
 #define NUM_PORTS_PER_NODE 6
 
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 #define PA_SYSTEM_DIMENSIONS 3
 #else
 #define PA_SYSTEM_DIMENSIONS 1
@@ -79,9 +79,9 @@ enum {X, Y, Z};
 enum {MESH, TORUS, SMALL};
 enum {COPROCESSOR, VIRTUAL};
 
-/* NOTE: Definition of bgl_info_record_t moved to src/api/node_select_info.h */
+/* NOTE: Definition of bg_info_record_t moved to src/api/node_select_info.h */
 
-extern List bgl_info_list;			/* List of BGL blocks */
+extern List bg_info_list;			/* List of BG blocks */
 
 /** 
  * structure that holds switch path information for finding the wiring 
@@ -198,7 +198,7 @@ typedef struct {
 	time_t now_time;
 
 	/* made to hold info about a system, which right now is only a grid of pa_nodes*/
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 	pa_node_t ***grid;
 #else
 	pa_node_t *grid;
@@ -220,8 +220,8 @@ extern char letters[62];
 extern char colors[6];
 extern int DIM_SIZE[PA_SYSTEM_DIMENSIONS];
 
-/* destroy a bgl_info_record_t */
-extern void destroy_bgl_info_record(void* object);
+/* destroy a bg_info_record_t */
+extern void destroy_bg_info_record(void* object);
 
 /**
  * create a partition request.  Note that if the geometry is given,
@@ -310,7 +310,7 @@ extern int alter_part(List nodes, int conn_type);
  */
 extern int redo_part(List nodes, int *geo, int conn_type, int new_count);
 
-extern char *set_bgl_part(List results, int *start, 
+extern char *set_bg_part(List results, int *start, 
 			  int *geometry, int conn_type);
 
 extern int reset_pa_system();
@@ -323,7 +323,7 @@ extern void init_grid(node_info_msg_t *node_info_ptr);
 extern int set_bp_map(void);
 
 /**
- * find a base partitions bgl location 
+ * find a base partitions bg location 
  */
 extern int *find_bp_loc(char* bp_id);
 

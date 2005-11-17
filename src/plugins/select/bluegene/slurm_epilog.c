@@ -47,10 +47,10 @@
 #define _DEBUG 0
 
 /*
- * Check the bglblock's status every POLL_SLEEP seconds. 
+ * Check the bgblock's status every POLL_SLEEP seconds. 
  * Retry for a period of MIN_DELAY + (INCR_DELAY * base partition count).
  * For example if MIN_DELAY=300 and INCR_DELAY=20, wait up to 428 seconds
- * for a 16 base partition bglblock to ready (300 + 20 * 16).
+ * for a 16 base partition bgblock to ready (300 + 20 * 16).
  */ 
 #define POLL_SLEEP 3			/* retry interval in seconds  */
 #define MIN_DELAY  300			/* time in seconds */

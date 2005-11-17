@@ -49,12 +49,12 @@
 #define _DEBUG 0
 
 /*
- * Check the bglblock's status every POLL_SLEEP seconds. 
+ * Check the bgblock's status every POLL_SLEEP seconds. 
  * Retry for a period of MIN_DELAY + 
  * (INCR_DELAY * POLL_SLEEP * base partition count).
  * For example if MIN_DELAY=300 and INCR_DELAY=20 and POLL_SLEEP=3, 
  * wait up to 1260 seconds.
- * For a 16 base partition bglblock to be ready (300 + (20 * 3 * 16).
+ * For a 16 base partition bgblock to be ready (300 + (20 * 3 * 16).
  */ 
 #define POLL_SLEEP 3			/* retry interval in seconds  */
 #define MIN_DELAY  300			/* time in seconds */
@@ -175,27 +175,27 @@ static int _get_job_size(uint32_t job_id)
 }
 
 /*
- * Test if any BGL blocks are in deallocating state 
+ * Test if any BG blocks are in deallocating state 
  * RET	1:  deallocate in progress
  *	0:  no deallocate in progress
  *	-1: error occurred
  */
 static int _partitions_dealloc()
 {
-	static node_select_info_msg_t *bgl_info_ptr = NULL, *new_bgl_ptr = NULL;
+	static node_select_info_msg_t *bg_info_ptr = NULL, *new_bg_ptr = NULL;
 	int rc = 0, error_code = 0, i;
 	
-	if (bgl_info_ptr) {
-		error_code = slurm_load_node_select(bgl_info_ptr->last_update, 
-						   &new_bgl_ptr);
+	if (bg_info_ptr) {
+		error_code = slurm_load_node_select(bg_info_ptr->last_update, 
+						   &new_bg_ptr);
 		if (error_code == SLURM_SUCCESS)
-			select_g_free_node_info(&bgl_info_ptr);
+			select_g_free_node_info(&bg_info_ptr);
 		else if (slurm_get_errno() == SLURM_NO_CHANGE_IN_DATA) {
 			error_code = SLURM_SUCCESS;
-			new_bgl_ptr = bgl_info_ptr;
+			new_bg_ptr = bg_info_ptr;
 		}
 	} else {
-		error_code = slurm_load_node_select((time_t) NULL, &new_bgl_ptr);
+		error_code = slurm_load_node_select((time_t) NULL, &new_bg_ptr);
 	}
 
 	if (error_code) {
@@ -203,13 +203,13 @@ static int _partitions_dealloc()
 		       slurm_strerror(slurm_get_errno()));
 		return -1;
 	}
-	for (i=0; i<new_bgl_ptr->record_count; i++) {
-		if(new_bgl_ptr->bgl_info_array[i].state 
+	for (i=0; i<new_bg_ptr->record_count; i++) {
+		if(new_bg_ptr->bg_info_array[i].state 
 		   == RM_PARTITION_DEALLOCATING) {
 			rc = 1;
 			break;
 		}
 	}
-	bgl_info_ptr = new_bgl_ptr;
+	bg_info_ptr = new_bg_ptr;
 	return rc;
 }

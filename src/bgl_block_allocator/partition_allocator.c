@@ -32,16 +32,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
-#include "src/partition_allocator/partition_allocator.h"
+#include "src/bgl_block_allocator/partition_allocator.h"
 
-#ifdef HAVE_BGL_FILES
+#ifdef HAVE_BG_FILES
 # include "src/plugins/select/bluegene/wrap_rm_api.h"
 #endif
 
 #define DEBUG_PA
 #define BEST_COUNT_INIT 20
 
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 int DIM_SIZE[PA_SYSTEM_DIMENSIONS] = {0,0,0};
 #else
 int DIM_SIZE[PA_SYSTEM_DIMENSIONS] = {0};
@@ -63,11 +63,11 @@ char letters[62];
 char colors[6];
 
 /** internal helper functions */
-#ifdef HAVE_BGL_FILES
+#ifdef HAVE_BG_FILES
 /** */
 static void _bp_map_list_del(void *object);
 #endif
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 /* */
 static int _check_for_options(pa_request_t* pa_request); 
 /* */
@@ -144,21 +144,21 @@ static int _set_one_dim(int *start, int *end, int *coord);
 
 /* Global */
 List bp_map_list;
-List bgl_info_list;
+List bg_info_list;
 
-extern void destroy_bgl_info_record(void* object)
+extern void destroy_bg_info_record(void* object)
 {
-	bgl_info_record_t* bgl_info_record = (bgl_info_record_t*) object;
+	bg_info_record_t* bg_info_record = (bg_info_record_t*) object;
 
-	if (bgl_info_record) {
-		if(bgl_info_record->nodes) 
-			xfree(bgl_info_record->nodes);
-		if(bgl_info_record->owner_name)
-			xfree(bgl_info_record->owner_name);
-		if(bgl_info_record->bgl_part_id)
-			xfree(bgl_info_record->bgl_part_id);
+	if (bg_info_record) {
+		if(bg_info_record->nodes) 
+			xfree(bg_info_record->nodes);
+		if(bg_info_record->owner_name)
+			xfree(bg_info_record->owner_name);
+		if(bg_info_record->bg_part_id)
+			xfree(bg_info_record->bg_part_id);
 		
-		xfree(bgl_info_record);
+		xfree(bg_info_record);
 	}
 }
 
@@ -180,7 +180,7 @@ extern void destroy_bgl_info_record(void* object)
 extern int new_pa_request(pa_request_t* pa_request)
 {
 	int i=0;
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 	float sz=1;
 	int geo[PA_SYSTEM_DIMENSIONS] = {0,0,0};
 	int i2, i3, picked, total_sz=1 , size2, size3;
@@ -565,12 +565,12 @@ extern void pa_init(node_info_msg_t *node_info_ptr)
 	char *numeric = NULL;
 	int x,y,z;
 
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 	int i;
 #endif
 
-#ifdef HAVE_BGL_FILES
-	rm_BGL_t *bgl = NULL;
+#ifdef HAVE_BG_FILES
+	rm_BGL_t *bg = NULL;
 	rm_size3D_t bp_size;
 	int rc = 0;
 #endif		
@@ -609,7 +609,7 @@ extern void pa_init(node_info_msg_t *node_info_ptr)
 	pa_system_ptr->resize_screen = 0;
 	
 	if(node_info_ptr!=NULL) {
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 		for (i = 0; i < node_info_ptr->record_count; i++) {
 			node_ptr = &node_info_ptr->node_array[i];
 			start = 0;
@@ -651,20 +651,20 @@ extern void pa_init(node_info_msg_t *node_info_ptr)
 		pa_system_ptr->num_of_proc = node_info_ptr->record_count;
         } 
 node_info_error:
-#ifdef HAVE_BGL_FILES
+#ifdef HAVE_BG_FILES
 	if (have_db2
 	    && (DIM_SIZE[X]==0) || (DIM_SIZE[Y]==0) || (DIM_SIZE[Z]==0)) {
-		if ((rc = rm_set_serial(BGL_SERIAL)) != STATUS_OK) {
-			error("rm_set_serial(%s): %d", BGL_SERIAL, rc);
+		if ((rc = rm_set_serial(BG_SERIAL)) != STATUS_OK) {
+			error("rm_set_serial(%s): %d", BG_SERIAL, rc);
 			return;
 		}
-		if ((rc = rm_get_BGL(&bgl)) != STATUS_OK) {
-			error("rm_get_BGL(): %d", rc);
+		if ((rc = rm_get_BG(&bg)) != STATUS_OK) {
+			error("rm_get_BG(): %d", rc);
 			return;
 		}
 		
-		if ((bgl != NULL)
-		&&  ((rc = rm_get_data(bgl, RM_Msize, &bp_size)) 
+		if ((bg != NULL)
+		&&  ((rc = rm_get_data(bg, RM_Msize, &bp_size)) 
 		     == STATUS_OK)) {
 			DIM_SIZE[X]=bp_size.X;
 			DIM_SIZE[Y]=bp_size.Y;
@@ -672,12 +672,12 @@ node_info_error:
 		} else {
 			error("rm_get_data(RM_Msize): %d", rc);	
 		}
-		if ((rc = rm_free_BGL(bgl)) != STATUS_OK)
-			error("rm_free_BGL(): %d", rc);
+		if ((rc = rm_free_BG(bg)) != STATUS_OK)
+			error("rm_free_BG(): %d", rc);
 	}
 #endif
 
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 	if ((DIM_SIZE[X]==0) || (DIM_SIZE[X]==0) || (DIM_SIZE[X]==0)) {
 		debug("Setting default system dimensions");
 		DIM_SIZE[X]=8;
@@ -695,7 +695,7 @@ node_info_error:
 	if(!pa_system_ptr->num_of_proc)
 		pa_system_ptr->num_of_proc = 
 			DIM_SIZE[X] 
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 			* DIM_SIZE[Y] 
 			* DIM_SIZE[Z]
 #endif 
@@ -705,7 +705,7 @@ node_info_error:
 	
 	init_grid(node_info_ptr);
 	
-#ifndef HAVE_BGL_FILES
+#ifndef HAVE_BG_FILES
 	_create_config_even(pa_system_ptr->grid);
 #endif
 	path = list_create(_delete_path_list);
@@ -724,7 +724,7 @@ extern void init_wires()
 	for(x=0;x<DIM_SIZE[X];x++) {
 		for(y=0;y<DIM_SIZE[Y];y++) {
 			for(z=0;z<DIM_SIZE[Z];z++) {
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 				source = &pa_system_ptr->grid[x][y][z];
 #else
 				source = &pa_system_ptr->grid[x];
@@ -740,7 +740,7 @@ extern void init_wires()
 			}
 		}
 	}
-#ifdef HAVE_BGL_FILES	
+#ifdef HAVE_BG_FILES	
 	   _set_external_wires(0,0,NULL,NULL);
 	   if(!bp_map_list) {
 		if(set_bp_map() == -1)
@@ -765,7 +765,7 @@ extern void pa_fini()
 		list_destroy(path);
 	if (best_path)
 		list_destroy(best_path);
-#ifdef HAVE_BGL_FILES
+#ifdef HAVE_BG_FILES
 	if (bp_map_list)
 		list_destroy(bp_map_list);
 #endif
@@ -789,7 +789,7 @@ extern void pa_set_node_down(pa_node_t *pa_node)
 	}
 
 #ifdef DEBUG_PA
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 	debug("pa_set_node_down: node to set down: [%d%d%d]", 
 	      pa_node->coord[X], pa_node->coord[Y], pa_node->coord[Z]); 
 #else
@@ -920,7 +920,7 @@ extern int redo_part(List nodes, int *geo, int conn_type, int new_count)
 	list_destroy(nodes);
 	nodes = list_create(NULL);
 	
-	name = set_bgl_part(nodes, pa_node->coord, geo, conn_type);
+	name = set_bg_part(nodes, pa_node->coord, geo, conn_type);
 	if(!name)
 		return SLURM_ERROR;
 	else {
@@ -929,7 +929,7 @@ extern int redo_part(List nodes, int *geo, int conn_type, int new_count)
 	}
 }
 
-extern char *set_bgl_part(List results, int *start, 
+extern char *set_bg_part(List results, int *start, 
 			  int *geometry, int conn_type)
 {
 	char *name = NULL;
@@ -945,7 +945,7 @@ extern char *set_bgl_part(List results, int *start,
 	else
 		send_results = 1;
 	start_list = list_create(NULL);
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 	if(start[X]>=DIM_SIZE[X] 
 	   || start[Y]>=DIM_SIZE[Y]
 	   || start[Z]>=DIM_SIZE[Z])
@@ -986,7 +986,7 @@ extern char *set_bgl_part(List results, int *start,
 				      conn_type);
 	}
 	if(found) {
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 		itr = list_iterator_create(results);
 		while((pa_node = (pa_node_t*) list_next(itr))) {
 			list_append(start_list, pa_node);
@@ -1028,7 +1028,7 @@ extern int reset_pa_system()
 	for (x = 0; x < DIM_SIZE[X]; x++)
 		for (y = 0; y < DIM_SIZE[Y]; y++)
 			for (z = 0; z < DIM_SIZE[Z]; z++) {
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 				coord[X] = x;
 				coord[Y] = y;
 				coord[Z] = z;
@@ -1049,10 +1049,10 @@ extern void init_grid(node_info_msg_t * node_info_ptr)
 	node_info_t *node_ptr;
 	int x, i = 0;
 	uint16_t node_base_state;
-	/* For systems with more than 62 active jobs or BGL blocks, 
+	/* For systems with more than 62 active jobs or BG blocks, 
 	 * we just repeat letters */
 
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 	int y,z;
 	for (x = 0; x < DIM_SIZE[X]; x++)
 		for (y = 0; y < DIM_SIZE[Y]; y++)
@@ -1128,7 +1128,7 @@ extern void init_grid(node_info_msg_t * node_info_ptr)
 
 extern int *find_bp_loc(char* bp_id)
 {
-#ifdef HAVE_BGL_FILES
+#ifdef HAVE_BG_FILES
 	pa_bp_map_t *bp_map = NULL;
 	ListIterator itr;
 	
@@ -1154,7 +1154,7 @@ extern int *find_bp_loc(char* bp_id)
 
 extern char *find_bp_rack_mid(char* xyz)
 {
-#ifdef HAVE_BGL_FILES
+#ifdef HAVE_BG_FILES
 	pa_bp_map_t *bp_map = NULL;
 	ListIterator itr;
 	int number;
@@ -1192,7 +1192,7 @@ extern char *find_bp_rack_mid(char* xyz)
 
 /********************* Local Functions *********************/
 
-#ifdef HAVE_BGL_FILES
+#ifdef HAVE_BG_FILES
 static void _bp_map_list_del(void *object)
 {
 	pa_bp_map_t *bp_map = (pa_bp_map_t *)object;
@@ -1203,7 +1203,7 @@ static void _bp_map_list_del(void *object)
 	}
 }
 #endif
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 static int _check_for_options(pa_request_t* pa_request) 
 {
 
@@ -1434,14 +1434,14 @@ static int _copy_the_path(pa_switch_t *curr_switch, pa_switch_t *mark_switch,
 	}
 	next_switch = &pa_system_ptr->
 		grid[node_tar[X]]
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 		[node_tar[Y]]
 		[node_tar[Z]]
 #endif
 		.axis_switch[X];
 	next_mark_switch = &pa_system_ptr->
 		grid[mark_node_tar[X]]
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 		[mark_node_tar[Y]]
 		[mark_node_tar[Z]]
 #endif
@@ -1611,7 +1611,7 @@ static int _find_yz_path(pa_node_t *pa_node, int *first,
 #endif
 
 /** */
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 static int _create_config_even(pa_node_t ***grid)
 #else
 static int _create_config_even(pa_node_t *grid)
@@ -1620,7 +1620,7 @@ static int _create_config_even(pa_node_t *grid)
 	int x;
 	pa_node_t *source = NULL, *target = NULL;
 
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 	int y,z;
 	init_wires();
 
@@ -1707,7 +1707,7 @@ static int _reset_the_path(pa_switch_t *curr_switch, int source,
 	}
 	next_switch = &pa_system_ptr->
 		grid[node_tar[X]]
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 		[node_tar[Y]]
 		[node_tar[Z]]
 #endif
@@ -1746,8 +1746,8 @@ int _port_enum(int port)
 /** */
 extern int set_bp_map(void)
 {
-#ifdef HAVE_BGL_FILES
-	static rm_BGL_t *bgl = NULL;
+#ifdef HAVE_BG_FILES
+	static rm_BGL_t *bg = NULL;
 	int rc;
 	rm_BP_t *my_bp = NULL;
 	pa_bp_map_t *bp_map = NULL;
@@ -1774,16 +1774,16 @@ extern int set_bp_map(void)
 		return -1;
 	}
 	
-	if ((rc = rm_set_serial(BGL_SERIAL)) != STATUS_OK) {
+	if ((rc = rm_set_serial(BG_SERIAL)) != STATUS_OK) {
 		error("rm_set_serial(): %d", rc);
 		return -1;
 	}
 	
-	if ((rc = rm_get_BGL(&bgl)) != STATUS_OK) {
-		error("rm_get_BGL(): %d", rc);
+	if ((rc = rm_get_BG(&bg)) != STATUS_OK) {
+		error("rm_get_BG(): %d", rc);
 		return -1;
 	}
-	if ((rc = rm_get_data(bgl, RM_BPNum, &bp_num)) != STATUS_OK) {
+	if ((rc = rm_get_data(bg, RM_BPNum, &bp_num)) != STATUS_OK) {
 		error("rm_get_data(RM_BPNum): %d", rc);
 		bp_num = 0;
 	}
@@ -1791,13 +1791,13 @@ extern int set_bp_map(void)
 	for (i=0; i<bp_num; i++) {
 
 		if (i) {
-			if ((rc = rm_get_data(bgl, RM_NextBP, &my_bp))
+			if ((rc = rm_get_data(bg, RM_NextBP, &my_bp))
 			    != STATUS_OK) {
 				error("rm_get_data(RM_NextBP): %d", rc);
 				break;
 			}
 		} else {
-			if ((rc = rm_get_data(bgl, RM_FirstBP, &my_bp))
+			if ((rc = rm_get_data(bg, RM_FirstBP, &my_bp))
 			    != STATUS_OK) {
 				error("rm_get_data(RM_FirstBP): %d", rc);
 				break;
@@ -1843,8 +1843,8 @@ extern int set_bp_map(void)
 		free(bp_id);		
 	}
 
-	if ((rc = rm_free_BGL(bgl)) != STATUS_OK)
-		error("rm_free_BGL(): %s", rc);	
+	if ((rc = rm_free_BG(bg)) != STATUS_OK)
+		error("rm_free_BG(): %s", rc);	
 	
 #endif
 	_bp_map_initialized = true;
@@ -1877,7 +1877,7 @@ static void _create_pa_system(void)
 	int x;
 	int coord[PA_SYSTEM_DIMENSIONS];
 				
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 	int y,z;
 	pa_system_ptr->grid = (pa_node_t***) 
 		xmalloc(sizeof(pa_node_t**) * DIM_SIZE[X]);
@@ -1886,7 +1886,7 @@ static void _create_pa_system(void)
 		xmalloc(sizeof(pa_node_t) * DIM_SIZE[X]);
 #endif
 	for (x=0; x<DIM_SIZE[X]; x++) {
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 		pa_system_ptr->grid[x] = (pa_node_t**) 
 			xmalloc(sizeof(pa_node_t*) * DIM_SIZE[Y]);
 		for (y=0; y<DIM_SIZE[Y]; y++) {
@@ -1910,7 +1910,7 @@ static void _create_pa_system(void)
 /** */
 static void _delete_pa_system(void)
 {
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 	int x=0;
 	int y;
 #endif
@@ -1919,7 +1919,7 @@ static void _delete_pa_system(void)
 	}
 	
 	if(pa_system_ptr->grid) {
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 		for (x=0; x<DIM_SIZE[X]; x++) {
 			for (y=0; y<DIM_SIZE[Y]; y++)
 				xfree(pa_system_ptr->grid[x][y]);
@@ -1950,7 +1950,7 @@ static void _delete_path_list(void *object)
 static int _find_match(pa_request_t *pa_request, List results)
 {
 	int x=0;
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 	int start[PA_SYSTEM_DIMENSIONS] = {0,0,0};
 #else
 	int start[PA_SYSTEM_DIMENSIONS] = {0};
@@ -1962,7 +1962,7 @@ static int _find_match(pa_request_t *pa_request, List results)
 		startx = DIM_SIZE[X]-1;
 	if(pa_request->start_req) {
 		if(pa_request->start[X]>DIM_SIZE[X] 
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 		   || pa_request->start[Y]>DIM_SIZE[Y]
 		   || pa_request->start[Z]>DIM_SIZE[Z]
 #endif
@@ -1975,12 +1975,12 @@ static int _find_match(pa_request_t *pa_request, List results)
 	x=0;
 	
 	if(pa_request->geometry[X]>DIM_SIZE[X] 
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 	   || pa_request->geometry[Y]>DIM_SIZE[Y]
 	   || pa_request->geometry[Z]>DIM_SIZE[Z]
 #endif
 		)
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 		if(!_check_for_options(pa_request))
 #endif
 			return 0;
@@ -1993,7 +1993,7 @@ start_again:
 		x++;
 		debug3("finding %d%d%d try %d",
 		       pa_request->geometry[X],
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 		       pa_request->geometry[Y],
 		       pa_request->geometry[Z],
 #endif
@@ -2001,7 +2001,7 @@ start_again:
 	new_node:
 		debug("starting at %d%d%d",
 		      start[X]
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 		      , start[Y],
 		      start[Z]
 #endif
@@ -2009,14 +2009,14 @@ start_again:
 		
 		pa_node = &pa_system_ptr->
 			grid[start[X]]
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 			[start[Y]]
 			[start[Z]]
 #endif
 			;
 
 		if (!_node_used(pa_node, pa_request->geometry)) {
-			name = set_bgl_part(results,
+			name = set_bg_part(results,
 					    start, 
 					    pa_request->geometry, 
 					    pa_request->conn_type);
@@ -2033,7 +2033,7 @@ start_again:
 			list_destroy(results);
 			results = list_create(NULL);
 		}
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 		
 		if((DIM_SIZE[Z]-start[Z]-1)
 		   >= pa_request->geometry[Z])
@@ -2053,7 +2053,7 @@ start_again:
 						return 0;
 					else {
 						start[X]=0;
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 						start[Y]=0;
 						start[Z]=0;
 #endif
@@ -2130,8 +2130,8 @@ static void _switch_config(pa_node_t* source, pa_node_t* target, int dim,
 static int _set_external_wires(int dim, int count, pa_node_t* source, 
 			       pa_node_t* target)
 {
-#ifdef HAVE_BGL_FILES
-	rm_BGL_t *bgl = NULL;
+#ifdef HAVE_BG_FILES
+	rm_BGL_t *bg = NULL;
 	int rc;
 	int i;
 	rm_wire_t *my_wire = NULL;
@@ -2147,19 +2147,19 @@ static int _set_external_wires(int dim, int count, pa_node_t* source,
 		error("Can't access DB2 library, run from service node");
 		return -1;
 	}
-	if ((rc = rm_set_serial(BGL_SERIAL)) != STATUS_OK) {
-		error("rm_set_serial(%s): %d", BGL_SERIAL, rc);
+	if ((rc = rm_set_serial(BG_SERIAL)) != STATUS_OK) {
+		error("rm_set_serial(%s): %d", BG_SERIAL, rc);
 		return -1;
 	}
-	if ((rc = rm_get_BGL(&bgl)) != STATUS_OK) {
-		error("rm_get_BGL(): %d", rc);
+	if ((rc = rm_get_BG(&bg)) != STATUS_OK) {
+		error("rm_get_BG(): %d", rc);
 		return -1;
 	}
 	
-	if (bgl == NULL) 
+	if (bg == NULL) 
 		return -1;
 	
-	if ((rc = rm_get_data(bgl, RM_WireNum, &wire_num)) != STATUS_OK) {
+	if ((rc = rm_get_data(bg, RM_WireNum, &wire_num)) != STATUS_OK) {
 		error("rm_get_data(RM_BPNum): %d", rc);
 		wire_num = 0;
 	}
@@ -2168,13 +2168,13 @@ static int _set_external_wires(int dim, int count, pa_node_t* source,
 	for (i=0; i<wire_num; i++) {
 		
 		if (i) {
-			if ((rc = rm_get_data(bgl, RM_NextWire, &my_wire))
+			if ((rc = rm_get_data(bg, RM_NextWire, &my_wire))
 			    != STATUS_OK) {
 				error("rm_get_data(RM_NextWire): %d", rc);
 				break;
 			}
 		} else {
-			if ((rc = rm_get_data(bgl, RM_FirstWire, &my_wire))
+			if ((rc = rm_get_data(bg, RM_FirstWire, &my_wire))
 			    != STATUS_OK) {
 				error("rm_get_data(RM_FirstWire): %d", rc);
 				break;
@@ -2282,8 +2282,8 @@ static int _set_external_wires(int dim, int count, pa_node_t* source,
 		     _port_enum(to_port));
 		
 	}
-	if ((rc = rm_free_BGL(bgl)) != STATUS_OK)
-		error("rm_free_BGL(): %s", rc);
+	if ((rc = rm_free_BG(bg)) != STATUS_OK)
+		error("rm_free_BG(): %s", rc);
 	
 #else
 
@@ -2299,9 +2299,9 @@ static int _set_external_wires(int dim, int count, pa_node_t* source,
 		   it will go to the first.*/
 		
 	
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 #if 0
-	/* this is here for the second half of bgl system.
+	/* this is here for the second half of bg system.
 	   if used it should be changed to #if 1
 	*/
 	if(count == 0) {
@@ -2383,7 +2383,7 @@ static int _set_external_wires(int dim, int count, pa_node_t* source,
 			_switch_config(source, source, dim, 5, 5);
 		}
 	} else if(DIM_SIZE[X] != 8) {
-		fatal("Do don't have a config to do this BGL system.");
+		fatal("Do don't have a config to do this BG system.");
 	}
 #else
 	if(count == 0)
@@ -2394,8 +2394,8 @@ static int _set_external_wires(int dim, int count, pa_node_t* source,
 		_switch_config(source, source, dim, 2, 2);
 	_switch_config(source, source, dim, 3, 3);
 	_switch_config(source, source, dim, 4, 4);
-#endif /* HAVE_BGL */
-#endif /* HAVE_BGL_FILES */
+#endif /* HAVE_BG */
+#endif /* HAVE_BG_FILES */
 	return 1;
 }
 				
@@ -2413,7 +2413,7 @@ static char *_set_internal_wires(List nodes, int size, int conn_type)
 		return NULL;
 	itr = list_iterator_create(nodes);
 	while((pa_node[count] = (pa_node_t*) list_next(itr))) {
-		sprintf(name, "bgl%d%d%d\0", 
+		sprintf(name, "bg%d%d%d\0", 
 			pa_node[count]->coord[X],
 			pa_node[count]->coord[Y],
 			pa_node[count]->coord[Z]);
@@ -2444,9 +2444,9 @@ static char *_set_internal_wires(List nodes, int size, int conn_type)
 				set=1;
 			}
 		} else {
-			error("No network connection to create bglblock "
+			error("No network connection to create bgblock "
 			      "containing %s", name);
-			error("Use smap to define bglblocks in bluegene.conf");
+			error("Use smap to define bgblocks in bluegene.conf");
 			xfree(name);
 			return NULL;
 		}
@@ -2561,7 +2561,7 @@ static int _find_x_path(List results, pa_node_t *pa_node,
 		broke_it:
 			next_node = &pa_system_ptr->
 				grid[node_tar[X]]
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 				[node_tar[Y]]
 				[node_tar[Z]]
 #endif
@@ -2592,7 +2592,7 @@ static int _find_x_path(List results, pa_node_t *pa_node,
 					node_tar = _set_best_path();
 					next_node = &pa_system_ptr->
 						grid[node_tar[X]]
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 						[node_tar[Y]]
 						[node_tar[Z]]
 #endif
@@ -2600,7 +2600,7 @@ static int _find_x_path(List results, pa_node_t *pa_node,
 					next_switch = 
 						&next_node->axis_switch[X];
 					
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 					debug2("found %d looking at "
 					       "%d%d%d going to %d%d%d %d",
 					       found,
@@ -2655,7 +2655,7 @@ static int _find_x_path(List results, pa_node_t *pa_node,
 			}
 
 			if (!_node_used(next_node, geometry)) {
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 				debug2("found %d looking at %d%d%d "
 				       "%d going to %d%d%d %d",
 				       found,
@@ -2682,7 +2682,7 @@ static int _find_x_path(List results, pa_node_t *pa_node,
 				}
 				list_iterator_destroy(itr);
 				if(!check_node) {
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 					debug2("add %d%d%d",
 					       next_node->coord[X],
 					       next_node->coord[Y],
@@ -2690,7 +2690,7 @@ static int _find_x_path(List results, pa_node_t *pa_node,
 #endif					       
 					list_append(results, next_node);
 				} else {
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 					debug2("Hey this is already added "
 					       "%d%d%d",
 					       node_tar[X],
@@ -2710,7 +2710,7 @@ static int _find_x_path(List results, pa_node_t *pa_node,
 					continue;
 				} else {
 				found_path:
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 					debug2("added node %d%d%d %d %d -> "
 					       "%d%d%d %d %d",
 					       pa_node->coord[X],
@@ -2848,7 +2848,7 @@ int port_tar;
 			not_first = 0;
 				
 		broke_it:
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 			next_node = &pa_system_ptr->
 				grid[node_tar[X]][node_tar[Y]][node_tar[Z]];
 #else
@@ -2890,7 +2890,7 @@ int port_tar;
 			}
 
 			if (!_node_used(next_node, geometry)) {
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 				debug2("found %d looking at %d%d%d "
 				       "%d going to %d%d%d %d",
 				       found,
@@ -2917,7 +2917,7 @@ int port_tar;
 				}
 				list_iterator_destroy(itr);
 				if(!check_node) {
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 					debug2("add %d%d%d",
 					       next_node->coord[X],
 					       next_node->coord[Y],
@@ -2925,7 +2925,7 @@ int port_tar;
 #endif					       
 					list_append(results, next_node);
 				} else {
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 					debug2("Hey this is already added "
 					       "%d%d%d",
 					       node_tar[X],
@@ -2945,7 +2945,7 @@ int port_tar;
 					continue;
 				} else {
 				found_path:
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 					debug2("added node %d%d%d %d %d -> "
 					       "%d%d%d %d %d",
 					       pa_node->coord[X],
@@ -2998,7 +2998,7 @@ int port_tar;
 			} 			
 		}
 	}
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 	debug2("looking for the next free node starting at %d%d%d",
 	       pa_node->coord[X],
 	       pa_node->coord[Y],
@@ -3017,7 +3017,7 @@ int port_tar;
 	if(best_count < BEST_COUNT_INIT) {
 		debug2("yes found next free %d", best_count);
 		node_tar = _set_best_path();
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 		next_node = &pa_system_ptr->
 			grid[node_tar[X]][node_tar[Y]][node_tar[Z]];
 #else
@@ -3026,7 +3026,7 @@ int port_tar;
 #endif
 		next_switch = &next_node->axis_switch[X];
 		
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 		debug2("found %d looking at %d%d%d going to %d%d%d %d",
 		       found,
 		       pa_node->coord[X],
@@ -3062,7 +3062,7 @@ static int _remove_node(List results, int *node_tar)
 	itr = list_iterator_create(results);
 	while((pa_node = (pa_node_t*) list_next(itr))) {
 		
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 		if(node_tar[X] == pa_node->coord[X] 
 		   && node_tar[Y] == pa_node->coord[Y] 
 		   && node_tar[Z] == pa_node->coord[Z]) {
@@ -3111,7 +3111,7 @@ static int _find_next_free_using_port_2(pa_switch_t *curr_switch,
 	static bool found = false;
 
 	path_add->geometry[X] = node_src[X];
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 	path_add->geometry[Y] = node_src[Y];
 	path_add->geometry[Z] = node_src[Z];
 #endif
@@ -3125,7 +3125,7 @@ static int _find_next_free_using_port_2(pa_switch_t *curr_switch,
 	while((pa_node = (pa_node_t*) list_next(itr))) {
 		
 		if(node_tar[X] == pa_node->coord[X] 
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 		   && node_tar[Y] == pa_node->coord[Y] 
 		   && node_tar[Z] == pa_node->coord[Z] 
 #endif
@@ -3139,7 +3139,7 @@ static int _find_next_free_using_port_2(pa_switch_t *curr_switch,
 	
 	if(!broke && count>0 &&
 	   !pa_system_ptr->grid[node_tar[X]]
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 	   [node_tar[Y]]
 	   [node_tar[Z]]
 #endif
@@ -3168,7 +3168,7 @@ static int _find_next_free_using_port_2(pa_switch_t *curr_switch,
 				xmalloc(sizeof(pa_path_switch_t));
 			 
 			temp_switch->geometry[X] = path_switch->geometry[X];
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 			temp_switch->geometry[Y] = path_switch->geometry[Y];
 			temp_switch->geometry[Z] = path_switch->geometry[Z];
 #endif
@@ -3189,7 +3189,7 @@ static int _find_next_free_using_port_2(pa_switch_t *curr_switch,
 		       (pa_path_switch_t*) list_next(itr))){
 				
 			if(((path_switch->geometry[X] == node_src[X]) 
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 			    && (path_switch->geometry[Y] 
 				== node_src[Y])
 			    && (path_switch->geometry[Z] 
@@ -3209,7 +3209,7 @@ static int _find_next_free_using_port_2(pa_switch_t *curr_switch,
 		if(curr_switch->
 		   ext_wire[port_to_try].node_tar[X]
 		   == curr_switch->ext_wire[0].node_tar[X]  
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 		   && curr_switch->
 		   ext_wire[port_to_try].node_tar[Y] 
 		   == curr_switch->ext_wire[0].node_tar[Y] 
@@ -3229,7 +3229,7 @@ static int _find_next_free_using_port_2(pa_switch_t *curr_switch,
 				
 			next_switch = &pa_system_ptr->
 				grid[node_tar[X]]
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 				[node_tar[Y]]
 				[node_tar[Z]]
 #endif
@@ -3272,7 +3272,7 @@ static int _find_passthrough(pa_switch_t *curr_switch, int source_port,
 	static bool found = false;
 
 	path_add->geometry[X] = node_src[X];
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 	path_add->geometry[Y] = node_src[Y];
 	path_add->geometry[Z] = node_src[Z];
 #endif
@@ -3286,7 +3286,7 @@ static int _find_passthrough(pa_switch_t *curr_switch, int source_port,
 	itr = list_iterator_create(nodes);
 	while((pa_node = (pa_node_t*) list_next(itr))) {
 		
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 		if(node_tar[X] == pa_node->coord[X] 
 		   && node_tar[Y] == pa_node->coord[Y] 
 		   && node_tar[Z] == pa_node->coord[Z]) {
@@ -3304,7 +3304,7 @@ static int _find_passthrough(pa_switch_t *curr_switch, int source_port,
 	list_iterator_destroy(itr);
 	pa_node = &pa_system_ptr->
 		grid[node_tar[X]]
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 		[node_tar[Y]]
 		[node_tar[Z]]
 #endif
@@ -3336,7 +3336,7 @@ static int _find_passthrough(pa_switch_t *curr_switch, int source_port,
 				xmalloc(sizeof(pa_path_switch_t));
 			 
 			temp_switch->geometry[X] = path_switch->geometry[X];
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 			temp_switch->geometry[Y] = path_switch->geometry[Y];
 			temp_switch->geometry[Z] = path_switch->geometry[Z];
 #endif
@@ -3368,7 +3368,7 @@ static int _find_passthrough(pa_switch_t *curr_switch, int source_port,
 			       (pa_path_switch_t*) list_next(itr))){
 				
 				if(((path_switch->geometry[X] == node_src[X]) 
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 				    && (path_switch->geometry[Y] 
 					== node_src[Y])
 				    && (path_switch->geometry[Z] 
@@ -3388,7 +3388,7 @@ static int _find_passthrough(pa_switch_t *curr_switch, int source_port,
 			if(curr_switch->
 			   ext_wire[ports_to_try[i]].node_tar[X]
 			   == curr_switch->ext_wire[0].node_tar[X]  
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 			   && curr_switch->
 			   ext_wire[ports_to_try[i]].node_tar[Y] 
 			   == curr_switch->ext_wire[0].node_tar[Y] 
@@ -3408,7 +3408,7 @@ static int _find_passthrough(pa_switch_t *curr_switch, int source_port,
 				
 				next_switch = &pa_system_ptr->
 					grid[node_tar[X]]
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 					[node_tar[Y]]
 					[node_tar[Z]]
 #endif
@@ -3459,7 +3459,7 @@ static int _finish_torus(pa_switch_t *curr_switch, int source_port,
 	static bool found = false;
 
 	path_add->geometry[X] = node_src[X];
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 	path_add->geometry[Y] = node_src[Y];
 	path_add->geometry[Z] = node_src[Z];
 #endif
@@ -3470,7 +3470,7 @@ static int _finish_torus(pa_switch_t *curr_switch, int source_port,
 		return 0;
 		
 	if(node_tar[X] == start[X] 
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 	    && node_tar[Y] == start[Y] 
 	    && node_tar[Z] == start[Z]
 #endif
@@ -3495,7 +3495,7 @@ static int _finish_torus(pa_switch_t *curr_switch, int source_port,
 				
 				temp_switch->geometry[X] = 
 					path_switch->geometry[X];
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 				temp_switch->geometry[Y] = 
 					path_switch->geometry[Y];
 				temp_switch->geometry[Z] = 
@@ -3525,7 +3525,7 @@ static int _finish_torus(pa_switch_t *curr_switch, int source_port,
 			       (pa_path_switch_t*) list_next(itr))){
 				
 				if(((path_switch->geometry[X] == node_src[X]) 
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 				    && (path_switch->geometry[Y] 
 					== node_src[Y])
 				    && (path_switch->geometry[Z] 
@@ -3559,7 +3559,7 @@ static int _finish_torus(pa_switch_t *curr_switch, int source_port,
 				
 				next_switch = &pa_system_ptr->
 					grid[node_tar[X]]
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 					[node_tar[Y]]
 					[node_tar[Z]]
 #endif
@@ -3590,7 +3590,7 @@ static int *_set_best_path()
 		return NULL;
 	itr = list_iterator_create(best_path);
 	while((path_switch = (pa_path_switch_t*) list_next(itr))) {
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 		debug3("mapping %d%d%d",path_switch->geometry[X],
 		       path_switch->geometry[Y],
 		       path_switch->geometry[Z]);
@@ -3629,7 +3629,7 @@ static int _set_one_dim(int *start, int *end, int *coord)
 	for(dim=0;dim<PA_SYSTEM_DIMENSIONS;dim++) {
 		if(start[dim]==end[dim]) {
 			curr_switch = &pa_system_ptr->grid[coord[X]]
-#ifdef HAVE_BGL
+#ifdef HAVE_BG
 				[coord[Y]]
 				[coord[Z]]
 #endif
