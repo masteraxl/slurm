@@ -1,6 +1,10 @@
 This file describes changes in recent versions of SLURM. It primarily
 documents those changes that are of interest to users and admins. 
 
+* Changes in SLURM 0.7.0-pre5
+=============================
+ -- Enhanced performance and debugging for slurmctld reconfiguration.
+
 * Changes in SLURM 0.7.0-pre4
 =============================
  -- Remove BNR libary functions and add those for PMI (KVS and basic
@@ -62,6 +66,11 @@ documents those changes that are of interest to users and admins.
  -- Add support for e-mail notification on job state changes.
  -- Some infrastructure added for task launch controls (slurm.conf:
     TaskProlog, TaskEpilog, TaskPlugin; srun --task-prolog, --task-epilog).
+
+* Changes in SLURM 0.6.10
+=========================
+ -- Sacct bug fixes: Report correct user name for job step, show "uid.gid"
+    as fifth field of job step record (Andy Riebs, slurm.hp.sacct_uid.patch).
 
 * Changes in SLURM 0.6.9
 ========================
