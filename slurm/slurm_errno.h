@@ -5,7 +5,7 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Kevin Tew <tew1@llnl.gov>, 
  *	Jim Garlick <garlick@llnl.gov>, et. al.
- *  UCRL-CODE-2002-040.
+ *  UCRL-CODE-217948.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -172,6 +172,8 @@ enum {
 	ESLURMD_TOOMANYSTEPS,
 	ESLURMD_STEP_EXISTS,
 	ESLURMD_JOB_NOTRUNNING,
+	ESLURMD_STEP_SUSPENDED,
+	ESLURMD_STEP_NOTSUSPENDED,
 
 	/* slurmd errors in user batch job */
 	ESCRIPT_CHDIR_FAILED =			4100,

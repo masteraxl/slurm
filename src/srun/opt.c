@@ -2,10 +2,10 @@
  *  opt.c - options processing for srun
  *  $Id$
  *****************************************************************************
- *  Copyright (C) 2002 The Regents of the University of California.
+ *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <grondona1@llnl.gov>, et. al.
- *  UCRL-CODE-2002-040.
+ *  UCRL-CODE-217948.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -829,6 +829,7 @@ _get_int(const char *arg, const char *what)
 void set_options(const int argc, char **argv, int first)
 {
 	int opt_char, option_index = 0;
+	static bool set_cwd=false, set_name=false;
 	struct utsname name;
 	static struct option long_options[] = {
 		{"attach",        required_argument, 0, 'a'},
@@ -966,7 +967,7 @@ void set_options(const int argc, char **argv, int first)
 			}
 			break;
 		case (int)'c':
-			if(!first && opt.cpus_per_task)
+			if(!first && opt.cpus_set)
 				break;
 			opt.cpus_set = true;
 			opt.cpus_per_task = 
@@ -986,9 +987,10 @@ void set_options(const int argc, char **argv, int first)
 				_get_int(optarg, "slurmd-debug");
 			break;
 		case (int)'D':
-			if(!first && opt.cwd)
+			if(!first && set_cwd)
 				break;
-			
+
+			set_cwd = true;
 			xfree(opt.cwd);
 			opt.cwd = xstrdup(optarg);
 			break;
@@ -1026,9 +1028,10 @@ void set_options(const int argc, char **argv, int first)
 			opt.join = true;
 			break;
 		case (int)'J':
-			if(!first && opt.job_name)
+			if(!first && set_name)
 				break;
-						
+
+			set_name = true;
 			xfree(opt.job_name);
 			opt.job_name = xstrdup(optarg);
 			break;
@@ -1053,7 +1056,7 @@ void set_options(const int argc, char **argv, int first)
 			}
 			break;
 		case (int)'n':
-			if(!first && opt.nprocs)
+			if(!first && opt.nprocs_set)
 				break;
 						
 			opt.nprocs_set = true;
@@ -1325,6 +1328,13 @@ void set_options(const int argc, char **argv, int first)
 			}
 			break;
 		} 
+	}
+
+	if (!first) {
+		if (!_opt_verify())
+			exit(1);
+		if (_verbose > 3)
+			_opt_list();
 	}
 }
 
@@ -1725,14 +1735,18 @@ static void _opt_list()
 	info("uid            : %ld", (long) opt.uid);
 	info("gid            : %ld", (long) opt.gid);
 	info("cwd            : %s", opt.cwd);
-	info("nprocs         : %d", opt.nprocs);
-	info("cpus_per_task  : %d", opt.cpus_per_task);
+	info("nprocs         : %d %s", opt.nprocs,
+		opt.nprocs_set ? "(set)" : "(default)");
+	info("cpus_per_task  : %d %s", opt.cpus_per_task,
+		opt.cpus_set ? "(set)" : "(default)");
 	if (opt.max_nodes)
 		info("nodes          : %d-%d", opt.min_nodes, opt.max_nodes);
-	else
-		info("nodes          : %d", opt.min_nodes);
+	else {
+		info("nodes          : %d %s", opt.min_nodes,
+			opt.nodes_set ? "(set)" : "(default)");
+	}
 	info("partition      : %s",
-	     opt.partition == NULL ? "default" : opt.partition);
+		opt.partition == NULL ? "default" : opt.partition);
 	info("job name       : `%s'", opt.job_name);
 	info("distribution   : %s", format_task_dist_states(opt.distribution));
 	info("cpu_bind       : %s", 

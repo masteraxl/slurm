@@ -4,7 +4,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>.
- *  UCRL-CODE-2002-040.
+ *  UCRL-CODE-217948.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -289,12 +289,10 @@ static int _parse_node_spec(char *in_line)
 #ifndef HAVE_FRONT_END	/* Fake node addresses for front-end */
 	char *this_node_addr;
 #endif
-	int port;
 
 	node_addr = node_name = state = feature = (char *) NULL;
 	cpus_val = real_memory_val = state_val = NO_VAL;
 	tmp_disk_val = weight_val = NO_VAL;
-	port = NO_VAL;
 	if ((error_code = load_string(&node_name, "NodeName=", in_line)))
 		return error_code;
 	if (node_name == NULL)
@@ -309,7 +307,6 @@ static int _parse_node_spec(char *in_line)
 				  "Feature=", 's', &feature,
 				  "NodeAddr=", 's', &node_addr,
 				  "NodeHostname=", 's', &node_hostname,
-				  "Port=", 'd', &port,
 				  "Procs=", 'd', &cpus_val,
 				  "RealMemory=", 'd', &real_memory_val,
 				  "Reason=", 's', &reason,
@@ -399,8 +396,6 @@ static int _parse_node_spec(char *in_line)
 				default_config_record.feature = feature;
 				feature = NULL;
 			}
-			if (port != NO_VAL)
-				default_node_record.port = port;
 			free(this_node_name);
 			break;
 		}
@@ -463,8 +458,6 @@ static int _parse_node_spec(char *in_line)
 				strncpy(node_ptr->comm_name, 
 				        node_ptr->name, MAX_NAME_LEN);
 #endif
-			if (port != NO_VAL)
-				node_ptr->port = port;
 			node_ptr->reason = xstrdup(reason);
 		} else {
 			error("_parse_node_spec: reconfiguration for node %s",
@@ -1070,7 +1063,7 @@ static int _sync_nodes_to_comp_job(void)
 		    (job_ptr->job_state & JOB_COMPLETING)) {
 			update_cnt++;
 			info("Killing job_id %u", job_ptr->job_id);
-			deallocate_nodes(job_ptr, false);
+			deallocate_nodes(job_ptr, false, false);
 		}
 	}
 	if (update_cnt)
@@ -1085,23 +1078,24 @@ static int _sync_nodes_to_active_job(struct job_record *job_ptr)
 {
 	int i, cnt = 0;
 	uint16_t base_state, node_flags;
+	struct node_record *node_ptr = node_record_table_ptr;
 
-	for (i = 0; i < node_record_count; i++) {
+	job_ptr->node_cnt = 0;
+	for (i = 0; i < node_record_count; i++, node_ptr++) {
 		if (bit_test(job_ptr->node_bitmap, i) == 0)
 			continue;
+		job_ptr->node_cnt++;
 
-		base_state = node_record_table_ptr[i].node_state & 
-				NODE_STATE_BASE;
-		node_flags = node_record_table_ptr[i].node_state & 
-				NODE_STATE_FLAGS;
+		base_state = node_ptr->node_state & NODE_STATE_BASE;
+		node_flags = node_ptr->node_state & NODE_STATE_FLAGS;
  
-		node_record_table_ptr[i].run_job_cnt++; /* NOTE:
+		node_ptr->run_job_cnt++; /* NOTE:
 				* This counter moved to comp_job_cnt 
 				* by _sync_nodes_to_comp_job() */
 		if (((job_ptr->job_state == JOB_RUNNING) ||
 		     (job_ptr->job_state &  JOB_COMPLETING)) &&
 		    (job_ptr->details) && (job_ptr->details->shared == 0))
-			node_record_table_ptr[i].no_share_job_cnt++;
+			node_ptr->no_share_job_cnt++;
 
 		if (base_state == NODE_STATE_DOWN) {
 			time_t now = time(NULL);
@@ -1113,7 +1107,7 @@ static int _sync_nodes_to_active_job(struct job_record *job_ptr)
 		} else if ((base_state == NODE_STATE_UNKNOWN) || 
 			   (base_state == NODE_STATE_IDLE)) {
 			cnt++;
-			node_record_table_ptr[i].node_state =
+			node_ptr->node_state =
 				NODE_STATE_ALLOCATED | node_flags;
 		} 
 	}

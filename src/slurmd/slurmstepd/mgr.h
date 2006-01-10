@@ -4,7 +4,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
- *  UCRL-CODE-2002-040.
+ *  UCRL-CODE-217948.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -62,5 +62,12 @@ void mgr_launch_batch_job_cleanup(slurmd_job_t *job, int rc);
  * Launch and manage the tasks in a job step.
  */
 int job_manager(slurmd_job_t *job);
+
+/*
+ * Register passwd entries so that we do not need to call initgroups(2)
+ * frequently.
+ */
+extern void init_initgroups(int);
+
 
 #endif

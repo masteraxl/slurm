@@ -6,7 +6,7 @@
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-2002-040.
+ *  UCRL-CODE-217948.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -137,6 +137,20 @@ extern int select_g_job_ready(struct job_record *job_ptr);
  * IN job_ptr - pointer to job being terminated
  */
 extern int select_g_job_fini(struct job_record *job_ptr);
+
+/*
+ * Suspend a job. Executed from slurmctld.
+ * IN job_ptr - pointer to job being suspended
+ * RET SLURM_SUCCESS or error code
+ */
+extern int select_g_job_suspend(struct job_record *job_ptr);
+
+/*
+ * Resume a job. Executed from slurmctld.
+ * IN job_ptr - pointer to job being resumed
+ * RET SLURM_SUCCESS or error code
+ */
+extern int select_g_job_resume(struct job_record *job_ptr);
 
 /* allocate storage for a select job credential
  * OUT jobinfo - storage for a select job credential

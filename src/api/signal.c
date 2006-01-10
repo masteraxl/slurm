@@ -5,7 +5,7 @@
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Christopher J. Morrone <morrone2@llnl.gov>.
- *  UCRL-CODE-2002-040.
+ *  UCRL-CODE-217948.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -131,9 +131,10 @@ slurm_signal_job_step (uint32_t job_id, uint32_t step_id, uint16_t signal)
 	int rc;
 	int i;
 
-	rc = slurm_allocation_lookup(job_id, &alloc_info);
-	if (rc != 0)
-		goto fail1;
+	if (slurm_allocation_lookup(job_id, &alloc_info)) {
+		rc = slurm_get_errno();
+                goto fail1;
+	}
 
 	/*
 	 * The controller won't give us info about the batch script job step,

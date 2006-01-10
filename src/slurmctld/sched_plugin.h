@@ -4,7 +4,7 @@
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Jay Windley <jwindley@lnxi.com>
- *  UCRL-CODE-2002-040.
+ *  UCRL-CODE-217948.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -294,6 +294,7 @@ extern sched_obj_list_t sched_get_job_list( void );
 
 #define JOB_STATE_LABEL_PENDING		"PENDING"
 #define JOB_STATE_LABEL_RUNNING		"RUNNING"
+#define JOB_STATE_LABEL_SUSPENDED	"SUSPENDED"
 #define JOB_STATE_LABEL_COMPLETE	"COMPLETE"
 #define JOB_STATE_LABEL_FAILED		"FAILED"
 #define JOB_STATE_LABEL_TIMEOUT		"TIMEOUT"

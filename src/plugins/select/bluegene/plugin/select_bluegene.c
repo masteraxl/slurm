@@ -6,7 +6,7 @@
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Dan Phung <phung4@llnl.gov> Danny Auble <da@llnl.gov>
- *  UCRL-CODE-2002-040.
+ *  UCRL-CODE-217948.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -257,6 +257,16 @@ extern int select_p_job_begin(struct job_record *job_ptr)
 extern int select_p_job_fini(struct job_record *job_ptr)
 {
 	return term_job(job_ptr);
+}
+
+extern int select_p_job_suspend(struct job_record *job_ptr)
+{
+	return ESLURM_NOT_SUPPORTED;
+}
+
+extern int select_p_job_resume(struct job_record *job_ptr)
+{
+	return ESLURM_NOT_SUPPORTED;
 }
 
 extern int select_p_job_ready(struct job_record *job_ptr)

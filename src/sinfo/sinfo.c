@@ -6,7 +6,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov>, Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-2002-040.
+ *  UCRL-CODE-217948.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -293,7 +293,7 @@ static int _build_sinfo_data(List sinfo_list,
 	/* make sinfo_list entries for every node in every partition */
 	for (j=0; j<partition_msg->record_count; j++, part_ptr++) {
 		part_ptr = &(partition_msg->partition_array[j]);
-		if (params.filtering
+		if (params.filtering && params.partition
 		&&  _strcmp(part_ptr->name, params.partition))
 			continue;
 		hl = hostlist_create(part_ptr->nodes);
@@ -361,7 +361,7 @@ static bool _filter_out(node_info_t *node_ptr)
 		int *node_state;
 		bool match = false;
 		uint16_t base_state = node_ptr->node_state & 
-			(~NODE_STATE_NO_RESPOND);
+			NODE_STATE_BASE;
 		ListIterator iterator;
 
 		iterator = list_iterator_create(params.state_list);
@@ -579,10 +579,10 @@ static void _create_sinfo(List sinfo_list, partition_info_t* part_ptr,
 		sinfo_ptr->reason   = node_ptr->reason;
 
 		sinfo_ptr->nodes = hostlist_create(node_ptr->name);
-
 		sinfo_ptr->part_inx = part_inx;
 	} else {
 		sinfo_ptr->nodes = hostlist_create("");
+		sinfo_ptr->part_inx = part_inx;
 	}
 
 	list_append(sinfo_list, sinfo_ptr);

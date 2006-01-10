@@ -12,7 +12,7 @@
 # Copyright (C) 2002 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-2002-040.
+# UCRL-CODE-217948.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -86,7 +86,7 @@ exec $bin_chmod 700 $file_in
 # with sharing permitted. Insure the first job completes before the 
 # second job is started.
 #
-spawn $srun --batch -N1 --nodelist=$host_name -t1 --output=$file_out --error=$file_err  $file_in
+spawn $srun --batch -N1 --exclusive --nodelist=$host_name -t1 --output=$file_out --error=$file_err  $file_in
 expect {
 	-re "jobid ($number) submitted" {
 		set job_id1 $expect_out(1,string)

@@ -7,7 +7,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-2002-040.
+ *  UCRL-CODE-217948.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -141,12 +141,15 @@ extern int count_cpus(unsigned *bitmap)
  * deallocate_nodes - for a given job, deallocate its nodes and make 
  *	their state NODE_STATE_COMPLETING
  * IN job_ptr - pointer to terminating job (already in some COMPLETING state)
- * IN timeout - true of job exhausted time limit, send REQUEST_KILL_TIMELIMIT
+ * IN timeout - true if job exhausted time limit, send REQUEST_KILL_TIMELIMIT
  *	RPC instead of REQUEST_TERMINATE_JOB
+ * IN suspended - true if job was already suspended (node's job_run_cnt 
+ *	already decremented);
  * globals: node_record_count - number of nodes in the system
  *	node_record_table_ptr - pointer to global node table
  */
-extern void deallocate_nodes(struct job_record *job_ptr, bool timeout)
+extern void deallocate_nodes(struct job_record *job_ptr, bool timeout, 
+		bool suspended)
 {
 	int i;
 	kill_job_msg_t *kill_job;
@@ -184,7 +187,7 @@ extern void deallocate_nodes(struct job_record *job_ptr, bool timeout)
 			bit_clear(job_ptr->node_bitmap, i);
 			job_ptr->node_cnt--;
 		}
-		make_node_comp(node_ptr, job_ptr);
+		make_node_comp(node_ptr, job_ptr, suspended);
 #ifdef HAVE_FRONT_END		/* Operate only on front-end */
 		if (agent_args->node_count > 0)
 			continue;
@@ -1217,7 +1220,6 @@ extern void build_node_details(struct job_record *job_ptr)
 	if (job_ptr->node_cnt != node_inx) {
 		error("Node count mismatch for JobId=%u (%u,%u)",
 		      job_ptr->job_id, job_ptr->node_cnt, node_inx);
-		job_ptr->node_cnt = node_inx;
 	}
 	job_ptr->num_cpu_groups = cpu_inx + 1;
 	if ((cr_enabled) && (error_code == SLURM_SUCCESS)) {

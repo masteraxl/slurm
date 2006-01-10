@@ -6,7 +6,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>.
- *  UCRL-CODE-2002-040.
+ *  UCRL-CODE-217948.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -267,7 +267,6 @@ extern char *get_conf_node_name(char *node_hostname)
 /* getnodename - equivalent to gethostname, but return only the first 
  * component of the fully qualified name 
  * (e.g. "linux123.foo.bar" becomes "linux123") 
- * OUT name
  */
 int
 getnodename (char *name, size_t len)
@@ -355,6 +354,7 @@ init_slurm_conf (slurm_ctl_conf_t *ctl_conf_ptr)
 {
 	ctl_conf_ptr->last_update		= time(NULL);
 	xfree (ctl_conf_ptr->authtype);
+	ctl_conf_ptr->cache_groups		= (uint16_t) NO_VAL;
 	xfree (ctl_conf_ptr->checkpoint_type);
 	xfree (ctl_conf_ptr->backup_addr);
 	xfree (ctl_conf_ptr->backup_controller);
@@ -397,7 +397,7 @@ init_slurm_conf (slurm_ctl_conf_t *ctl_conf_ptr)
 	ctl_conf_ptr->slurmd_debug		= (uint16_t) NO_VAL; 
 	xfree (ctl_conf_ptr->slurmd_logfile);
 	xfree (ctl_conf_ptr->slurmd_pidfile);
-/* 	ctl_conf_ptr->slurmd_port		= (uint32_t) NO_VAL; */
+	ctl_conf_ptr->slurmd_port		= (uint32_t) NO_VAL;
 	xfree (ctl_conf_ptr->slurmd_spooldir);
 	ctl_conf_ptr->slurmd_timeout		= (uint16_t) NO_VAL;
 	xfree (ctl_conf_ptr->state_save_location);
@@ -442,7 +442,7 @@ parse_config_spec (char *in_line, slurm_ctl_conf_t *ctl_conf_ptr)
 	long slurmctld_debug = -1, slurmd_debug = -1;
 	long max_job_cnt = -1, min_job_age = -1, wait_time = -1;
 	long slurmctld_port = -1, slurmd_port = -1;
-	long mpich_gm_dir = -1, kill_tree = -1;
+	long mpich_gm_dir = -1, kill_tree = -1, cache_groups = -1;
 	char *backup_addr = NULL, *backup_controller = NULL;
 	char *checkpoint_type = NULL, *control_addr = NULL;
 	char *control_machine = NULL, *epilog = NULL, *mpi_default = NULL;
@@ -468,6 +468,7 @@ parse_config_spec (char *in_line, slurm_ctl_conf_t *ctl_conf_ptr)
 	error_code = slurm_parser (in_line,
 		"AuthType=", 's', &auth_type,
 		"CheckpointType=", 's', &checkpoint_type,
+		"CacheGroups=", 'l', &cache_groups,
 		"BackupAddr=", 's', &backup_addr, 
 		"BackupController=", 's', &backup_controller, 
 		"ControlAddr=", 's', &control_addr, 
@@ -537,6 +538,15 @@ parse_config_spec (char *in_line, slurm_ctl_conf_t *ctl_conf_ptr)
 			xfree( ctl_conf_ptr->authtype );
 		}
 		ctl_conf_ptr->authtype = auth_type;
+	}
+
+	if ( cache_groups != -1) {
+		if ( ctl_conf_ptr->cache_groups != (uint16_t) NO_VAL)
+			error (MULTIPLE_VALUE_MSG, "CacheGroups");
+		if ((cache_groups < 0) || (cache_groups > 0xffff))
+			error("CacheGroups=%ld is invalid", cache_groups);
+		else
+			ctl_conf_ptr->cache_groups = cache_groups;
 	}
 
 	if ( checkpoint_type ) {
@@ -923,14 +933,14 @@ parse_config_spec (char *in_line, slurm_ctl_conf_t *ctl_conf_ptr)
 		ctl_conf_ptr->slurmd_logfile = slurmd_logfile;
 	}
 
-/* 	if ( slurmd_port != -1) { */
-/* 		if ( ctl_conf_ptr->slurmd_port != (uint32_t) NO_VAL) */
-/* 			error (MULTIPLE_VALUE_MSG, "SlurmdPort"); */
-/* 		else if (slurmd_port < 0) */
-/* 			error ("SlurmdPort=%ld is invalid", slurmd_port); */
-/* 		else */
-/* 			ctl_conf_ptr->slurmd_port = slurmd_port; */
-/* 	} */
+	if ( slurmd_port != -1) {
+		if ( ctl_conf_ptr->slurmd_port != (uint32_t) NO_VAL)
+			error (MULTIPLE_VALUE_MSG, "SlurmdPort");
+		else if (slurmd_port < 0)
+			error ("SlurmdPort=%ld is invalid", slurmd_port);
+		else
+			ctl_conf_ptr->slurmd_port = slurmd_port;
+	}
 
 	if ( slurmd_spooldir ) {
 		if ( ctl_conf_ptr->slurmd_spooldir ) {
@@ -1048,14 +1058,12 @@ _parse_node_spec (char *in_line, bool slurmd_hosts)
 	char *state = NULL, *reason=NULL;
 	char *node_hostname = NULL;
 	int cpus_val, real_memory_val, tmp_disk_val, weight_val;
-	int port;
 
 	error_code = slurm_parser (in_line,
 		"Feature=", 's', &feature, 
 		"NodeAddr=", 's', &node_addr, 
 		"NodeName=", 's', &node_name, 
 		"NodeHostname=", 's', &node_hostname, 
-		"Port=", 'd', &port,
 		"Procs=", 'd', &cpus_val, 
 		"RealMemory=", 'd', &real_memory_val, 
 		"Reason=", 's', &reason, 
@@ -1068,7 +1076,7 @@ _parse_node_spec (char *in_line, bool slurmd_hosts)
 		return error_code;
 
 	if (node_name
-	    && (node_hostname || slurmd_hosts)) {
+	&&  (node_hostname || slurmd_hosts)) {
 		all_slurmd_hosts = true;
 		_register_conf_node_aliases(node_name, node_hostname);
 	}
@@ -1309,6 +1317,9 @@ validate_config (slurm_ctl_conf_t *ctl_conf_ptr)
 	if (ctl_conf_ptr->authtype == NULL)
 		ctl_conf_ptr->authtype = xstrdup(DEFAULT_AUTH_TYPE);
 
+	if (ctl_conf_ptr->cache_groups == (uint16_t) NO_VAL)
+		ctl_conf_ptr->cache_groups = DEFAULT_CACHE_GROUPS;
+
 	if (ctl_conf_ptr->checkpoint_type == NULL)
 		 ctl_conf_ptr->checkpoint_type = 
 			xstrdup(DEFAULT_CHECKPOINT_TYPE);
@@ -1422,8 +1433,8 @@ validate_config (slurm_ctl_conf_t *ctl_conf_ptr)
 	if (ctl_conf_ptr->slurmd_pidfile == NULL)
 		ctl_conf_ptr->slurmd_pidfile = xstrdup(DEFAULT_SLURMD_PIDFILE);
 
-/* 	if (ctl_conf_ptr->slurmd_port == (uint32_t) NO_VAL)  */
-/* 		ctl_conf_ptr->slurmd_port = SLURMD_PORT; */
+	if (ctl_conf_ptr->slurmd_port == (uint32_t) NO_VAL) 
+		ctl_conf_ptr->slurmd_port = SLURMD_PORT;
 
 	if (ctl_conf_ptr->slurmd_spooldir == NULL)
 		ctl_conf_ptr->slurmd_spooldir = xstrdup(DEFAULT_SPOOLDIR);

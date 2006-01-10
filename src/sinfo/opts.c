@@ -4,7 +4,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov>, Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-2002-040.
+ *  UCRL-CODE-217948.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -46,8 +46,8 @@
 #include "src/sinfo/sinfo.h"
 
 /* getopt_long options, integers but not characters */
-#define OPT_LONG_HELP  0x100
-#define OPT_LONG_USAGE 0x101
+#define OPT_LONG_HELP   0x100
+#define OPT_LONG_USAGE  0x101
 #define OPT_LONG_HIDE	0x102
 
 /* FUNCTIONS */
@@ -75,7 +75,7 @@ extern void parse_command_line(int argc, char *argv[])
 	int option_index;
 	static struct option long_options[] = {
 		{"all",       no_argument,       0, 'a'},
-		{"bg",       no_argument,       0, 'b'},
+		{"bg",        no_argument,       0, 'b'},
 		{"dead",      no_argument,       0, 'd'},
 		{"exact",     no_argument,       0, 'e'},
 		{"noheader",  no_argument,       0, 'h'},
@@ -94,7 +94,7 @@ extern void parse_command_line(int argc, char *argv[])
 		{"version",   no_argument,       0, 'V'},
 		{"help",      no_argument,       0, OPT_LONG_HELP},
 		{"usage",     no_argument,       0, OPT_LONG_USAGE},
-		{"hide",     no_argument, 0, OPT_LONG_HIDE},
+		{"hide",      no_argument,       0, OPT_LONG_HIDE},
 		{NULL,        0,                 0, 0}
 	};
 

@@ -8,7 +8,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Kevin Tew <tew1@llnl.gov> et. al.
- *  UCRL-CODE-2002-040.
+ *  UCRL-CODE-217948.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -500,6 +500,8 @@ char *job_state_string(enum job_states inx)
 			return "PENDING";
 		case JOB_RUNNING:
 			return "RUNNING";
+		case JOB_SUSPENDED:
+			return "SUSPENDED";
 		case JOB_COMPLETE:
 			return "COMPLETED";
 		case JOB_CANCELLED:
@@ -525,6 +527,8 @@ char *job_state_string_compact(enum job_states inx)
 			return "PD";
 		case JOB_RUNNING:
 			return "R";
+		case JOB_SUSPENDED:
+			return "S";
 		case JOB_COMPLETE:
 			return "CD";
 		case JOB_CANCELLED:

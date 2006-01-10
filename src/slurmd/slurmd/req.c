@@ -2,10 +2,10 @@
  *  src/slurmd/slurmd/req.c - slurmd request handling
  *  $Id$
  *****************************************************************************
- *  Copyright (C) 2002 The Regents of the University of California.
+ *  Copyright (C) 2002-5 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
- *  UCRL-CODE-2002-040.
+ *  UCRL-CODE-217948.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -49,6 +49,7 @@
 #include "src/common/slurm_auth.h"
 #include "src/common/slurm_cred.h"
 #include "src/common/slurm_jobacct.h"
+#include "src/common/slurm_protocol_defs.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/slurm_protocol_interface.h"
 #include "src/common/xstring.h"
@@ -65,12 +66,17 @@
 #define MAXHOSTNAMELEN	64
 #endif
 
+typedef struct {
+	int ngids;
+	gid_t *gids;
+} gids_t;
 
 static int  _abort_job(uint32_t job_id);
 static char ** _build_env(uint32_t jobid, uid_t uid, char *bg_part_id);
 static bool _slurm_authorized_user(uid_t uid);
 static bool _job_still_running(uint32_t job_id);
 static int  _kill_all_active_steps(uint32_t jobid, int sig, bool batch);
+static int  _terminate_all_steps(uint32_t jobid, bool batch);
 static void _rpc_launch_tasks(slurm_msg_t *, slurm_addr *);
 static void _rpc_spawn_task(slurm_msg_t *, slurm_addr *);
 static void _rpc_batch_job(slurm_msg_t *, slurm_addr *);
@@ -79,6 +85,7 @@ static void _rpc_terminate_tasks(slurm_msg_t *, slurm_addr *);
 static void _rpc_timelimit(slurm_msg_t *, slurm_addr *);
 static void _rpc_reattach_tasks(slurm_msg_t *, slurm_addr *);
 static void _rpc_signal_job(slurm_msg_t *, slurm_addr *);
+static void _rpc_suspend_job(slurm_msg_t *, slurm_addr *);
 static void _rpc_terminate_job(slurm_msg_t *, slurm_addr *);
 static void _rpc_update_time(slurm_msg_t *, slurm_addr *);
 static void _rpc_shutdown(slurm_msg_t *msg, slurm_addr *cli_addr);
@@ -95,6 +102,8 @@ static int _waiter_complete (uint32_t jobid);
 static bool _steps_completed_now(uint32_t jobid);
 static void _wait_state_completed(uint32_t jobid, int max_delay);
 static uid_t _get_job_uid(uint32_t jobid);
+
+static gids_t *_gids_cache_lookup(char *user, gid_t gid);
 
 /*
  *  List of threads waiting for jobs to complete
@@ -151,6 +160,10 @@ slurmd_req(slurm_msg_t *msg, slurm_addr *cli)
 		debug2("Processing RPC: REQUEST_SIGNAL_JOB");
 		_rpc_signal_job(msg, cli);
 		slurm_free_signal_job_msg(msg->data);
+		break;
+	case REQUEST_SUSPEND:
+		_rpc_suspend_job(msg, cli);
+		slurm_free_suspend_msg(msg->data);
 		break;
 	case REQUEST_TERMINATE_JOB:
 		debug2("Processing RPC: REQUEST_TERMINATE_JOB");
@@ -230,6 +243,9 @@ _send_slurmstepd_init(int fd, slurmd_step_type_t type, void *req,
 	int len = 0;
 	Buf buffer;
 	slurm_msg_t *msg = NULL;
+	uid_t uid = (uid_t)-1;
+	struct passwd *pw = NULL;
+	gids_t *gids = NULL;
 
 	/* send type over to slurmstepd */
 	safe_write(fd, &type, sizeof(int));
@@ -242,7 +258,7 @@ _send_slurmstepd_init(int fd, slurmd_step_type_t type, void *req,
 	safe_write(fd, get_buf_data(buffer), len);
 	free_buf(buffer);
 
-	/* send cli over to slurmstepd */
+	/* send cli address over to slurmstepd */
 	buffer = init_buf(0);
 	slurm_pack_slurm_addr(cli, buffer);
 	len = get_buf_offset(buffer);
@@ -250,7 +266,7 @@ _send_slurmstepd_init(int fd, slurmd_step_type_t type, void *req,
 	safe_write(fd, get_buf_data(buffer), len);
 	free_buf(buffer);
 
-	/* send self over to slurmstepd */
+	/* send self address over to slurmstepd */
 	if(self) {
 		buffer = init_buf(0);
 		slurm_pack_slurm_addr(self, buffer);
@@ -267,12 +283,30 @@ _send_slurmstepd_init(int fd, slurmd_step_type_t type, void *req,
 	msg = xmalloc(sizeof(slurm_msg_t));
 	switch(type) {
 	case LAUNCH_BATCH_JOB:
+		/*
+		 * The validity of req->uid was verified against the
+		 * auth credential in _rpc_batch_job().  req->gid
+		 * has NOT yet been checked!
+		 */
+		uid = (uid_t)((batch_job_launch_msg_t *)req)->uid;
 		msg->msg_type = REQUEST_BATCH_JOB_LAUNCH;
 		break;
 	case LAUNCH_TASKS:
+		/*
+		 * The validity of req->uid was verified against the
+		 * auth credential in _rpc_launch_tasks().  req->gid
+		 * has NOT yet been checked!
+		 */
+		uid = (uid_t)((launch_tasks_request_msg_t *)req)->uid;
 		msg->msg_type = REQUEST_LAUNCH_TASKS;
 		break;
 	case SPAWN_TASKS:
+		/*
+		 * The validity of req->uid was verified against the
+		 * auth credential in _rpc_spawn_task().  req->gid
+		 * has NOT yet been checked!
+		 */
+		uid = (uid_t)((spawn_task_request_msg_t *)req)->uid;
 		msg->msg_type = REQUEST_SPAWN_TASK;
 		break;
 	default:
@@ -288,6 +322,25 @@ _send_slurmstepd_init(int fd, slurmd_step_type_t type, void *req,
 	free_buf(buffer);
 	slurm_free_msg(msg);
 
+	/* send cached group ids array for the relevant uid */
+	if (!(pw = getpwuid(uid))) {
+		error("_send_slurmstepd_init getpwuid: %m");
+		len = 0;
+		safe_write(fd, &len, sizeof(int));
+		return -1;
+	}
+	if (gids = _gids_cache_lookup(pw->pw_name, pw->pw_gid)) {
+		int i;
+		uint32_t tmp32;
+		safe_write(fd, &gids->ngids, sizeof(int));
+		for (i = 0; i < gids->ngids; i++) {
+			tmp32 = (uint32_t)gids->gids[i];
+			safe_write(fd, &tmp32, sizeof(uint32_t));
+		}
+	} else {
+		len = 0;
+		safe_write(fd, &len, sizeof(int));
+	}
 	return 0;
 
 rwfail:
@@ -698,7 +751,7 @@ _rpc_batch_job(slurm_msg_t *msg, slurm_addr *cli)
 	char    *bg_part_id = NULL;
 	bool	replied = false;
 
-	if (!_slurm_authorized_user(req_uid)) {
+	if (!_slurm_authorized_user(req_uid) && (req_uid != req->uid)) {
 		error("Security violation, batch launch RPC from uid %u",
 		      (unsigned int) req_uid);
 		rc = ESLURM_USER_ID_MISSING;	/* or bad in this case */
@@ -936,7 +989,7 @@ _rpc_terminate_tasks(slurm_msg_t *msg, slurm_addr *cli_addr)
 		goto done3;
 	}
 
-	rc = stepd_signal_container(fd, req->signal);
+	rc = stepd_terminate(fd);
 	if (rc == -1)
 		rc = ESLURMD_JOB_NOTRUNNING;
 
@@ -1121,15 +1174,15 @@ done:
 	xfree(resp);
 }
 
-static uid_t
+static uid_t 
 _get_job_uid(uint32_t jobid)
 {
 	List steps;
 	ListIterator i;
 	step_loc_t *stepd;
-	slurmstepd_info_t *info;
+	slurmstepd_info_t *info = NULL;
 	int fd;
-	uid_t uid;
+	uid_t uid = 0;
 
 	steps = stepd_available(conf->spooldir, conf->node_name);
 	i = list_iterator_create(steps);
@@ -1154,12 +1207,12 @@ _get_job_uid(uint32_t jobid)
 			      stepd->jobid, stepd->stepid);
 			continue;
 		}
+		uid = (uid_t)info->uid;
 		break;
 	}
 	list_iterator_destroy(i);
 	list_destroy(steps);
 
-	uid = (uid_t)info->uid;
 	xfree(info);
 	return uid;
 }
@@ -1213,6 +1266,56 @@ _kill_all_active_steps(uint32_t jobid, int sig, bool batch)
 	list_destroy(steps);
 	if (step_cnt == 0)
 		debug2("No steps in jobid %u to send signal %d", jobid, sig);
+	return step_cnt;
+}
+
+/*
+ * _terminate_all_steps - signals the container of all steps of a job
+ * jobid IN - id of job to signal
+ * batch IN - if true signal batch script, otherwise skip it
+ * RET count of signaled job steps (plus batch script, if applicable)
+ */
+static int
+_terminate_all_steps(uint32_t jobid, bool batch)
+{
+	List steps;
+	ListIterator i;
+	step_loc_t *stepd;
+	int step_cnt  = 0;  
+	int fd;
+
+	steps = stepd_available(conf->spooldir, conf->node_name);
+	i = list_iterator_create(steps);
+	while (stepd = list_next(i)) {
+		if (stepd->jobid != jobid) {
+			/* multiple jobs expected on shared nodes */
+			debug3("Step from other job: jobid=%u (this jobid=%u)",
+			       stepd->jobid, jobid);
+			continue;
+		}
+
+		if ((stepd->stepid == SLURM_BATCH_SCRIPT) && (!batch))
+			continue;
+
+		step_cnt++;
+
+		fd = stepd_connect(stepd->directory, stepd->nodename,
+				   stepd->jobid, stepd->stepid);
+		if (fd == -1) {
+			debug3("Unable to connect to step %u.%u",
+			       stepd->jobid, stepd->stepid);
+			continue;
+		}
+
+		debug2("terminsate job step %u.%u", jobid, stepd->stepid);
+		if (stepd_terminate(fd) < 0)
+			debug("kill jobid=%u failed: %m", jobid);
+		close(fd);
+	}
+	list_iterator_destroy(i);
+	list_destroy(steps);
+	if (step_cnt == 0)
+		debug2("No steps in job %u to terminate", jobid);
 	return step_cnt;
 }
 
@@ -1360,7 +1463,7 @@ _rpc_signal_job(slurm_msg_t *msg, slurm_addr *cli)
 	debug("_rpc_signal_job, uid = %d, signal = %d", req_uid, req->signal);
 	job_uid = _get_job_uid(req->job_id);
 	/* 
-	 * check that requesting user ID is the SLURM UID
+	 * check that requesting user ID is the SLURM UID or root
 	 */
 	if ((req_uid != job_uid) && (!_slurm_authorized_user(req_uid))) {
 		error("Security violation: kill_job(%ld) from uid %ld",
@@ -1425,6 +1528,94 @@ _rpc_signal_job(slurm_msg_t *msg, slurm_addr *cli)
 	}
 }
 
+/*
+ * Send a job suspend/resume request through the appropriate slurmstepds for 
+ * each job step belonging to a given job allocation.
+ */
+static void 
+_rpc_suspend_job(slurm_msg_t *msg, slurm_addr *cli)
+{
+	suspend_msg_t *req = msg->data;
+	uid_t req_uid = g_slurm_auth_get_uid(msg->cred);
+	uid_t job_uid;
+	List steps;
+	ListIterator i;
+	step_loc_t *stepd;
+	int step_cnt  = 0;  
+	int fd, rc = SLURM_SUCCESS;
+
+	if (req->op != SUSPEND_JOB && req->op != RESUME_JOB) {
+		error("REQUEST_SUSPEND: bad op code %u", req->op);
+		rc = ESLURM_NOT_SUPPORTED;
+		goto fini;
+	}
+	debug("_rpc_suspend_job jobid=%u uid=%d", 
+		req->job_id, req_uid);
+	job_uid = _get_job_uid(req->job_id);
+	/* 
+	 * check that requesting user ID is the SLURM UID or root
+	 */
+	if (!_slurm_authorized_user(req_uid)) {
+		error("Security violation: signal_job(%u) from uid %ld",
+		      req->job_id, (long) req_uid);
+		rc =  ESLURM_USER_ID_MISSING;
+		goto fini;
+	} 
+
+	/*
+	 * Loop through all job steps and call stepd_suspend or stepd_resume
+	 * as appropriate.
+	 */
+	steps = stepd_available(conf->spooldir, conf->node_name);
+	i = list_iterator_create(steps);
+	while (stepd = list_next(i)) {
+		if (stepd->jobid != req->job_id) {
+			/* multiple jobs expected on shared nodes */
+			debug3("Step from other job: jobid=%u (this jobid=%u)",
+			      stepd->jobid, req->job_id);
+			continue;
+		}
+		step_cnt++;
+
+		fd = stepd_connect(stepd->directory, stepd->nodename,
+				   stepd->jobid, stepd->stepid);
+		if (fd == -1) {
+			debug3("Unable to connect to step %u.%u",
+			       stepd->jobid, stepd->stepid);
+			continue;
+		}
+
+		if (req->op == SUSPEND_JOB) {
+			debug2("Suspending job step %u.%u",
+			       stepd->jobid, stepd->stepid);
+			if (stepd_suspend(fd) < 0)
+				debug("  suspend failed: %m", stepd->jobid);
+		} else {
+			debug2("Resuming job step %u.%u",
+			       stepd->jobid, stepd->stepid);
+			if (stepd_resume(fd) < 0)
+				debug("  resume failed: %m", stepd->jobid);
+		}
+
+		close(fd);
+	}
+	list_iterator_destroy(i);
+	list_destroy(steps);
+	if (step_cnt == 0)
+		debug2("No steps in jobid %u to suspend/resume", req->job_id);
+
+	/*
+	 *  At this point, if connection still open, we send controller
+	 *  a reply.
+	 */
+ fini:	if (msg->conn_fd >= 0) {
+		slurm_send_rc_msg(msg, rc);
+		if (slurm_close_accepted_conn(msg->conn_fd) < 0)
+			error ("_rpc_signal_job: close(%d): %m", msg->conn_fd);
+		msg->conn_fd = -1;
+	}
+}
+
 static void 
 _rpc_terminate_job(slurm_msg_t *msg, slurm_addr *cli)
 {
@@ -1476,8 +1667,16 @@ _rpc_terminate_job(slurm_msg_t *msg, slurm_addr *cli)
 	 * so send SIGCONT first.
 	 */
 	_kill_all_active_steps(req->job_id, SIGCONT, true);
-
-	nsteps = _kill_all_active_steps(req->job_id, SIGTERM, true);
+	if (errno == ESLURMD_STEP_SUSPENDED) {
+		/*
+		 * If the job step is currently suspended, we don't
+		 * bother with a "nice" termination.
+		 */
+		debug2("Job is currently suspened, terminating");
+		nsteps = _terminate_all_steps(req->job_id, true);
+	} else {
+		nsteps = _kill_all_active_steps(req->job_id, SIGTERM, true);
+	}
 
 	/*
 	 *  If there are currently no active job steps and no
@@ -1514,7 +1713,7 @@ _rpc_terminate_job(slurm_msg_t *msg, slurm_addr *cli)
 	 */
 	delay = MAX(conf->cf.kill_wait, 5);
 	if ( !_pause_for_job_completion (req->job_id, delay)
-	     && _kill_all_active_steps(req->job_id, SIGKILL, true) ) {
+	     && _terminate_all_steps(req->job_id, true) ) {
 		/*
 		 *  Block until all user processes are complete.
 		 */
@@ -1622,7 +1821,7 @@ _pause_for_job_completion (uint32_t job_id, int max_time)
 	while ( ((sec++ < max_time) || (max_time == 0))
 	      && (rc = _job_still_running (job_id))) {
 		if ((max_time == 0) && (sec > 1))
-			_kill_all_active_steps(job_id, SIGKILL, true);
+			_terminate_all_steps(job_id, true);
 		sleep (1);
 	}
 	/* 
@@ -1711,4 +1910,173 @@ _run_epilog(uint32_t jobid, uid_t uid, char *bg_part_id)
 	xfree(my_env);
 
 	return error_code;
+}
+
+
+/**********************************************************************/
+/* Because calling initgroups(2) in Linux 2.4/2.6 looks very costly,  */
+/* we cache the group access list and call setgroups(2).              */
+/**********************************************************************/
+
+typedef struct gid_cache_s {
+	char *user;
+	gid_t gid;
+	gids_t *gids;
+	struct gid_cache_s *next;
+} gids_cache_t;
+
+#define GIDS_HASH_LEN 64
+static gids_cache_t *gids_hashtbl[GIDS_HASH_LEN] = {NULL};
+
+
+static gids_t *
+_alloc_gids(int n, gid_t *gids)
+{
+	gids_t *new;
+
+	new = (gids_t *)xmalloc(sizeof(gids_t));
+	new->ngids = n;
+	new->gids = gids;
+	return new;
+}
+
+static void
+_dealloc_gids(gids_t *p)
+{
+	xfree(p->gids);
+	xfree(p);
+}
+
+static gids_cache_t *
+_alloc_gids_cache(char *user, gid_t gid, gids_t *gids, gids_cache_t *next)
+{
+	gids_cache_t *p;
+
+	p = (gids_cache_t *)xmalloc(sizeof(gids_cache_t));
+	p->user = xstrdup(user);
+	p->gid = gid;
+	p->gids = gids;
+	p->next = next;
+	return p;
+}
+
+static void
+_dealloc_gids_cache(gids_cache_t *p)
+{
+	xfree(p->user);
+	_dealloc_gids(p->gids);
+	xfree(p);
+}
+
+static int
+_gids_hashtbl_idx(char *user)
+{
+	unsigned char *p = (unsigned char *)user;
+	unsigned int x = 0;
+
+	while (*p) {
+		x += (unsigned int)*p;
+		p++;
+	}
+	return x % GIDS_HASH_LEN;
+}
+
+static void
+_gids_cache_purge(void)
+{
+	int i;
+	gids_cache_t *p, *q;
+
+	for (i=0; i<GIDS_HASH_LEN; i++) {
+		p = gids_hashtbl[i];
+		while (p) {
+			q = p->next;
+			_dealloc_gids_cache(p);
+			p = q;
+		}
+		gids_hashtbl[i] = NULL;
+	}
+}
+
+static gids_t *
+_gids_cache_lookup(char *user, gid_t gid)
+{
+	int idx;
+	gids_cache_t *p;
+
+	idx = _gids_hashtbl_idx(user);
+	p = gids_hashtbl[idx];
+	while (p) {
+		if (strcmp(p->user, user) == 0 && p->gid == gid) {
+			return p->gids;
+		}
+		p = p->next;
+	}
+	return NULL;
+}
+
+static void
+_gids_cache_register(char *user, gid_t gid, gids_t *gids)
+{
+	int idx;
+	gids_cache_t *p, *q;
+
+	idx = _gids_hashtbl_idx(user);
+	q = gids_hashtbl[idx];
+	p = _alloc_gids_cache(user, gid, gids, q);
+	gids_hashtbl[idx] = p;
+	debug2("Cached group access list for %s/%d", user, gid);
+}
+
+static gids_t *
+_getgroups(void)
+{
+	int n, i, found;
+	gid_t *gg;
+
+	if ((n = getgroups(0, NULL)) < 0) {
+		error("getgroups:_getgroups: %m");
+		return NULL;
+	}
+	gg = (gid_t *)xmalloc(n * sizeof(gid_t));
+	getgroups(n, gg);
+	return _alloc_gids(n, gg);
+}
+
+
+extern void
+init_gids_cache(int cache)
+{
+	struct passwd *pwd;
+	int ngids;
+	gid_t *orig_gids;
+	gids_t *gids;
+
+	if (!cache) {
+		_gids_cache_purge();
+		return;
+	}
+
+	if ((ngids = getgroups(0, NULL)) < 0) {
+		error("getgroups: init_gids_cache: %m");
+		return;
+	}
+	orig_gids = (gid_t *)xmalloc(ngids * sizeof(gid_t));
+	getgroups(ngids, orig_gids);
+
+	while (pwd = getpwent()) {
+		if (_gids_cache_lookup(pwd->pw_name, pwd->pw_gid))
+			continue;
+		if (initgroups(pwd->pw_name, pwd->pw_gid)) {
+			error("initgroups:init_gids_cache: %m");
+			continue;
+		}
+		if ((gids = _getgroups()) == NULL)
+			continue;
+		_gids_cache_register(pwd->pw_name, pwd->pw_gid, gids);
+	}
+	endpwent();
+
+	setgroups(ngids, orig_gids);		
+	xfree(orig_gids);
 }

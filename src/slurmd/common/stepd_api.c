@@ -5,7 +5,7 @@
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Christopher Morrone <morrone2@llnl.gov>
- *  UCRL-CODE-2002-040.
+ *  UCRL-CODE-217948.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -36,6 +36,7 @@
 #include <regex.h>
 #include <string.h>
 #include <inttypes.h>
+#include <signal.h>
 
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
@@ -191,7 +192,6 @@ stepd_signal(int fd, int signal)
 
 	/* Receive the return code */
 	safe_read(fd, &rc, sizeof(int));
-
 	return rc;
 rwfail:
 	return -1;
@@ -203,7 +203,7 @@ rwfail:
 int
 stepd_signal_task_local(int fd, int signal, int ltaskid)
 {
-	int req = REQUEST_SIGNAL_PROCESS_GROUP;
+	int req = REQUEST_SIGNAL_TASK_LOCAL;
 	int rc;
 
 	safe_write(fd, &req, sizeof(int));
@@ -398,8 +398,8 @@ done:
 }
 
 /*
- * Unlink all of the unix domain socket files for a given directory
- * and nodename.
+ * Send the termination signal to all of the unix domain socket files
+ * for a given directory and nodename, and then unlink the files.
  * Returns SLURM_ERROR if any sockets could not be unlinked.
  */
 int
@@ -433,10 +433,24 @@ stepd_cleanup_sockets(const char *directory, const char *nodename)
 		uint32_t jobid, stepid;
 		if (_sockname_regex(&re, ent->d_name, &jobid, &stepid) == 0) {
 			char *path;
+			int fd;
+
 			path = NULL;
 			xstrfmtcat(path, "%s/%s", directory, ent->d_name);
-			verbose("Unlinking stray socket %s", path);
-			if (unlink(path) == -1) {
+			verbose("Cleaning up stray job step %u.%u", 
+				jobid, stepid);
+
+			/* signal the slurmstepd to terminate its step */
+			fd = stepd_connect(directory, nodename, jobid, stepid);
+			if (fd == -1) {
+				debug("Unable to connect to socket %s", path);
+			} else {
+				stepd_signal_container(fd, SIGKILL);
+				close(fd);
+			}
+
+			/* make sure that the socket has been removed */
+			if (unlink(path) == -1 && errno != ENOENT) {
 				error("Unable to clean up stray socket %s: %m",
 				      path);
 				rc = SLURM_ERROR;
@@ -488,4 +502,82 @@ stepd_daemon_pid(int fd)
 	return pid;
 rwfail:
 	return (pid_t)-1;
+}
+
+/*
+ * Suspend execution of the job step.  Only root or SlurmUser is
+ * authorized to use this call.
+ *
+ * Returns SLURM_SUCCESS is successful.  On error returns SLURM_ERROR
+ * and sets errno.
+ */
+int
+stepd_suspend(int fd)
+{
+	int req = REQUEST_STEP_SUSPEND;
+	int rc;
+	int errnum = 0;
+
+	safe_write(fd, &req, sizeof(int));
+
+	/* Receive the return code and errno */
+	safe_read(fd, &rc, sizeof(int));
+	safe_read(fd, &errnum, sizeof(int));
+
+	errno = errnum;
+	return rc;
+rwfail:
+	return -1;
+}
+
+/*
+ * Resume execution of the job step that has been suspended by a
+ * call to stepd_suspend().  Only root or SlurmUser is
+ * authorized to use this call.
+ *
+ * Returns SLURM_SUCCESS is successful.  On error returns SLURM_ERROR
+ * and sets errno.
+ */
+int
+stepd_resume(int fd)
+{
+	int req = REQUEST_STEP_RESUME;
+	int rc;
+	int errnum = 0;
+
+	safe_write(fd, &req, sizeof(int));
+
+	/* Receive the return code and errno */
+	safe_read(fd, &rc, sizeof(int));
+	safe_read(fd, &errnum, sizeof(int));
+
+	errno = errnum;
+	return rc;
+rwfail:
+	return -1;
+}
+
+/*
+ * Terminate the job step.
+ *
+ * Returns SLURM_SUCCESS is successful.  On error returns SLURM_ERROR
+ * and sets errno.
+ */
+int
+stepd_terminate(int fd)
+{
+	int req = REQUEST_STEP_TERMINATE;
+	int rc;
+	int errnum = 0;
+
+	safe_write(fd, &req, sizeof(int));
+
+	/* Receive the return code and errno */
+	safe_read(fd, &rc, sizeof(int));
+	safe_read(fd, &errnum, sizeof(int));
+
+	errno = errnum;
+	return rc;
+rwfail:
+	return -1;
 }

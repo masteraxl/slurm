@@ -6,7 +6,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-2002-040.
+ *  UCRL-CODE-217948.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -1670,7 +1670,7 @@ _update_node (int argc, char *argv[])
 					state_val = (uint16_t) j;
 					break;
 				}
-				if (strcmp(node_state_string(j),"END") == 0) {
+				if (j == NODE_STATE_END) {
 					exit_code = 1;
 					fprintf(stderr, "Invalid input: %s\n", 
 						argv[i]);
@@ -1684,7 +1684,7 @@ _update_node (int argc, char *argv[])
 					fprintf (stderr, "\n");
 					goto done;
 				}
-			}	
+			}
 			node_msg.node_state = state_val;
 			update_cnt++;
 		}

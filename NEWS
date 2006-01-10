@@ -1,6 +1,23 @@
 This file describes changes in recent versions of SLURM. It primarily
 documents those changes that are of interest to users and admins. 
 
+* Changes in SLURM 0.7.0-pre9
+=============================
+ -- Fix sinfo filtering bug, especially "sinfo -R" output.
+ -- Fix node state change bug, resuming down or drained nodes.
+ -- Fix "scontrol show config" to display JobCredentialPrivateKey instead
+    of JobCredPrivateKey and JobCredentialPublicCertificate instead of
+    JobCredPublicKey.  They now match the options in the slurm.conf.
+ -- Fix bug in job accounting for very long node list records (Andy Riebs,
+    HP, sacct_buf.patch).
+
+* Changes in SLURM 0.7.0-pre8
+=============================
+ -- BGL specific -- bug fix for smap configure function down configuration
+ -- Add support for job suspend/resume.
+ -- Add slurmd cache for group IDs (Takao Hatazaki, HP).
+ -- Fix bug in processing of "#SLURM" batch script option parsing.
+
 * Changes in SLURM 0.7.0-pre7
 =============================
  -- Fix issue with NODE_STATE_COMPLETING, could start job on node before
@@ -96,8 +113,14 @@ documents those changes that are of interest to users and admins.
  -- Some infrastructure added for task launch controls (slurm.conf:
     TaskProlog, TaskEpilog, TaskPlugin; srun --task-prolog, --task-epilog).
 
+* Changes in SLURM 0.6.11
+=========================
+ -- Fix bug in sinfo partition sorting order.
+ -- Fix bugs in srun use of #SLURM options in batch script.
+
 * Changes in SLURM 0.6.10
 =========================
+ -- Fix for slurmd job termination logic (could hang in COMPLETING state).
  -- Sacct bug fixes: Report correct user name for job step, show "uid.gid"
     as fifth field of job step record (Andy Riebs, slurm.hp.sacct_uid.patch).
  -- Add job_id to maui scheduler plugin start job status message.

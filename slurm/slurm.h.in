@@ -5,7 +5,7 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>, 
  *	Joey Ekstrom <ekstrom1@llnl.gov> et. al.
- *  UCRL-CODE-2002-040.
+ *  UCRL-CODE-217948.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -138,6 +138,7 @@ BEGIN_C_DECLS
 enum job_states {
 	JOB_PENDING,		/* queued waiting for initiation */
 	JOB_RUNNING,		/* allocated resources and executing */
+	JOB_SUSPENDED,		/* allocated resources, execution suspended */
 	JOB_COMPLETE,		/* completed execution successfully */
 	JOB_CANCELLED,		/* cancelled by user */
 	JOB_FAILED,		/* completed execution unsuccessfully */
@@ -216,7 +217,7 @@ typedef enum cpu_bind_type {	/* cpu binding type from --cpu_bind=... */
 	CPU_BIND_NONE	= 0x02,	/* =no */
 	CPU_BIND_RANK  	= 0x04,	/* =rank */
 	CPU_BIND_MAPCPU	= 0x08,	/* =map_cpu:<list of CPU IDs> */
-	CPU_BIND_MASKCPU= 0x10,	/* =mask_cpu:<list of CPU masks> */
+	CPU_BIND_MASKCPU= 0x10	/* =mask_cpu:<list of CPU masks> */
 } cpu_bind_type_t;
 
 /* The last entry in node_states must be STATE_END, keep in sync with 
@@ -384,6 +385,8 @@ typedef struct job_info {
 	time_t submit_time;	/* time of job submission */
 	time_t start_time;	/* time execution begins, actual or expected */
 	time_t end_time;	/* time of termination, actual or expected */
+	time_t suspend_time;	/* time job last suspended or resumed */
+	time_t pre_sus_time;	/* time job ran prior to last suspend */
 	uint32_t priority;	/* relative priority of the job, 
 				 * 0=held, 1=required nodes DOWN/DRAINED */
 	char *nodes;		/* list of nodes allocated to job */
@@ -548,6 +551,7 @@ typedef struct slurm_ctl_conf {
 	char *authtype;		/* authentication type */
 	char *backup_addr;	/* comm path of slurmctld secondary server */
 	char *backup_controller;/* name of slurmctld secondary server */
+	uint16_t cache_groups;	/* cache /etc/groups to avoid initgroups(2) */
 	char *checkpoint_type;	/* checkpoint plugin type */
 	char *control_addr;	/* comm path of slurmctld primary server */
 	char *control_machine;	/* name of slurmctld primary server */

@@ -5,7 +5,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov> and Kevin Tew <tew1@llnl.gov>.
- *  UCRL-CODE-2002-040.
+ *  UCRL-CODE-217948.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -71,6 +71,8 @@ void slurm_print_ctl_conf ( FILE* out,
 		slurm_ctl_conf_ptr->backup_addr);
 	fprintf(out, "BackupController  = %s\n", 
 		slurm_ctl_conf_ptr->backup_controller);
+	fprintf(out, "CacheGroups       = %u\n", 
+		slurm_ctl_conf_ptr->cache_groups);
 	fprintf(out, "CheckpointType    = %s\n",
 		slurm_ctl_conf_ptr->checkpoint_type);
 	fprintf(out, "ControlAddr       = %s\n", 
@@ -97,9 +99,9 @@ void slurm_print_ctl_conf ( FILE* out,
 		slurm_ctl_conf_ptr->job_comp_loc);
 	fprintf(out, "JobCompType       = %s\n", 
 		slurm_ctl_conf_ptr->job_comp_type);
-	fprintf(out, "JobCredPrivateKey = %s\n", 
+	fprintf(out, "JobCredentialPrivateKey = %s\n", 
 		slurm_ctl_conf_ptr->job_credential_private_key);
-	fprintf(out, "JobCredPublicKey  = %s\n", 
+	fprintf(out, "JobCredentialPublicCertificate = %s\n", 
 		slurm_ctl_conf_ptr->job_credential_public_certificate);
 	fprintf(out, "KillWait          = %u\n", 
 		slurm_ctl_conf_ptr->kill_wait);
@@ -150,8 +152,8 @@ void slurm_print_ctl_conf ( FILE* out,
 		slurm_ctl_conf_ptr->slurmd_logfile);
 	fprintf(out, "SlurmdPidFile     = %s\n", 
 		slurm_ctl_conf_ptr->slurmd_pidfile);
-/* 	fprintf(out, "SlurmdPort        = %u\n",  */
-/* 		slurm_ctl_conf_ptr->slurmd_port); */
+	fprintf(out, "SlurmdPort        = %u\n", 
+		slurm_ctl_conf_ptr->slurmd_port);
 	fprintf(out, "SlurmdSpoolDir    = %s\n", 
 		slurm_ctl_conf_ptr->slurmd_spooldir);
 	fprintf(out, "SlurmdTimeout     = %u\n", 

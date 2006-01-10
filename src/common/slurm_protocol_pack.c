@@ -6,7 +6,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Kevin Tew <tew1@llnl.gov>, et. al.
- *  UCRL-CODE-2002-040.
+ *  UCRL-CODE-217948.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -1801,6 +1801,8 @@ _unpack_job_info_members(job_info_t * job, Buf buffer)
 	safe_unpack_time(&job->submit_time, buffer);
 	safe_unpack_time(&job->start_time, buffer);
 	safe_unpack_time(&job->end_time, buffer);
+	safe_unpack_time(&job->suspend_time, buffer);
+	safe_unpack_time(&job->pre_sus_time, buffer);
 	safe_unpack32(&job->priority, buffer);
 
 	safe_unpackstr_xmalloc(&job->nodes, &uint16_tmp, buffer);
@@ -1879,6 +1881,7 @@ _pack_slurm_ctl_conf_msg(slurm_ctl_conf_info_msg_t * build_ptr, Buf buffer)
 	packstr(build_ptr->authtype, buffer);
 	packstr(build_ptr->backup_addr, buffer);
 	packstr(build_ptr->backup_controller, buffer);
+	pack16(build_ptr->cache_groups, buffer);
 	packstr(build_ptr->checkpoint_type, buffer);
 	packstr(build_ptr->control_addr, buffer);
 	packstr(build_ptr->control_machine, buffer);
@@ -1917,7 +1920,7 @@ _pack_slurm_ctl_conf_msg(slurm_ctl_conf_info_msg_t * build_ptr, Buf buffer)
 	pack16(build_ptr->slurmd_debug, buffer);
 	packstr(build_ptr->slurmd_logfile, buffer);
 	packstr(build_ptr->slurmd_pidfile, buffer);
-/* 	pack32(build_ptr->slurmd_port, buffer); */
+	pack32(build_ptr->slurmd_port, buffer);
 	packstr(build_ptr->slurmd_spooldir, buffer);
 	debug2("Packing string %s", build_ptr->slurmd_spooldir);
 	pack16(build_ptr->slurmd_timeout, buffer);
@@ -1954,6 +1957,7 @@ _unpack_slurm_ctl_conf_msg(slurm_ctl_conf_info_msg_t **
 	safe_unpackstr_xmalloc(&build_ptr->backup_addr, &uint16_tmp, buffer);
 	safe_unpackstr_xmalloc(&build_ptr->backup_controller, &uint16_tmp,
 			       buffer);
+	safe_unpack16(&build_ptr->cache_groups, buffer);
 	safe_unpackstr_xmalloc(&build_ptr->checkpoint_type, &uint16_tmp,
 				buffer);
 	safe_unpackstr_xmalloc(&build_ptr->control_addr, &uint16_tmp, buffer);
@@ -2002,7 +2006,7 @@ _unpack_slurm_ctl_conf_msg(slurm_ctl_conf_info_msg_t **
 			       buffer);
 	safe_unpackstr_xmalloc(&build_ptr->slurmd_pidfile, &uint16_tmp,
 			       buffer);
-/* 	safe_unpack32(&build_ptr->slurmd_port, buffer); */
+	safe_unpack32(&build_ptr->slurmd_port, buffer);
 	safe_unpackstr_xmalloc(&build_ptr->slurmd_spooldir, &uint16_tmp,
 			       buffer);
 	safe_unpack16(&build_ptr->slurmd_timeout, buffer);

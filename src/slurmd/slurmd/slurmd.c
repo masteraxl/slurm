@@ -5,7 +5,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
- *  UCRL-CODE-2002-040.
+ *  UCRL-CODE-217948.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -67,7 +67,7 @@
 #include "src/slurmd/common/proctrack.h"
 #include "src/slurmd/common/task_plugin.h"
 
-#define GETOPT_ARGS	"L:Dvhcf:MN:P:"
+#define GETOPT_ARGS	"L:Dvhcf:M"
 
 #ifndef MAXHOSTNAMELEN
 #  define MAXHOSTNAMELEN	64
@@ -176,7 +176,7 @@ main (int argc, char *argv[])
 	info("slurmd version %s started", SLURM_VERSION);
 	debug3("finished daemonize");
 
-	/*_kill_old_slurmd();*/
+	_kill_old_slurmd();
 
 	if (conf->mlock_pages) {
 		/*
@@ -473,6 +473,7 @@ _free_and_set(char **confvar, char *newval)
 /*
  * Read the slurm configuration file (slurm.conf) and substitute some
  * values into the slurmd configuration in preference of the defaults.
+ *
  */
 static void
 _read_config()
@@ -488,7 +489,7 @@ _read_config()
 	if (conf->conffile == NULL)
 		conf->conffile = xstrdup(conf->cf.slurm_conf);
 
-/* 	conf->port          =  conf->cf.slurmd_port; */
+	conf->port          =  conf->cf.slurmd_port;
 	conf->slurm_user_id =  conf->cf.slurm_user_id;
 
 	path_pubkey = xstrdup(conf->cf.job_credential_public_certificate);
@@ -496,10 +497,7 @@ _read_config()
 	if (!conf->logfile)
 		conf->logfile = xstrdup(conf->cf.slurmd_logfile);
 
-	/* FIXME - temporary way to have multiple node_name slurmds on a node */
-	if (conf->node_name == NULL)
-		_free_and_set(&conf->node_name,
-			      get_conf_node_name(conf->hostname));
+	_free_and_set(&conf->node_name, get_conf_node_name(conf->hostname));
 	_free_and_set(&conf->epilog,   xstrdup(conf->cf.epilog));
 	_free_and_set(&conf->prolog,   xstrdup(conf->cf.prolog));
 	_free_and_set(&conf->tmpfs,    xstrdup(conf->cf.tmp_fs));
@@ -523,6 +521,8 @@ _read_config()
 static void
 _reconfigure(void)
 {
+	_reconfig = 0;
+
 	_read_config();
 
 	_update_logging();
@@ -534,6 +534,11 @@ _reconfigure(void)
 	slurm_cred_ctx_key_update(conf->vctx, conf->pubkey);
 
 	/*
+	 * Reinitialize the groups cache
+	 */
+	init_gids_cache(conf->cf.cache_groups);
+
+	/*
 	 * XXX: reopen slurmd port?
 	 */
 }
@@ -541,6 +546,7 @@ _reconfigure(void)
 static void
 _print_conf()
 {
+	debug3("CacheGroups = %d",       conf->cf.cache_groups);
 	debug3("Confile     = `%s'",     conf->conffile);
 	debug3("Debug       = %d",       conf->cf.slurmd_debug);
 	debug3("Epilog      = `%s'",     conf->epilog);
@@ -625,12 +631,6 @@ _process_cmdline(int ac, char **av)
 			break;
 		case 'M':
 			conf->mlock_pages = 1;
-			break;
-		case 'N':
-			conf->node_name = xstrdup(optarg);
-			break;
-		case 'P':
-			conf->port = (uint16_t)atoi(optarg);
 			break;
 		default:
 			_usage(c);
@@ -721,7 +721,7 @@ _slurmd_init()
 		/* 
 		 * Need to kill any running slurmd's here
 		 */
-		/*_kill_old_slurmd(); */
+		_kill_old_slurmd(); 
 
 		stepd_cleanup_sockets(conf->spooldir, conf->node_name);
 	}
@@ -736,6 +736,11 @@ _slurmd_init()
 	 */
 	g_slurmd_jobacct_init(conf->cf.job_acct_parameters);
 
+
+	/*
+	 * Cache the group access list
+	 */
+	init_gids_cache(conf->cf.cache_groups);
 
 	return SLURM_SUCCESS;
 }

@@ -5,7 +5,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <grondona@llnl.gov>.
- *  UCRL-CODE-2002-040.
+ *  UCRL-CODE-217948.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -115,7 +115,7 @@ launch(void *arg)
 	
 	debug("going to launch %d tasks on %d hosts", 
 	      opt.nprocs, job->step_layout->num_hosts);
-/*	debug("sending to slurmd port %d", slurm_get_slurmd_port());*/
+	debug("sending to slurmd port %d", slurm_get_slurmd_port());
 
 	msg_array_ptr = xmalloc(sizeof(launch_tasks_request_msg_t) 
 				* job->step_layout->num_hosts);
@@ -478,14 +478,15 @@ static void * _p_launch_task(void *arg)
     again:
 	if (_send_msg_rc(req) < 0) {	/* Has timeout */
 
-		if (errno != EINTR)
-			verbose("first launch error on %s: %m", 
-				job->step_layout->host[nodeid]);
-
-		if ((errno != ETIMEDOUT) 
-		    && (job->state == SRUN_JOB_LAUNCHING)
-		    && (errno != ESLURMD_INVALID_JOB_CREDENTIAL) 
-		    &&  retry--                                  ) {
+		if ((job->state == SRUN_JOB_LAUNCHING)
+		&&  (errno != ETIMEDOUT) 
+		&&  (errno != ESLURMD_INVALID_JOB_CREDENTIAL)
+		&&  (errno != ESLURMD_CREDENTIAL_REPLAYED)
+		&&  (retry--)                                ) {
+			if (errno != EINTR) {
+				verbose("launch retry on %s: %m",
+					job->step_layout->host[nodeid]);
+			}
 			sleep(1);
 			goto again;
 		}
@@ -494,7 +495,7 @@ static void * _p_launch_task(void *arg)
 			verbose("launch on %s canceled", 
 				job->step_layout->host[nodeid]);
 		else
-			error("second launch error on %s: %m", 
+			error("launch error on %s: %m", 
 			      job->step_layout->host[nodeid]);
 
 		_update_failed_node(job, nodeid);

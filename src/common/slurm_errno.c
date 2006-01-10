@@ -4,7 +4,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Jim Garlick <garlick@llnl.gov>, et. al.
- *  UCRL-CODE-2002-040.
+ *  UCRL-CODE-217948.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -228,6 +228,10 @@ static slurm_errtab_t slurm_errtab[] = {
 	  "Job step already in shared memory"	        	},
 	{ ESLURMD_JOB_NOTRUNNING,
 	  "Job step not running"	        	        },
+ 	{ ESLURMD_STEP_SUSPENDED,
+	  "Job step is suspended"                               },
+ 	{ ESLURMD_STEP_NOTSUSPENDED,
+	  "Job step is not currently suspended"                 },
 
 	/* slurmd errors in user batch job */
 	{ ESCRIPT_CHDIR_FAILED,

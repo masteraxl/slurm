@@ -4,11 +4,11 @@
  *
  *  $Id$
  *****************************************************************************
- *  Copyright (C) 2002 The Regents of the University of California.
+ *  Copyright (C) 2002-5 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
- *  Written by Morris Jette <jette@llnl.gov>, et. al.
+ *  Written by Morris Jette <jette1@llnl.gov>, et. al.
  *  Derived from pdsh written by Jim Garlick <garlick1@llnl.gov>
- *  UCRL-CODE-2002-040.
+ *  UCRL-CODE-217948.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -313,6 +313,7 @@ static int _valid_agent_arg(agent_arg_t *agent_arg_ptr)
 		(agent_arg_ptr->msg_type == REQUEST_PING) || 
 		(agent_arg_ptr->msg_type == REQUEST_BATCH_JOB_LAUNCH) || 
 		(agent_arg_ptr->msg_type == REQUEST_SHUTDOWN) || 
+		(agent_arg_ptr->msg_type == REQUEST_SUSPEND) || 
 		(agent_arg_ptr->msg_type == REQUEST_RECONFIGURE) ||
 	        (agent_arg_ptr->msg_type == RESPONSE_RESOURCE_ALLOCATION) ||	
 		(agent_arg_ptr->msg_type == REQUEST_NODE_REGISTRATION_STATUS));

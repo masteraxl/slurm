@@ -5,7 +5,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <grondona@llnl.gov>.
- *  UCRL-CODE-2002-040.
+ *  UCRL-CODE-217948.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -213,7 +213,8 @@ _get_job_info(srun_step_t *s)
 		goto done;
 	}
 
-	if (job->job_state != JOB_RUNNING) {
+	if ((job->job_state != JOB_RUNNING)
+	&&  (job->job_state != JOB_SUSPENDED)) {
 		error ("Cannot attach to job %d in state %s",
 		       job->job_id, job_state_string(job->job_state));
 		goto done;

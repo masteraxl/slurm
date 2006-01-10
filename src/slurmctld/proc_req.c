@@ -6,7 +6,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette@llnl.gov>, Kevin Tew <tew1@llnl.gov>, et. al.
- *  UCRL-CODE-2002-040.
+ *  UCRL-CODE-217948.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -283,6 +283,7 @@ void _fill_ctld_conf(slurm_ctl_conf_t * conf_ptr)
 	conf_ptr->backup_addr         = xstrdup(slurmctld_conf.backup_addr);
 	conf_ptr->backup_controller   = xstrdup(slurmctld_conf.
 					backup_controller);
+	conf_ptr->cache_groups        = slurmctld_conf.cache_groups;
 	conf_ptr->checkpoint_type     = xstrdup(slurmctld_conf.checkpoint_type);
 	conf_ptr->control_addr        = xstrdup(slurmctld_conf.control_addr);
 	conf_ptr->control_machine     = xstrdup(slurmctld_conf.
@@ -336,7 +337,7 @@ void _fill_ctld_conf(slurm_ctl_conf_t * conf_ptr)
 					slurmd_logfile);
 	conf_ptr->slurmd_pidfile      = xstrdup(slurmctld_conf.
 					slurmd_pidfile);
-/* 	conf_ptr->slurmd_port         = slurmctld_conf.slurmd_port; */
+	conf_ptr->slurmd_port         = slurmctld_conf.slurmd_port;
 	conf_ptr->slurmd_spooldir     = xstrdup(slurmctld_conf.
 					slurmd_spooldir);
 	conf_ptr->slurmd_timeout      = slurmctld_conf.slurmd_timeout;
@@ -1264,17 +1265,10 @@ static void _slurm_rpc_old_job_alloc(slurm_msg_t * msg)
 
 	/* do RPC call */
 	uid = g_slurm_auth_get_uid(msg->cred);
-	if ( !_is_super_user(uid) ) {
-		error_code = ESLURM_USER_ID_MISSING;
-		error("Security violation, RESOURCE_ALLOCATE from uid=%u",
-		      (unsigned int) uid);
-	}
-	if (error_code == SLURM_SUCCESS) {
-		do_unlock = true;
-		lock_slurmctld(job_read_lock);
-		error_code = old_job_info(uid, job_desc_msg->job_id, &job_ptr);
-		END_TIMER;
-	}
+	do_unlock = true;
+	lock_slurmctld(job_read_lock);
+	error_code = old_job_info(uid, job_desc_msg->job_id, &job_ptr);
+	END_TIMER;
 
 	/* return result */
 	if (error_code || (job_ptr == NULL)) {
@@ -1866,9 +1860,9 @@ inline static void _slurm_rpc_suspend(slurm_msg_t * msg)
 	int error_code = SLURM_SUCCESS;
 	DEF_TIMERS;
 	suspend_msg_t *sus_ptr = (suspend_msg_t *) msg->data;
-	/* Locks: write job */
+	/* Locks: write job and node */
 	slurmctld_lock_t job_write_lock = {
-		NO_LOCK, WRITE_LOCK, NO_LOCK, NO_LOCK };
+		NO_LOCK, WRITE_LOCK, WRITE_LOCK, NO_LOCK };
 	uid_t uid;
 	char *op;
 
@@ -1883,7 +1877,7 @@ inline static void _slurm_rpc_suspend(slurm_msg_t * msg)
 		default:
 			op = "unknown";
 	}
-	info("Processing RPC: REQUEST_SUSPEND %s", op);
+	info("Processing RPC: REQUEST_SUSPEND(%s)", op);
 	uid = g_slurm_auth_get_uid(msg->cred);
 
 	lock_slurmctld(job_write_lock);
@@ -1892,12 +1886,14 @@ inline static void _slurm_rpc_suspend(slurm_msg_t * msg)
 	END_TIMER;
 
 	if (error_code) {
-		info("_slurm_rpc_suspend %s %u: %s", op,
+		info("_slurm_rpc_suspend(%s) %u: %s", op,
 			sus_ptr->job_id, slurm_strerror(error_code));
 	} else {
-		info("_slurm_rpc_suspend %s for %u %s", op,
+		info("_slurm_rpc_suspend(%s) for %u %s", op,
 			sus_ptr->job_id, TIME_STR);
-		/* NOTE: This function provides it own locks */
+		/* Functions below provide their own locking */
+		if (sus_ptr->op == SUSPEND_JOB)
+			(void) schedule();
 		schedule_job_save();
 	}
 }
