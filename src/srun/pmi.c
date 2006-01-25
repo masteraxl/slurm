@@ -116,6 +116,10 @@ static void *_msg_thread(void *x)
 	struct msg_arg *msg_arg_ptr = (struct msg_arg *) x;
 	int rc, success = 0, task_fd;
 	slurm_msg_t msg_send, msg_rcv;
+	msg_send.forward.cnt = 0;
+	msg_send.ret_list = NULL;
+	msg_rcv.forward.cnt = 0;
+	msg_rcv.ret_list = NULL;
 
 	debug2("KVS_Barrier msg to %s:%u",
 		msg_arg_ptr->bar_ptr->hostname,
@@ -194,7 +198,8 @@ static void *_agent(void *x)
 			msg_args->bar_ptr = &args->barrier_xmit_ptr[j];
 			msg_args->kvs_ptr = &kvs_set;
 			slurm_attr_init(&attr);
-			pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+			pthread_attr_setdetachstate(&attr, 
+						    PTHREAD_CREATE_DETACHED);
 			if (pthread_create(&msg_id, &attr, _msg_thread, 
 					(void *) msg_args)) {
 				fatal("pthread_create: %m");

@@ -273,7 +273,7 @@ static int _signal_batch_script_step(
 	msg.data = &rpc;
 	msg.address = allocation->node_addr[0];
 
-	slurm_send_recv_rc_msg(&msg, &rc, 10);
+	slurm_send_recv_rc_msg_only_one(&msg, &rc, 10);
 	
 	return rc;
 }
@@ -347,7 +347,8 @@ _thr_send_recv_rc_msg(void *args)
 	pthread_cond_t *cond = params->cond;
 	int *active = params->active;
 
-	slurm_send_recv_rc_msg(params->msg, params->rc, params->timeout);
+	slurm_send_recv_rc_msg_only_one(params->msg, 
+					params->rc, params->timeout);
 
 	xfree(args);
 	slurm_mutex_lock(lock);
