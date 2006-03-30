@@ -60,7 +60,7 @@
 
 #ifdef HAVE_BG_FILES
 static int  _block_is_deallocating(bg_record_t *bg_record);
-static void _drain_as_needed(char *node_list, char *reason);
+static void _drain_as_needed(bg_record_t *bg_record, char *reason);
 
 static int _block_is_deallocating(bg_record_t *bg_record)
 {
@@ -128,13 +128,24 @@ static int _block_is_deallocating(bg_record_t *bg_record)
  *   else drain all of the nodes
  * This function lets us drain an entire bgblock only if 
  * we have not already identified a specific node as bad. */
-static void _drain_as_needed(char *node_list, char *reason)
+static void _drain_as_needed(bg_record_t *bg_record, char *reason)
 {
 	bool needed = true;
 	hostlist_t hl;
-	char *host;
+	char *host = NULL;
 
-	/* scan node list */
+	/* small blocks */
+	if(bg_record->cpus_per_bp != procs_per_node) {
+		while(bg_record->job_running > -1) 
+			sleep(1);
+		slurm_mutex_lock(&block_state_mutex);
+		bg_record->job_running = -3;
+		bg_record->state = RM_PARTITION_ERROR;
+		slurm_mutex_unlock(&block_state_mutex);
+		return;
+	}
+
+	/* at least one base partition */
 	hl = hostlist_create(node_list);
 	if (!hl) {
 		slurm_drain_nodes(node_list, reason);
@@ -143,8 +154,10 @@ static void _drain_as_needed(char *node_list, char *reason)
 	while ((host = hostlist_shift(hl))) {
 		if (node_already_down(host)) {
 			needed = false;
+			free(host);
 			break;
 		}
+		free(host);
 	}
 	hostlist_destroy(hl);
 
@@ -362,7 +375,8 @@ extern int update_block_list()
 			updated = -1;
 			slurm_mutex_unlock(&block_state_mutex);
 			break;
-		} else if(bg_record->state != state) {
+		} else if(bg_record->job_running != -3 //plugin set error
+			  && bg_record->state != state) {
 			debug("state of Partition %s was %d and now is %d",
 			      bg_record->bg_block_id, 
 			      bg_record->state, 
@@ -417,10 +431,15 @@ extern int update_block_list()
 					      bg_record->boot_count);
 					bg_record->boot_count++;
 				} else {
-					error("Couldn't boot Partition %s "
+					error("Couldn't boot Block %s "
 					      "for user %s",
 					      bg_record->bg_block_id, 
 					      bg_record->target_name);
+					slurm_mutex_unlock(&block_state_mutex);
+					if(bg_record->job_running > -1)
+						slurm_fail_job(
+							bg_record->
+							job_running);
 					now = time(NULL);
 					time_ptr = localtime(&now);
 					strftime(reason, sizeof(reason),
@@ -428,8 +447,8 @@ extern int update_block_list()
 						"Boot fails "
 						"[SLURM@%b %d %H:%M]",
 						time_ptr);
-					_drain_as_needed(bg_record->nodes,
-						reason);
+					_drain_as_needed(bg_record, reason);
+					slurm_mutex_lock(&block_state_mutex);
 					bg_record->boot_state = 0;
 					bg_record->boot_count = 0;
 				}
