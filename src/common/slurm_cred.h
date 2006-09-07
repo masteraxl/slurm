@@ -133,8 +133,6 @@ typedef struct {
 	char    *hostlist;
         uint32_t ntask_cnt;
         uint32_t *ntask;
-        uint32_t alloc_lps_cnt;
-        uint32_t *alloc_lps;
 } slurm_cred_arg_t;
 
 /*

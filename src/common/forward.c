@@ -421,7 +421,7 @@ extern int forward_msg_to_next(forward_msg_t *fwd_msg, int err)
 
 /*
  * forward_set - divide a mesage up into components for forwarding
- * IN: forward     - forward_t *   - struct to store forward info
+ * OUT: forward    - forward_t *   - struct to store forward info
  * IN: span        - int           - count of forwards to do
  * IN/OUT: pos     - int *         - position in the original messages addr 
  *                                   structure
@@ -484,7 +484,7 @@ extern int forward_set(forward_t *forward,
 /*
  * forward_set_launch - add to the message possible forwards to go to during 
  *                      a job launch
- * IN: forward     - forward_t *           - struct to store forward info
+ * OUT: forward     - forward_t *          - struct to store forward info
  * IN: span        - int                   - count of forwards to do
  * IN: pos         - int *                 - position in the node list
  * IN: total       - int                   - total count of nodes in message
@@ -492,7 +492,7 @@ extern int forward_set(forward_t *forward,
  * IN: itr         - hostlist_iterator_t   - count into host list of hosts to 
  *                                           send messages to 
  * IN: timeout     - int32_t               - timeout if any to wait for 
- *                                           message responses
+ *                                           message responses in milliseconds
  * RET: SLURM_SUCCESS - int
  */
 extern int forward_set_launch(forward_t *forward, 
@@ -546,7 +546,7 @@ extern void forward_wait(slurm_msg_t * msg)
 	ListIterator itr;
 	
 	/* wait for all the other messages on the tree under us */
-	if(msg->forward_struct_init == FORWARD_INIT && msg->forward_struct) {
+	if(msg->forward_struct) {
 		debug2("looking for %d", msg->forward_struct->fwd_cnt);
 		slurm_mutex_lock(&msg->forward_struct->forward_mutex);
 		count = 0;

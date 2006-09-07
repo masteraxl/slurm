@@ -234,7 +234,6 @@ int setup_env(env_t *env)
 {
 	int rc = SLURM_SUCCESS;
 	char *dist = NULL;
-	char *lllp_dist = NULL;
 	char *bgl_part_id = NULL;
 	char addrbuf[INET_ADDRSTRLEN];
 
@@ -270,182 +269,133 @@ int setup_env(env_t *env)
 	if ((int)env->distribution >= 0) {
 		switch(env->distribution) {
 		case SLURM_DIST_CYCLIC:
-			dist      = "cyclic";
-			lllp_dist = "";
+			dist = "cyclic";
 			break;
 		case SLURM_DIST_BLOCK:
-			dist      = "block";
-			lllp_dist = "";
-			break;
-		case SLURM_DIST_PLANE:
-			dist      = "plane";
-			lllp_dist = "plane";
+			dist = "block";
 			break;
 		case SLURM_DIST_ARBITRARY:
-			dist      = "arbitrary";
-			lllp_dist = "";
-			break;
-		case SLURM_DIST_CYCLIC_CYCLIC:
-			dist      = "cyclic";
-			lllp_dist = "cyclic";
-			break;
-		case SLURM_DIST_CYCLIC_BLOCK:
-			dist      = "cyclic";
-			lllp_dist = "block";
-			break;
-		case SLURM_DIST_BLOCK_CYCLIC:
-			dist      = "block";
-			lllp_dist = "cyclic";
-			break;
-		case SLURM_DIST_BLOCK_BLOCK:
-			dist      = "block";
-			lllp_dist = "block";
+			dist = "arbitrary";
 			break;
 		default:
 			error("unknown dist, type %d", env->distribution);
-			dist      = "unknown";
-			lllp_dist = "unknown";
-			break;
+			dist = "unknown";
 		}
-
+		
 		if (setenvf(&env->env, "SLURM_DISTRIBUTION", "%s", dist)) {
 			error("Can't set SLURM_DISTRIBUTION env variable");
 			rc = SLURM_FAILURE;
 		}
-
-		if (setenvf(&env->env, "SLURM_DIST_PLANESIZE", "%d", 
-			    env->plane_size)) {
-		  error("Can't set SLURM_DIST_PLANESIZE env variable");
-		  rc = SLURM_FAILURE;
-		}
-
-		if (setenvf(&env->env, "SLURM_DIST_LLLP", "%s", lllp_dist)) {
-			error("Can't set SLURM_DIST_LLLP env variable");
-			rc = SLURM_FAILURE;
-		}
-	}
+	} 
 	
 	if (env->cpu_bind_type) {
-		unsetenvp(env->env, "SLURM_CPU_BIND_VERBOSE");
-		unsetenvp(env->env, "SLURM_CPU_BIND_TYPE");
-		unsetenvp(env->env, "SLURM_CPU_BIND_LIST");
-		unsetenvp(env->env, "SLURM_CPU_BIND");
-
-		char *str_verbose = xstrdup ("");
+		int setstat = 0;
+		unsetenvp(env->env, "SLURM_CPU_BIND");	/* don't propagate SLURM_CPU_BIND */
 		if (env->cpu_bind_type & CPU_BIND_VERBOSE) {
-			xstrcat(str_verbose, "verbose");
+			setstat |= setenvf(&env->env, "SLURM_CPU_BIND_VERBOSE", "verbose");
 		} else {
-			xstrcat(str_verbose, "quiet");
+			setstat |= setenvf(&env->env, "SLURM_CPU_BIND_VERBOSE", "quiet");
 		}
-		if (setenvf(&env->env, "SLURM_CPU_BIND_VERBOSE", str_verbose)) {
+		if (setstat) {
 			error("Unable to set SLURM_CPU_BIND_VERBOSE");
 			rc = SLURM_FAILURE;
 		}
 
-		char *str_bind_type = xstrdup ("");
-		if (env->cpu_bind_type & CPU_BIND_TO_THREADS) {
-			xstrcat(str_bind_type, "threads,");
-		} else if (env->cpu_bind_type & CPU_BIND_TO_CORES) {
-			xstrcat(str_bind_type, "cores,");
-		} else if (env->cpu_bind_type & CPU_BIND_TO_SOCKETS) {
-			xstrcat(str_bind_type, "sockets,");
-		}
+		setstat = 0;
 		if (env->cpu_bind_type & CPU_BIND_NONE) {
-			xstrcat(str_bind_type, "none");
+			setstat |= setenvf(&env->env, "SLURM_CPU_BIND_TYPE", "none");
 		} else if (env->cpu_bind_type & CPU_BIND_RANK) {
-			xstrcat(str_bind_type, "rank");
-		} else if (env->cpu_bind_type & CPU_BIND_MAP) {
-			xstrcat(str_bind_type, "map_cpu:");
-		} else if (env->cpu_bind_type & CPU_BIND_MASK) {
-			xstrcat(str_bind_type, "mask_cpu:");
+			setstat |= setenvf(&env->env, "SLURM_CPU_BIND_TYPE", "rank");
+		} else if (env->cpu_bind_type & CPU_BIND_MAPCPU) {
+			setstat |= setenvf(&env->env, "SLURM_CPU_BIND_TYPE", "map_cpu:");
+		} else if (env->cpu_bind_type & CPU_BIND_MASKCPU) {
+			setstat |= setenvf(&env->env, "SLURM_CPU_BIND_TYPE", "mask_cpu:");
+		} else if (env->cpu_bind_type & (~CPU_BIND_VERBOSE)) {
+			setstat |= setenvf(&env->env, "SLURM_CPU_BIND_TYPE", "unknown");
+		} else {
+			setstat |= setenvf(&env->env, "SLURM_CPU_BIND_TYPE", "");
 		}
-		int len = strlen(str_bind_type);
-		if (len) {		/* remove a possible trailing ',' */
-		    	if (str_bind_type[len-1] == ',') {
-			    	str_bind_type[len-1] = '\0';
-			}
-		}
-		if (setenvf(&env->env, "SLURM_CPU_BIND_TYPE", str_bind_type)) {
+		if (setstat) {
 			error("Unable to set SLURM_CPU_BIND_TYPE");
 			rc = SLURM_FAILURE;
 		}
 
-		char *str_bind_list = xstrdup ("");
+		setstat = 0;
 		if (env->cpu_bind) {
-			xstrcat(str_bind_list, env->cpu_bind);
+			setstat |= setenvf(&env->env, "SLURM_CPU_BIND_LIST", env->cpu_bind);
+		} else {
+			setstat |= setenvf(&env->env, "SLURM_CPU_BIND_LIST", "");
 		}
-		if (setenvf(&env->env, "SLURM_CPU_BIND_LIST", str_bind_list)) {
+		if (setenvf(&env->env, "SLURM_CPU_BIND_LIST", env->cpu_bind)) {
 			error("Unable to set SLURM_CPU_BIND_LIST");
 			rc = SLURM_FAILURE;
 		}
-
-		char *str_bind = xstrdup ("");
-		xstrcat(str_bind, str_verbose);
-		if (str_bind[0]) {		/* add ',' if str_verbose */
-			xstrcatchar(str_bind, ',');
-		}
-		xstrcat(str_bind, str_bind_type);
-		xstrcat(str_bind, str_bind_list);
-
-		if (setenvf(&env->env, "SLURM_CPU_BIND", str_bind)) {
-			error("Unable to set SLURM_CPU_BIND");
+	} else {
+		int setstat = 0;
+		unsetenvp(env->env, "SLURM_CPU_BIND");	/* don't propagate SLURM_CPU_BIND */
+		/* set SLURM_CPU_BIND_* env vars to defaults */
+		setstat |= setenvf(&env->env, "SLURM_CPU_BIND_VERBOSE", "quiet");
+		setstat |= setenvf(&env->env, "SLURM_CPU_BIND_TYPE", "");
+		setstat |= setenvf(&env->env, "SLURM_CPU_BIND_LIST", "");
+		if (setstat) {
+			error("Unable to set SLURM_CPU_BIND_*");
 			rc = SLURM_FAILURE;
 		}
 	}
 
 	if (env->mem_bind_type) {
-		unsetenvp(env->env, "SLURM_MEM_BIND_VERBOSE");
-		unsetenvp(env->env, "SLURM_MEM_BIND_TYPE");
-		unsetenvp(env->env, "SLURM_MEM_BIND_LIST");
-		unsetenvp(env->env, "SLURM_MEM_BIND");
-
-		char *str_verbose = xstrdup ("");
+		unsetenvp(env->env, "SLURM_MEM_BIND");	/* don't propagate SLURM_MEM_BIND */
+		int setstat = 0;
 		if (env->mem_bind_type & MEM_BIND_VERBOSE) {
-			xstrcat(str_verbose, "verbose");
+			setstat |= setenvf(&env->env, "SLURM_MEM_BIND_VERBOSE", "verbose");
 		} else {
-			xstrcat(str_verbose, "quiet");
+			setstat |= setenvf(&env->env, "SLURM_MEM_BIND_VERBOSE", "quiet");
 		}
-		if (setenvf(&env->env, "SLURM_MEM_BIND_VERBOSE", str_verbose)) {
+		if (setstat) {
 			error("Unable to set SLURM_MEM_BIND_VERBOSE");
 			rc = SLURM_FAILURE;
 		}
  
-		char *str_bind_type = xstrdup ("");
+		setstat = 0;
 		if (env->mem_bind_type & MEM_BIND_NONE) {
-			xstrcat(str_bind_type, "none");
+			setstat |= setenvf(&env->env, "SLURM_MEM_BIND_TYPE", "none");
 		} else if (env->mem_bind_type & MEM_BIND_RANK) {
-			xstrcat(str_bind_type, "rank");
-		} else if (env->mem_bind_type & MEM_BIND_MAP) {
-			xstrcat(str_bind_type, "map_mem:");
-		} else if (env->mem_bind_type & MEM_BIND_MASK) {
-			xstrcat(str_bind_type, "mask_mem:");
-		} else if (env->mem_bind_type & MEM_BIND_LOCAL) {
-			xstrcat(str_bind_type, "local");
+			setstat |= setenvf(&env->env, "SLURM_MEM_BIND_TYPE", "rank");
+		} else if (env->mem_bind_type & MEM_BIND_MAPCPU) {
+			setstat |= setenvf(&env->env, "SLURM_MEM_BIND_TYPE", "map_cpu:");
+		} else if (env->mem_bind_type & MEM_BIND_MASKCPU) {
+			setstat |= setenvf(&env->env, "SLURM_MEM_BIND_TYPE", "mask_cpu:");
+		} else if (env->mem_bind_type & (~MEM_BIND_VERBOSE)) {
+			setstat |= setenvf(&env->env, "SLURM_MEM_BIND_TYPE", "unknown");
+		} else {
+			setstat |= setenvf(&env->env, "SLURM_MEM_BIND_TYPE", "");
 		}
-		if (setenvf(&env->env, "SLURM_MEM_BIND_TYPE", str_bind_type)) {
+		if (setstat) {
 			error("Unable to set SLURM_MEM_BIND_TYPE");
 			rc = SLURM_FAILURE;
 		}
 
-		char *str_bind_list = xstrdup ("");
+		setstat = 0;
 		if (env->mem_bind) {
-			xstrcat(str_bind_list, env->mem_bind);
+			setstat |= setenvf(&env->env, "SLURM_MEM_BIND_LIST",
+					   env->mem_bind);
+		} else {
+			setstat |= setenvf(&env->env, "SLURM_MEM_BIND_LIST",
+					   "");
 		}
-		if (setenvf(&env->env, "SLURM_MEM_BIND_LIST", str_bind_list)) {
+		if (setstat) {
 			error("Unable to set SLURM_MEM_BIND_LIST");
 			rc = SLURM_FAILURE;
 		}
-
-		char *str_bind = xstrdup ("");
-		xstrcat(str_bind, str_verbose);
-		if (str_bind[0]) {		/* add ',' if str_verbose */
-			xstrcatchar(str_bind, ',');
-		}
-		xstrcat(str_bind, str_bind_type);
-		xstrcat(str_bind, str_bind_list);
-
-		if (setenvf(&env->env, "SLURM_MEM_BIND", str_bind)) {
-			error("Unable to set SLURM_MEM_BIND");
+	} else {
+		unsetenvp(env->env, "SLURM_MEM_BIND");  /* don't propagate SLURM_MEM_BIND */
+		/* set SLURM_MEM_BIND_* env vars to defaults */
+		int setstat = 0;
+		setstat |= setenvf(&env->env, "SLURM_MEM_BIND_VERBOSE", "quiet");
+		setstat |= setenvf(&env->env, "SLURM_MEM_BIND_TYPE", "");
+		setstat |= setenvf(&env->env, "SLURM_MEM_BIND_LIST", "");
+		if (setstat) {
+			error("Unable to set SLURM_MEM_BIND_*");
 			rc = SLURM_FAILURE;
 		}
 	}

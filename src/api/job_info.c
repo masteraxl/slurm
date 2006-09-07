@@ -257,9 +257,9 @@ slurm_sprint_job_info ( job_info_t * job_ptr, int one_liner )
 		xstrcat(out, "\n   ");
 
 	/****** Line 8 ******/
-	convert_num_unit((float)job_ptr->job_min_procs, tmp1, UNIT_NONE);
-	convert_num_unit((float)job_ptr->job_min_memory, tmp2, UNIT_NONE);
-	convert_num_unit((float)job_ptr->job_min_tmp_disk, tmp3, UNIT_NONE);
+	convert_num_unit((float)job_ptr->min_procs, tmp1, UNIT_NONE);
+	convert_num_unit((float)job_ptr->min_memory, tmp2, UNIT_NONE);
+	convert_num_unit((float)job_ptr->min_tmp_disk, tmp3, UNIT_NONE);
 	snprintf(tmp_line, sizeof(tmp_line), 
 		"MinProcs=%s MinMemory=%s Features=%s MinTmpDisk=%s", 
 		tmp1, tmp2, job_ptr->features, tmp3);
@@ -408,10 +408,8 @@ slurm_pid2jobid (pid_t job_pid, uint32_t *jobid)
 	job_id_request_msg_t req;
 	List ret_list;
 
-	memset(&req_msg, 0, sizeof(slurm_msg_t));
-	slurm_init_slurm_msg(&req_msg, NULL);
-	memset(&resp_msg, 0, sizeof(slurm_msg_t));
-	slurm_init_slurm_msg(&resp_msg, NULL);
+	slurm_msg_t_init(&req_msg);
+	slurm_msg_t_init(&resp_msg);
 
 	/*
 	 *  Set request message address to slurmd on localhost

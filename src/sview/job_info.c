@@ -36,6 +36,7 @@ DEF_TIMERS;
 
 enum { 
 	SORTID_POS = POS_LOC,
+	SORTID_ACTION,
 	SORTID_JOBID, 
 	SORTID_ALLOC, 
 	SORTID_PARTITION, 
@@ -82,6 +83,8 @@ enum {
 
 static display_data_t display_data_job[] = {
 	{G_TYPE_INT, SORTID_POS, NULL, FALSE, -1, refresh_job,
+	 create_model_job, admin_edit_job},
+	{G_TYPE_STRING, SORTID_ACTION, "Action", TRUE, 0, refresh_job,
 	 create_model_job, admin_edit_job},
 	{G_TYPE_INT, SORTID_JOBID, "JobID", TRUE, -1, refresh_job,
 	 create_model_job, admin_edit_job},
@@ -797,6 +800,29 @@ extern GtkListStore *create_model_job(int type)
 	GtkTreeIter iter;
 	
 	switch(type) {
+	case SORTID_ACTION:
+		model = gtk_list_store_new(1, G_TYPE_STRING);
+		gtk_list_store_append(model, &iter);
+		gtk_list_store_set(model, &iter,
+				   0, "cancel",
+				   -1);	
+		gtk_list_store_append(model, &iter);
+		gtk_list_store_set(model, &iter,
+				   0, "suspend",
+				   -1);	
+		gtk_list_store_append(model, &iter);
+		gtk_list_store_set(model, &iter,
+				   0, "resume",
+				   -1);			
+		gtk_list_store_append(model, &iter);
+		gtk_list_store_set(model, &iter,
+				   0, "checkpoint",
+				   -1);			
+		gtk_list_store_append(model, &iter);
+		gtk_list_store_set(model, &iter,
+				   0, "requeue",
+				   -1);			
+		break;
 	case SORTID_TIMELIMIT:
 		break;
 	case SORTID_PRIORITY:
@@ -969,27 +995,27 @@ extern void admin_edit_job(GtkCellRendererText *cell,
 			goto print_error;
 		break;
 	case SORTID_MIN_PROCS:
-		job_msg.job_min_procs = 
+		job_msg.min_procs = 
 			(uint32_t)strtol(new_text, (char **)NULL, 10);
 		temp = (char *)new_text;
 		type = "min procs";
-		if((int32_t)job_msg.job_min_procs <= 0)
+		if((int32_t)job_msg.min_procs <= 0)
 			goto print_error;
 		break;
 	case SORTID_MIN_MEM:
-		job_msg.job_min_memory = 
+		job_msg.min_memory = 
 			(uint32_t)strtol(new_text, (char **)NULL, 10);
 		temp = (char *)new_text;
 		type = "min memory";
-		if((int32_t)job_msg.job_min_memory <= 0)
+		if((int32_t)job_msg.min_memory <= 0)
 			goto print_error;
 		break;
 	case SORTID_TMP_DISK:
-		job_msg.job_min_tmp_disk = 
+		job_msg.min_tmp_disk = 
 			(uint32_t)strtol(new_text, (char **)NULL, 10);
 		temp = (char *)new_text;
 		type = "min tmp disk";
-		if((int32_t)job_msg.job_min_tmp_disk <= 0)
+		if((int32_t)job_msg.min_tmp_disk <= 0)
 			goto print_error;
 		break;
 	case SORTID_PARTITION:

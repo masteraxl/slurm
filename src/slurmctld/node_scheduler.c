@@ -283,7 +283,7 @@ static int _match_feature(char *seek, char *available)
 
 /*
  * _pick_best_load - Given a specification of scheduling requirements, 
- *	identify the nodes which "best" satify the request.
+ *	identify the nodes which "best" satisfy the request.
  * 	"best" is defined as the least loaded nodes
  * IN job_ptr - pointer to job being scheduled
  * IN/OUT bitmap - usable nodes are set on input, nodes not required to 
@@ -411,7 +411,7 @@ _node_load_bitmaps(bitstr_t * bitmap, bitstr_t ** no_load_bit,
  *	4) If nodes _not_ shared then call select_g_job_test() to select the 
  *	   "best" of those based upon topology, else call _pick_best_load()
  *	   to pick the "best" nodes in terms of workload
- *	5) If request can't be satified now, execute select_g_job_test() 
+ *	5) If request can't be satisfied now, execute select_g_job_test() 
  *	   against the list of nodes that exist in any state (perhaps DOWN 
  *	   DRAINED or ALLOCATED) to determine if the request can
  *         ever be satified.
@@ -460,7 +460,7 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 			/* Update partially_idle_node_bitmap to reflect the
 			 * idle and partially idle nodes */
 			error_code = select_g_get_info_from_plugin (
-					SELECT_BITMAP, 
+					SELECT_CR_BITMAP, 
 					&partially_idle_node_bitmap);
 		}
 
@@ -481,7 +481,7 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 				error_code = select_g_get_extra_jobinfo (
 					NULL, 
 					job_ptr, 
-					SELECT_CPU_COUNT, 
+					SELECT_CR_CPU_COUNT, 
 					&total_cpus);
 				if (error_code != SLURM_SUCCESS) {
 					FREE_NULL_BITMAP(
@@ -733,7 +733,7 @@ _pick_best_nodes(struct node_set *node_set_ptr, int node_set_size,
 		error_code = ESLURM_REQUESTED_PART_CONFIG_UNAVAILABLE;
 	if (!runable_ever) {
 		error_code = ESLURM_REQUESTED_NODE_CONFIG_UNAVAILABLE;
-		info("_pick_best_nodes %u : job never runnable", job_ptr->job_id);
+		info("_pick_best_nodes: job never runnable");
 	}
 
 	if (error_code == SLURM_SUCCESS)
@@ -778,7 +778,7 @@ _add_node_set_info(struct node_set *node_set_ptr,
                         allocated_cpus = 0;
                         error_code = select_g_get_select_nodeinfo(
 				&node_record_table_ptr[i], 
-				SELECT_USED_CPUS, 
+				SELECT_CR_USED_CPUS, 
 				&allocated_cpus);
                         if (error_code != SLURM_SUCCESS) {
                                error(" cons_res: Invalid Node reference", 
@@ -874,7 +874,7 @@ extern int select_nodes(struct job_record *job_ptr, bool test_only)
 		error_code = _nodes_in_sets(job_ptr->details->req_node_bitmap, 
 					    node_set_ptr, node_set_size);
 		if (error_code) {
-			info("No nodes satify requirements for JobId=%u",
+			info("No nodes satisfy requirements for JobId=%u",
 			     job_ptr->job_id);
 			goto cleanup;
 		}
@@ -1023,19 +1023,12 @@ static int _build_node_list(struct job_record *job_ptr,
 		if (tmp_feature == 0)
 			continue;
 
-		if ((detail_ptr->min_sockets      > config_ptr->sockets    ) || 
-		    (detail_ptr->min_cores        > config_ptr->cores      ) || 
-		    (detail_ptr->min_threads      > config_ptr->threads    ) || 
-		    (detail_ptr->job_min_procs    > config_ptr->cpus       ) ||
-		    (detail_ptr->job_min_sockets  > config_ptr->sockets    ) || 
-		    (detail_ptr->job_min_cores    > config_ptr->cores      ) || 
-		    (detail_ptr->job_min_threads  > config_ptr->threads    ) || 
-		    (detail_ptr->job_min_memory   > config_ptr->real_memory) || 
-		    (detail_ptr->job_min_tmp_disk > config_ptr->tmp_disk))
+		if ((detail_ptr->min_procs  > config_ptr->cpus       ) || 
+		    (detail_ptr->min_memory > config_ptr->real_memory) || 
+		    (detail_ptr->min_tmp_disk > config_ptr->tmp_disk))
 			config_filter = 1;
 		else
 			config_filter = 0;
-
 
 		/* since nodes can register with more resources than defined */
 		/* in the configuration, we want to use those higher values */
@@ -1112,15 +1105,9 @@ static void _filter_nodes_in_set(struct node_set *node_set_ptr,
 			if (bit_test(node_set_ptr->my_bitmap, i) == 0)
 				continue;
 			node_con = node_record_table_ptr[i].config_ptr;
-			if ((job_con->min_sockets      <= node_con->sockets) &&
-			    (job_con->min_cores        <= node_con->cores)   &&
-			    (job_con->min_threads      <= node_con->threads) &&
-			    (job_con->job_min_procs    <= node_con->cpus)    &&
-			    (job_con->job_min_sockets  <= node_con->sockets) &&
-			    (job_con->job_min_cores    <= node_con->cores)   &&
-			    (job_con->job_min_threads  <= node_con->threads) &&
-			    (job_con->job_min_memory   <= node_con->real_memory) &&
-			    (job_con->job_min_tmp_disk <= node_con->tmp_disk))
+			if ((job_con->min_procs    <= node_con->cpus)        &&
+			    (job_con->min_memory   <= node_con->real_memory) &&
+			    (job_con->min_tmp_disk <= node_con->tmp_disk))
 				continue;
 
 			bit_clear(node_set_ptr->my_bitmap, i);
@@ -1134,16 +1121,9 @@ static void _filter_nodes_in_set(struct node_set *node_set_ptr,
 			if (bit_test(node_set_ptr->my_bitmap, i) == 0)
 				continue;
 			node_ptr = &node_record_table_ptr[i];
-
-			if ((job_con->min_sockets      <= node_ptr->sockets) &&
-			    (job_con->min_cores        <= node_ptr->cores)   &&
-			    (job_con->min_threads      <= node_ptr->threads) &&
-			    (job_con->job_min_procs    <= node_ptr->cpus)    &&
-			    (job_con->job_min_sockets  <= node_ptr->sockets) &&
-			    (job_con->job_min_cores    <= node_ptr->cores)   &&
-			    (job_con->job_min_threads  <= node_ptr->threads) &&
-			    (job_con->job_min_memory   <= node_ptr->real_memory) &&
-			    (job_con->job_min_tmp_disk <= node_ptr->tmp_disk))
+			if ((job_con->min_procs    <= node_ptr->cpus)        &&
+			    (job_con->min_memory   <= node_ptr->real_memory) &&
+			    (job_con->min_tmp_disk <= node_ptr->tmp_disk))
 				continue;
 
 			bit_clear(node_set_ptr->my_bitmap, i);
@@ -1208,8 +1188,8 @@ extern void build_node_details(struct job_record *job_ptr)
 		job_ptr->cpus_per_node = NULL;
 		job_ptr->cpu_count_reps = NULL;
 		job_ptr->node_addr = NULL;
-                job_ptr->alloc_lps_cnt = 0;
-		xfree(job_ptr->alloc_lps);
+                job_ptr->ntask_cnt = 0;
+		xfree(job_ptr->ntask);
 		return;
 	}
 
@@ -1229,19 +1209,19 @@ extern void build_node_details(struct job_record *job_ptr)
 		(sizeof(slurm_addr) * job_ptr->node_cnt));
 	
 
-        job_ptr->alloc_lps_cnt = 0;
-        xfree(job_ptr->alloc_lps);
+        job_ptr->ntask_cnt = 0;
+        xfree(job_ptr->ntask);
         if (job_ptr->cr_enabled) {
                 cr_enabled = job_ptr->cr_enabled;
-                job_ptr->alloc_lps = xmalloc(job_ptr->node_cnt * sizeof(int));
-                job_ptr->alloc_lps_cnt = job_ptr->node_cnt;
+                job_ptr->ntask = xmalloc(job_ptr->node_cnt * sizeof(int));
+                job_ptr->ntask_cnt = job_ptr->node_cnt;
         }
 
 	while ((this_node_name = hostlist_shift(host_list))) {
 		node_ptr = find_node_record(this_node_name);
 		     		
 		if (node_ptr) {
-			int usable_lps = 0;
+			int usable_cpus = 0;
 #ifdef HAVE_BG
 			if(job_ptr->node_cnt == 1) {
 				memcpy(&job_ptr->node_addr[node_inx++],
@@ -1255,29 +1235,33 @@ extern void build_node_details(struct job_record *job_ptr)
 				goto cleanup;
 			}
 #endif
-			error_code = select_g_get_extra_jobinfo( 
-				node_ptr, job_ptr, SELECT_USABLE_CPUS, 
-				&usable_lps);
-			if (cr_enabled)
-				job_ptr->alloc_lps[cr_count++] = usable_lps;
-			if(error_code != SLURM_SUCCESS) {
-				if (cr_enabled)
-					xfree(job_ptr->alloc_lps); 
-				error("Unable to get extra jobinfo "
-				      "from JobId=%u", job_ptr->job_id);
+			if (cr_enabled) {
+				error_code = select_g_get_extra_jobinfo( 
+					node_ptr, job_ptr, 
+					SELECT_CR_USABLE_CPUS, &usable_cpus);
+				job_ptr->ntask[cr_count++] = usable_cpus;
+				if(error_code != SLURM_SUCCESS) {
+					xfree(job_ptr->ntask); 
+					error("Unable to get extra jobinfo "
+					      "from JobId=%u", 
+					      job_ptr->job_id);
+				}
+			} else if (slurmctld_conf.fast_schedule) {
+				usable_cpus = node_ptr->config_ptr->cpus;
+			} else {
+				usable_cpus = node_ptr->cpus;
 			}
 			
-			if (usable_lps <= 0)
+			if (usable_cpus <= 0)
 					goto cleanup;
 			memcpy(&job_ptr->node_addr[node_inx++],
 			       &node_ptr->slurm_addr, sizeof(slurm_addr));
-
 			if ((cpu_inx == -1) ||
 			    (job_ptr->cpus_per_node[cpu_inx] !=
-			     usable_lps)) {
+			     usable_cpus)) {
 				cpu_inx++;
 				job_ptr->cpus_per_node[cpu_inx] =
-					usable_lps;
+					usable_cpus;
 				job_ptr->cpu_count_reps[cpu_inx] = 1;
 			} else
 				job_ptr->cpu_count_reps[cpu_inx]++;
@@ -1290,13 +1274,12 @@ extern void build_node_details(struct job_record *job_ptr)
 	}
 	hostlist_destroy(host_list);
 	if (job_ptr->node_cnt != node_inx) {
-		error("SMB5 Node count mismatch for JobId=%u (%u,%u)",
+		error("Node count mismatch for JobId=%u (%u,%u)",
 		      job_ptr->job_id, job_ptr->node_cnt, node_inx);
 	}
 	job_ptr->num_cpu_groups = cpu_inx + 1;
 	if ((cr_enabled) && (error_code == SLURM_SUCCESS)) {
-                /* Update cr node structure with this job's allocated resources */
-                error_code = select_g_update_nodeinfo(job_ptr, SELECT_USED_CPUS);
+                error_code = select_g_update_nodeinfo(job_ptr, SELECT_CR_USED_CPUS);
                 if(error_code != SLURM_SUCCESS)
                       fatal("Unable to update nodeinfo JobId=%u",
                             job_ptr->job_id);

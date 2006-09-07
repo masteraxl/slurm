@@ -68,9 +68,6 @@
  **********************************************************************/
 static int _launch_tasks(slurm_step_ctx ctx,
 			 launch_tasks_request_msg_t *launch_msg);
-static client_io_t *_setup_step_client_io(slurm_step_ctx ctx,
-					  slurm_step_io_fds_t fds,
-					  bool labelio);
 /* static int _get_step_addresses(const slurm_step_ctx ctx, */
 /* 			       slurm_addr **address, int *num_addresses); */
 
@@ -175,7 +172,7 @@ int slurm_step_launch (slurm_step_ctx ctx,
 		env_array_for_step(&env,
 				   ctx->step_resp,
 				   launcher_hostname,
-				   htons(ctx->launch_state->resp_port[0]),
+				   ctx->launch_state->resp_port[0],
 				   ent->h_addr_list[0]);
 		xfree(launcher_hostname);
 	}
@@ -215,8 +212,12 @@ int slurm_step_launch (slurm_step_ctx ctx,
 	launch.cpus_allocated = ctx->step_resp->step_layout->tasks;
 	launch.global_task_ids = ctx->step_resp->step_layout->tids;
 	
-	ctx->launch_state->client_io = _setup_step_client_io(
-		ctx, params->local_fds, params->labelio);
+	ctx->launch_state->client_io =
+		client_io_handler_create(params->local_fds,
+					 ctx->step_req->num_tasks,
+					 ctx->step_req->node_count,
+					 ctx->step_resp->cred,
+					 params->labelio);
 	if (ctx->launch_state->client_io == NULL)
 		return SLURM_ERROR;
 	if (client_io_handler_start(ctx->launch_state->client_io) 
@@ -227,13 +228,13 @@ int slurm_step_launch (slurm_step_ctx ctx,
 	launch.io_port = xmalloc(sizeof(uint16_t) * launch.num_io_port);
 	for (i = 0; i < launch.num_io_port; i++) {
 		launch.io_port[i] =
-			ntohs(ctx->launch_state->client_io->listenport[i]);
+			ctx->launch_state->client_io->listenport[i];
 	}
 	
 	launch.num_resp_port = ctx->launch_state->num_resp_port;
 	launch.resp_port = xmalloc(sizeof(uint16_t) * launch.num_resp_port);
 	for (i = 0; i < launch.num_resp_port; i++) {
-		launch.resp_port[i] = ntohs(ctx->launch_state->resp_port[i]);
+		launch.resp_port[i] = ctx->launch_state->resp_port[i];
 	}
 
 	_launch_tasks(ctx, &launch);
@@ -421,7 +422,7 @@ _estimate_nports(int nclients, int cli_per_port)
 static int _msg_thr_create(struct step_launch_state *sls, int num_nodes)
 {
 	int sock = -1;
-	int port = -1;
+	short port = -1;
 	eio_obj_t *obj;
 	int i;
 
@@ -515,12 +516,12 @@ static int _message_socket_accept(eio_obj_t *obj, List objs)
 	fflush(stdout);
 
 	msg = xmalloc(sizeof(slurm_msg_t));
-	slurm_init_slurm_msg(msg, NULL);
+	slurm_msg_t_init(msg);
 
 	/* multiple jobs (easily induced via no_alloc) and highly
 	 * parallel jobs using PMI sometimes result in slow message 
 	 * responses and timeouts. Raise the default timeout for srun. */
-	timeout = slurm_get_msg_timeout() * 8;
+	timeout = slurm_get_msg_timeout() * 8000;
 again:
 	ret_list = slurm_receive_msg(fd, msg, timeout);
 	if(!ret_list || errno != SLURM_SUCCESS) {
@@ -722,6 +723,7 @@ static int _launch_tasks(slurm_step_ctx ctx,
 	int timeout;
 
 	debug("Entering _launch_tasks");
+	slurm_msg_t_init(&msg);
 	msg.msg_type = REQUEST_LAUNCH_TASKS;
 	msg.data = launch_msg;
 	buffer = slurm_pack_msg_no_header(&msg);
@@ -733,7 +735,7 @@ static int _launch_tasks(slurm_step_ctx ctx,
 	msg.buffer = buffer;
 	memcpy(&msg.address, &ctx->step_resp->step_layout->node_addr[0],
 	       sizeof(slurm_addr));
-	timeout = slurm_get_msg_timeout();
+	timeout = slurm_get_msg_timeout() * 1000;
  	forward_set_launch(&msg.forward,
 			   ctx->step_resp->step_layout->node_cnt,
 			   &zero,
@@ -779,28 +781,4 @@ static int _launch_tasks(slurm_step_ctx ctx,
 	list_iterator_destroy(ret_itr);
 	list_destroy(ret_list);
 	return SLURM_SUCCESS;
-}
-
-static client_io_t *_setup_step_client_io(slurm_step_ctx ctx,
-					  slurm_step_io_fds_t fds,
-					  bool labelio)
-{
-	int siglen;
-	char *sig;
-	client_io_t *client_io;
-
-	if (slurm_cred_get_signature(ctx->step_resp->cred, &sig, &siglen)
-	    < 0) {
-		debug("_setup_step_client_io slurm_cred_get_signature failed");
-		return NULL;
-	}
-		
-	client_io = client_io_handler_create(fds,
-					     ctx->step_req->num_tasks,
-					     ctx->step_req->node_count,
-					     sig,
-					     labelio);
-
-	/* no need to free sig, it is just a pointer into the credential */
-	return client_io;
 }

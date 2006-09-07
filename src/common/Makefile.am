@@ -71,9 +71,6 @@ libcommon_la_SOURCES = 			\
 	malloc.c malloc.h		\
 	getopt.h getopt.c getopt1.c     \
 	$(build_unsetenv_src)		\
-	slurm_selecttype_info.c 	\
-	slurm_resource_info.c 		\
-	slurm_resource_info.h		\
 	hostlist.c hostlist.h		\
 	slurm_step_layout.c slurm_step_layout.h	\
 	checkpoint.c checkpoint.h	\

@@ -72,6 +72,9 @@
 
 #include "src/common/mpi.h"
 
+/* generic getopt_long flags, integers and *not* valid characters */
+#define LONG_OPT_INFO_ONLY 0x100
+
 /*---- global variables, defined in opt.h ----*/
 opt_t opt;
 
@@ -153,6 +156,7 @@ static void argerror(const char *msg, ...)
 static void _opt_default()
 {
 	struct passwd *pw;
+	static slurm_step_io_fds_t fds = SLURM_STEP_IO_FDS_INITIALIZER;
 
 	if ((pw = getpwuid(getuid())) != NULL) {
 		strncpy(opt.user, pw->pw_name, MAX_USERNAME);
@@ -164,17 +168,19 @@ static void _opt_default()
 
 	opt.progname = NULL;
 
-	opt.jobid    = NO_VAL;
+	opt.jobid = NO_VAL;
 	opt.jobid_set = false;
 
 	opt.quiet = 0;
 	opt.verbose = 0;
 
-	opt.euid	    = (uid_t) -1;
-	opt.egid	    = (gid_t) -1;
+	opt.euid = (uid_t) -1;
+	opt.egid = (gid_t) -1;
 	
+	opt.labelio = false;
 	opt.ctrl_comm_ifhn  = xshort_hostname();
-
+	memcpy(&opt.fds, &fds, sizeof(fds));
+	opt.info_only = false;
 }
 
 /*---[ env var processing ]-----------------------------------------------*/
@@ -238,14 +244,16 @@ void set_options(const int argc, char **argv)
 {
 	int opt_char, option_index = 0;
 	static struct option long_options[] = {
-		{"help",          no_argument,       0, 'h'},
-		{"quiet",         no_argument,       0, 'q'},
-		{"usage",         no_argument,       0, 'u'},
-		{"verbose",       no_argument,       0, 'v'},
-		{"version",       no_argument,       0, 'V'},
+		{"help", 	no_argument,   0, 'h'},
+		{"label",       no_argument,   0, 'l'},
+		{"quiet",       no_argument,   0, 'q'},
+		{"usage",       no_argument,   0, 'u'},
+		{"verbose",     no_argument,   0, 'v'},
+		{"version",     no_argument,   0, 'V'},
+		{"info",        no_argument,   0, LONG_OPT_INFO_ONLY},
 		{NULL}
 	};
-	char *opt_string = "+hquvV";
+	char *opt_string = "+hlquvV";
 
 	opt.progname = xbasename(argv[0]);
 	optind = 0;		
@@ -261,6 +269,9 @@ void set_options(const int argc, char **argv)
 		case 'h':
 			_help();
 			exit(0);
+		case 'l':
+			opt.labelio = true;
+			break;
 		case 'q':
 			opt.quiet++;
 			break;
@@ -273,6 +284,9 @@ void set_options(const int argc, char **argv)
 		case 'V':
 			_print_version();
 			exit(0);
+			break;
+		case LONG_OPT_INFO_ONLY:
+			opt.info_only = true;
 			break;
 		default:
 			fatal("Unrecognized command line parameter %c",

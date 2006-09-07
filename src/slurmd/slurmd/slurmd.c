@@ -70,7 +70,6 @@
 #include "src/common/macros.h"
 #include "src/common/fd.h"
 #include "src/common/forward.h"
-#include "src/common/bitstring.h"
 
 #include "src/slurmd/slurmd/slurmd.h"
 #include "src/slurmd/slurmd/req.h"
@@ -125,7 +124,6 @@ static void      _init_conf();
 static void      _destroy_conf();
 static void      _print_conf();
 static void      _read_config();
-static void      _init_lllp();
 static void 	 _kill_old_slurmd();
 static void      _reconfigure();
 static int       _restore_cred_state(slurm_cred_ctx_t ctx);
@@ -364,7 +362,7 @@ _service_connection(void *arg)
 	slurm_msg_t *msg = xmalloc(sizeof(slurm_msg_t));
 		
 	debug3("in the service_connection");
-	slurm_init_slurm_msg(msg, NULL);
+	slurm_msg_t_init(msg);
 	msg->conn_fd = con->fd;
 	/* this could change if being forwarded to */
 	memcpy(&msg->orig_addr, con->cli_addr, sizeof(slurm_addr));
@@ -406,8 +404,8 @@ send_registration_msg(uint32_t status, bool startup)
 	slurm_node_registration_status_msg_t *msg = 
 		xmalloc (sizeof (slurm_node_registration_status_msg_t));
 	
-	slurm_init_slurm_msg(&req, NULL);
-	slurm_init_slurm_msg(&resp, NULL);
+	slurm_msg_t_init(&req);
+	slurm_msg_t_init(&resp);
 	
 	msg->startup = (uint16_t) startup;
 	_fill_registration_msg(msg);
@@ -439,17 +437,14 @@ _fill_registration_msg(slurm_node_registration_status_msg_t *msg)
 	slurm_ctl_conf_t *cf;
 
 	msg->node_name = xstrdup (conf->node_name);
-	msg->cpus	= conf->cpus;
-	msg->sockets	= conf->sockets;
-	msg->cores	= conf->cores;
-	msg->threads	= conf->threads;
 
-	msg->real_memory_size     = conf->real_memory_size;
-	msg->temporary_disk_space = conf->tmp_disk_space;
-
-	debug3("Procs=%u, S=%u, C=%u, T=%u, Memory=%u, TmpDisk=%u",
-		msg->cpus, msg->sockets, msg->cores, msg->threads,
-		msg->real_memory_size, msg->temporary_disk_space);
+	get_procs(&msg->cpus);
+	get_memory(&msg->real_memory_size);
+	cf = slurm_conf_lock();
+	get_tmp_disk(&msg->temporary_disk_space, cf->tmp_fs);
+	slurm_conf_unlock();
+	debug3("Procs=%u RealMemory=%u, TmpDisk=%u", msg->cpus, 
+	       msg->real_memory_size, msg->temporary_disk_space);
 
 	if (msg->startup) {
 		if (switch_g_alloc_node_info(&msg->switch_nodeinfo))
@@ -546,10 +541,6 @@ _read_config()
 
 	conf->slurm_user_id =  cf->slurm_user_id;
 
-	conf->cr_type = cf->select_type_param;
-
-	conf->fast_schedule = cf->fast_schedule;
-
 	path_pubkey = xstrdup(cf->job_credential_public_certificate);
 
 	if (!conf->logfile)
@@ -567,46 +558,8 @@ _read_config()
 	_massage_pathname(&conf->logfile);
 
 	conf->port = slurm_conf_get_port(conf->node_name);
-	slurm_conf_get_cpus_sct(conf->node_name,
-				&conf->conf_cpus,  &conf->conf_sockets,
-				&conf->conf_cores, &conf->conf_threads);
-
-	/* store hardware properties in slurmd_config */
-	if (conf->block_map) {
-		xfree(conf->block_map);
-	}
-	if (conf->block_map_inv) {
-		xfree(conf->block_map_inv);
-	}
-	conf->block_map_size = 0;
-
-	_update_logging();
-	get_procs(&conf->actual_cpus);
-	get_cpuinfo(conf->actual_cpus,
-		   &conf->actual_sockets,
-		   &conf->actual_cores,
-		   &conf->actual_threads,
-		   &conf->block_map_size,
-		   &conf->block_map, &conf->block_map_inv);
-
-	if (conf->fast_schedule) {
-	    	conf->cpus    = conf->conf_cpus;
-		conf->sockets = conf->conf_sockets;
-		conf->cores   = conf->conf_cores;
-		conf->threads = conf->conf_threads;
-	} else {
-	    	conf->cpus    = conf->actual_cpus;
-		conf->sockets = conf->actual_sockets;
-		conf->cores   = conf->actual_cores;
-		conf->threads = conf->actual_threads;
-	}
-
-	get_memory(&conf->real_memory_size);
-
-	lllp_ctx_alloc();
 
 	cf = slurm_conf_lock();
-	get_tmp_disk(&conf->tmp_disk_space, cf->tmp_fs);
 	_free_and_set(&conf->epilog,   xstrdup(cf->epilog));
 	_free_and_set(&conf->prolog,   xstrdup(cf->prolog));
 	_free_and_set(&conf->tmpfs,    xstrdup(cf->tmp_fs));
@@ -642,7 +595,7 @@ _reconfigure(void)
 	_reconfig = 0;
 	_read_config();
 	
-	/* _update_logging(); */
+	_update_logging();
 	_print_conf();
 	
 	/*
@@ -666,48 +619,11 @@ static void
 _print_conf()
 {
 	slurm_ctl_conf_t *cf;
-	int i;
 
 	cf = slurm_conf_lock();
 	debug3("CacheGroups = %d",       cf->cache_groups);
 	debug3("Confile     = `%s'",     conf->conffile);
 	debug3("Debug       = %d",       cf->slurmd_debug);
-	debug3("CPUs        = %-2d (CF: %2d, HW: %2d)",
-					 conf->cpus,
-					 conf->conf_cpus,
-					 conf->actual_cpus);
-	debug3("Sockets     = %-2d (CF: %2d, HW: %2d)",
-					 conf->sockets,
-					 conf->conf_sockets,
-					 conf->actual_sockets);
-	debug3("Cores       = %-2d (CF: %2d, HW: %2d)",
-					 conf->cores,
-					 conf->conf_cores,
-					 conf->actual_cores);
-	debug3("Threads     = %-2d (CF: %2d, HW: %2d)",
-					 conf->threads,
-					 conf->conf_threads,
-					 conf->actual_threads);
-	char *str = xmalloc(conf->block_map_size*5);
-	str[0] = '\0';
-	for (i = 0; i < conf->block_map_size; i++) {
-		char id[10];	       
-		sprintf(id, "%d,", conf->block_map[i]);
-		strcat(str, id);
-	}
-	str[strlen(str)-1] = '\0';		/* trim trailing "," */
-	debug3("Block Map   = %s", str);
-	str[0] = '\0';
-	for (i = 0; i < conf->block_map_size; i++) {
-		char id[10];	       
-		sprintf(id, "%d,", conf->block_map_inv[i]);
-		strcat(str, id);
-	}
-	str[strlen(str)-1] = '\0';		/* trim trailing "," */
-	debug3("Inverse Map = %s", str);
-	xfree(str);
-	debug3("RealMemory  = %d",       conf->real_memory_size);
-	debug3("TmpDisk     = %d",       conf->tmp_disk_space);
 	debug3("Epilog      = `%s'",     conf->epilog);
 	debug3("Logfile     = `%s'",     cf->slurmd_logfile);
 	debug3("NodeName    = %s",       conf->node_name);
@@ -720,8 +636,6 @@ _print_conf()
 	debug3("Slurm UID   = %u",       conf->slurm_user_id);
 	debug3("TaskProlog  = `%s'",     conf->task_prolog);
 	debug3("TaskEpilog  = `%s'",     conf->task_epilog);
-	debug3("Use PAM     = %d",       conf->use_pam);
-	debug3("Fast Sched  = %d",       conf->fast_schedule);
 	slurm_conf_unlock();
 }
 
@@ -737,13 +651,6 @@ _init_conf()
 	}
 	conf->hostname    = xstrdup(host);
 	conf->node_name   = NULL;
-	conf->sockets     = 0;
-	conf->cores       = 0;
-	conf->threads     = 0;
-	conf->lllp_reserved = NULL;
-	conf->block_map_size = 0;
-	conf->block_map   = NULL;
-	conf->block_map_inv = NULL;
 	conf->conffile    = NULL;
 	conf->epilog      = NULL;
 	conf->logfile     = NULL;
@@ -751,7 +658,6 @@ _init_conf()
 	conf->prolog      = NULL;
 	conf->task_prolog = NULL;
 	conf->task_epilog = NULL;
-
 	conf->port        =  0;
 	conf->daemonize   =  1;
 	conf->lfd         = -1;
@@ -762,7 +668,6 @@ _init_conf()
 	conf->pidfile     = xstrdup(DEFAULT_SLURMD_PIDFILE);
 	conf->spooldir	  = xstrdup(DEFAULT_SPOOLDIR);
 	conf->use_pam	  =  0;
-	conf->fast_schedule = 0;
 
 	slurm_mutex_init(&conf->config_mutex);
 	return;
@@ -786,7 +691,6 @@ _destroy_conf()
 		xfree(conf->tmpfs);
 		slurm_mutex_destroy(&conf->config_mutex);
 		slurm_cred_ctx_destroy(conf->vctx);
-		lllp_ctx_destroy();
 		xfree(conf);
 	}
 	return;
@@ -883,7 +787,7 @@ _slurmd_init()
 	 * print current configuration (if in debug mode), and 
 	 * load appropriate plugin(s).
 	 */
-	/* _update_logging(); */
+	_update_logging();
 	_print_conf();
 	if (slurm_proctrack_init() != SLURM_SUCCESS)
 		return SLURM_FAILURE;

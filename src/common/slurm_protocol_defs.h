@@ -56,7 +56,6 @@
 #include <slurm/slurm.h>
 #include <sys/wait.h>
 
-#include "src/common/bitstring.h"
 #include "src/common/list.h"
 #include "src/common/macros.h"
 #include "src/common/slurm_protocol_common.h"
@@ -269,7 +268,6 @@ typedef struct slurm_msg {
 	uint32_t  srun_node_id;	/* node id of this node (relative to job) */
 	forward_t forward;
 	forward_struct_t *forward_struct;
-	uint16_t   forward_struct_init;
 	slurm_addr orig_addr;       
 	List ret_list;
 	Buf buffer;
@@ -399,10 +397,6 @@ typedef struct launch_tasks_request_msg {
 	uint16_t  argc;
 	uint16_t  multi_prog;
 	uint32_t  *cpus_allocated;
-	uint32_t  max_sockets;
-	uint32_t  max_cores;
-	uint32_t  max_threads;
-	uint32_t  cpus_per_task;
 	char    **env;
 	char    **argv;
 	char     *cwd;
@@ -415,13 +409,10 @@ typedef struct launch_tasks_request_msg {
 	uint16_t  num_io_port;
 	uint16_t  *io_port;  /* array of available client IO listen ports */
 
-        /* Distribution at the lowest level of logical processor (lllp) */
-	task_dist_states_t task_dist;  /* --distribution=, -m dist	*/
-	uint32_t plane_size; /* lllp distribution -> plane_size for
-			      * when -m plane=<# of lllp per plane> */      
 	uint16_t  task_flags;
 	uint32_t **global_task_ids;
 	slurm_addr orig_addr;	  /* where message really came from for io */ 
+	
 	/* stdout/err/in per task filenames */
 	char     *ofname;
 	char     *efname;
@@ -630,9 +621,6 @@ typedef struct slurm_node_registration_status_msg {
 	time_t timestamp;
 	char *node_name;
 	uint32_t cpus;
-	uint32_t sockets;
-	uint32_t cores;
-	uint32_t threads;
 	uint32_t real_memory_size;
 	uint32_t temporary_disk_space;
 	uint32_t job_count;	/* number of associate job_id's */
@@ -649,13 +637,20 @@ typedef struct slurm_ctl_conf slurm_ctl_conf_info_msg_t;
 \*****************************************************************************/
 
 /*
- * slurm_init_slurm_msg - initialize slurm message 
- * OUT msg - user defined slurm message
- * IN in_msg - NULL if fresh initialization, or already initialized message to
- *             initialize from.  (Usually for reponse messages send in
- *             the request message)
+ * slurm_msg_t_init - initialize a slurm message 
+ * OUT msg - pointer to the slurm_msg_t structure which will be initialized
  */
-extern void slurm_init_slurm_msg (slurm_msg_t * msg, slurm_msg_t * in_msg);
+extern void slurm_msg_t_init (slurm_msg_t *msg);
+
+/*
+ * slurm_msg_t_copy - initialize a slurm_msg_t structure "dest" with
+ *	values from the "src" slurm_msg_t structure.
+ * IN src - Pointer to the initialized message from which "dest" will
+ *	be initialized.
+ * OUT dest - Pointer to the slurm_msg_t which will be intialized.
+ * NOTE: the "dest" structure will contain pointers into the contents of "src".
+ */
+extern void slurm_msg_t_copy(slurm_msg_t *dest, slurm_msg_t *src);
 
 /* free message functions */
 void inline slurm_free_last_update_msg(last_update_msg_t * msg);

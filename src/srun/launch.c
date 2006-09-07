@@ -142,7 +142,8 @@ launch(void *arg)
 	msg_array_ptr = xmalloc(sizeof(slurm_msg_t) 
 				* job->step_layout->node_cnt);
 	my_envc = envcount(environ);
-
+	/* convert timeout from sec to milliseconds */
+	opt.msg_timeout *= 1000;
 	/* Common message contents */
 	r.job_id          = job->jobid;
 	r.uid             = opt.uid;
@@ -160,8 +161,6 @@ launch(void *arg)
 	r.switch_job      = job->switch_job;
 	r.task_prolog     = opt.task_prolog;
 	r.task_epilog     = opt.task_epilog;
-	r.task_dist       = opt.distribution;
-	r.plane_size      = opt.plane_size;
 	r.cpu_bind_type   = opt.cpu_bind_type;
 	r.cpu_bind        = opt.cpu_bind;
 	r.mem_bind_type   = opt.mem_bind_type;
@@ -188,10 +187,6 @@ launch(void *arg)
 
 	r.global_task_ids = job->step_layout->tids;
 	r.cpus_allocated  = job->step_layout->tasks;
-	r.max_sockets     = opt.max_sockets_per_node;
-	r.max_cores       = opt.max_cores_per_socket;
-	r.max_threads     = opt.max_threads_per_core;
-	r.cpus_per_task   = opt.cpus_per_task;
 	
 	r.num_resp_port = job->njfds;
 	r.resp_port = xmalloc(sizeof(uint16_t) * r.num_resp_port);
@@ -202,7 +197,7 @@ launch(void *arg)
 	r.num_io_port = job->client_io->num_listen;
 	r.io_port = xmalloc(sizeof(uint16_t) * r.num_io_port);
 	for (i = 0; i < r.num_io_port; i++) {
-		r.io_port[i] = ntohs(job->client_io->listenport[i]);
+		r.io_port[i] = job->client_io->listenport[i];
 	}
 
 	msg_array_ptr[0].msg_type = REQUEST_LAUNCH_TASKS;
@@ -223,7 +218,7 @@ launch(void *arg)
 		free(host);
 		
 		m = &msg_array_ptr[job->thr_count];
-		slurm_init_slurm_msg(m, NULL);
+		slurm_msg_t_init(m);
 		
 		m->srun_node_id    = (uint32_t)i;			
 		m->msg_type        = REQUEST_LAUNCH_TASKS;

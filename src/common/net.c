@@ -48,6 +48,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
+#include <stdint.h>
 
 #include "src/common/log.h"
 #include "src/common/net.h"
@@ -56,7 +57,10 @@
 #  define NET_DEFAULT_BACKLOG	1024
 #endif 
 
-static int _sock_bind_wild(int sockfd)
+/*
+ * Returns the port number in host byte order.
+ */
+static short _sock_bind_wild(int sockfd)
 {
 	socklen_t len;
 	struct sockaddr_in sin;
@@ -71,16 +75,17 @@ static int _sock_bind_wild(int sockfd)
 	len = sizeof(sin);
 	if (getsockname(sockfd, (struct sockaddr *) &sin, &len) < 0)
 		return (-1);
-	return (sin.sin_port);
+	return ntohs(sin.sin_port);
 }
 
 /* open a stream socket on an ephemereal port and put it into 
  * the listen state. fd and port are filled in with the new
  * socket's file descriptor and port #.
  *
- * NOTE: port is in network byte order!
+ * OUT fd - listening socket file descriptor number
+ * OUT port - TCP port number in host byte order
  */
-int net_stream_listen(int *fd, int *port)
+int net_stream_listen(int *fd, short *port)
 {
 	int rc, val;
 
@@ -93,8 +98,6 @@ int net_stream_listen(int *fd, int *port)
 		goto cleanup;
 
 	*port = _sock_bind_wild(*fd);
-	if (*port < 0)
-		goto cleanup;
 #undef SOMAXCONN
 #define SOMAXCONN	1024
 	rc = listen(*fd, NET_DEFAULT_BACKLOG);

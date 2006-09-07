@@ -405,8 +405,8 @@ int job_step_complete(uint32_t job_id, uint32_t step_id, uid_t uid,
 }
 
 /* 
- * _pick_step_nodes - select nodes for a job step that satify its requirements
- *	we satify the super-set of constraints.
+ * _pick_step_nodes - select nodes for a job step that satisfy its requirements
+ *	we satisfy the super-set of constraints.
  * IN job_ptr - pointer to job to have new step started
  * IN step_spec - job step specification
  * global: node_record_table_ptr - pointer to global node table
@@ -681,11 +681,6 @@ step_create(job_step_create_request_msg_t *step_specs,
 
 	if ((step_specs->task_dist != SLURM_DIST_CYCLIC) &&
 	    (step_specs->task_dist != SLURM_DIST_BLOCK) &&
-	    (step_specs->task_dist != SLURM_DIST_CYCLIC_CYCLIC) &&
-	    (step_specs->task_dist != SLURM_DIST_BLOCK_CYCLIC) &&
-	    (step_specs->task_dist != SLURM_DIST_CYCLIC_BLOCK) &&
-	    (step_specs->task_dist != SLURM_DIST_BLOCK_BLOCK) &&
-	    (step_specs->task_dist != SLURM_DIST_PLANE) &&
 	    (step_specs->task_dist != SLURM_DIST_ARBITRARY))
 		return ESLURM_BAD_DIST;
 
@@ -742,18 +737,8 @@ step_create(job_step_create_request_msg_t *step_specs,
 		step_specs->node_list = xstrdup(step_node_list);
 	}
 	step_ptr->step_node_bitmap = nodeset;
-	
-	switch(step_specs->task_dist) {
-	case SLURM_DIST_CYCLIC: 
-	case SLURM_DIST_CYCLIC_CYCLIC: 
-	case SLURM_DIST_CYCLIC_BLOCK: 
-		step_ptr->cyclic_alloc = 1;
-		break;
-	default:
-		step_ptr->cyclic_alloc = 0;
-		break;
-	}
-
+	step_ptr->cyclic_alloc = 
+		(uint16_t) (step_specs->task_dist == SLURM_DIST_CYCLIC);
 	step_ptr->port = step_specs->port;
 	step_ptr->host = xstrdup(step_specs->host);
 	step_ptr->batch_step = batch_step;
@@ -777,8 +762,7 @@ step_create(job_step_create_request_msg_t *step_specs,
 					   step_node_list,
 					   step_specs->node_count,
 					   step_specs->num_tasks,
-					   step_specs->task_dist,
-					   step_specs->plane_size);
+					   step_specs->task_dist);
 		if (!step_ptr->step_layout)
 			return SLURM_ERROR;
 		if (switch_alloc_jobinfo (&step_ptr->switch_job) < 0)
@@ -806,8 +790,7 @@ extern slurm_step_layout_t *step_layout_create(struct step_record *step_ptr,
 					       char *step_node_list,
 					       uint16_t node_count,
 					       uint32_t num_tasks,
-					       uint16_t task_dist,
-					       uint32_t plane_size)
+					       uint16_t task_dist)
 {
 	uint32_t cpus_per_node[node_count];
 	uint32_t cpu_count_reps[node_count];
@@ -851,8 +834,7 @@ extern slurm_step_layout_t *step_layout_create(struct step_record *step_ptr,
 	/* layout the tasks on the nodes */
 	return slurm_step_layout_create(step_node_list,
 					cpus_per_node, cpu_count_reps, 
-					node_count, num_tasks, task_dist,
-					plane_size);
+					node_count, num_tasks, task_dist);
 }
 
 /* Pack the data for a specific job step record
@@ -1021,7 +1003,7 @@ extern int job_step_checkpoint(checkpoint_msg_t *ckpt_ptr,
 	checkpoint_resp_msg_t resp_data;
 	slurm_msg_t resp_msg;
 
-	slurm_init_slurm_msg(&resp_msg, NULL);
+	slurm_msg_t_init(&resp_msg);
 	
 	/* find the job */
 	job_ptr = find_job_record (ckpt_ptr->job_id);
@@ -1114,7 +1096,7 @@ extern int job_step_checkpoint_comp(checkpoint_comp_msg_t *ckpt_ptr,
 	slurm_msg_t resp_msg;
 	return_code_msg_t rc_msg;
 	
-	slurm_init_slurm_msg(&resp_msg, NULL);
+	slurm_msg_t_init(&resp_msg);
 		
 	/* find the job */
 	job_ptr = find_job_record (ckpt_ptr->job_id);

@@ -221,119 +221,103 @@ static enum task_dist_states _verify_dist_type(const char *arg)
 static int _verify_cpu_bind(const char *arg, char **cpu_bind, 
 		cpu_bind_type_t *cpu_bind_type)
 {
-	if (!arg) {
-	    	return 0;
-	}
+    	char *buf = xstrdup(arg);
+	char *pos = buf;
 	/* we support different launch policy names
 	 * we also allow a verbose setting to be specified
-	 *     --cpu_bind=threads
-	 *     --cpu_bind=cores
-	 *     --cpu_bind=sockets
 	 *     --cpu_bind=v
 	 *     --cpu_bind=rank,v
 	 *     --cpu_bind=rank
-	 *     --cpu_bind={MAP_CPU|MASK_CPU}:0,1,2,3,4
+	 *     --cpu_bind={MAP_CPU|MAP_MASK}:0,1,2,3,4
 	 */
-    	char *buf = xstrdup(arg);
-    	char *p = buf;
-	/* change all ',' delimiters to ';' until a ':' is seen */
-	/* simplifies parsing tokens while keeping map/mask together */
-	int saw_colon = 0;
-	while (*p) {
-	    	if (*p == ':') {
-		    	saw_colon = 1;
+	if (*pos) {
+		/* parse --cpu_bind command line arguments */
+		bool fl_cpubind_verbose = 0;
+	        char *cmd_line_affinity = NULL;
+	        char *cmd_line_mapping  = NULL;
+		char *mappos = strchr(pos,':');
+		if (!mappos) {
+		    	mappos = strchr(pos,'=');
 		}
-	    	if (!saw_colon && (*p == ',')) {
-			*p = ';';
-	    	}
-		*p++;
-	}
-	char *tok;
-	while (tok = strsep(&buf, ";")) {
-		if (strcasecmp(tok, "help") == 0) {
+		if (strncasecmp(pos, "help", 4) == 0) {
 			printf("CPU bind options:\n"
 	"\tq[uiet],        quietly bind before task runs (default)\n"
 	"\tv[erbose],      verbosely report binding before task runs\n"
 	"\tno[ne]          don't bind tasks to CPUs (default)\n"
 	"\trank            bind by task rank\n"
-	"\tmap_cpu:<list>  specify a CPU ID binding for each task\n"
+	"\tmap_cpu:<list>  bind by mapping CPU IDs to tasks as specified\n"
 	"\t                where <list> is <cpuid1>,<cpuid2>,...<cpuidN>\n"
-	"\tmask_cpu:<list> specify a CPU ID binding mask for each task\n"
-	"\t                where <list> is <mask1>,<mask2>,...<maskN>\n"
-        "\tsockets         auto-generated masks bind to sockets\n"
-        "\tcores           auto-generated masks bind to cores\n"
-        "\tthreads         auto-generated masks bind to threads\n");
+	"\tmask_cpu:<list> bind by setting CPU masks on tasks as specified\n"
+	"\t                where <list> is <mask1>,<mask2>,...<maskN>\n");
 			return 1;
-		} else if ((strcasecmp(tok, "q") == 0) ||
-		    (strcasecmp(tok, "quiet") == 0)) {
-		        *cpu_bind_type &= ~CPU_BIND_VERBOSE;
-		} else if ((strcasecmp(tok, "v") == 0) ||
-			   (strcasecmp(tok, "verbose") == 0)) {
+			
+		}
+
+		if (strncasecmp(pos, "quiet", 5) == 0) {
+			fl_cpubind_verbose=0;
+			pos+=5;
+		} else if (*pos=='q' || *pos=='Q') {
+			fl_cpubind_verbose=0;
+			pos++;
+		}
+		if (strncasecmp(pos, "verbose", 7) == 0) {
+			fl_cpubind_verbose=1;
+			pos+=7;
+		} else if (*pos=='v' || *pos=='V') {
+			fl_cpubind_verbose=1;
+			pos++;
+		}
+		if (*pos==',') {
+			pos++;
+		}
+		if (*pos) {
+			char *vpos=NULL;
+			cmd_line_affinity = pos;
+			if (((vpos=strstr(pos,",q")) !=0  ) ||
+			    ((vpos=strstr(pos,",Q")) !=0  )) {
+				*vpos='\0';
+				fl_cpubind_verbose=0;
+			}
+			if (((vpos=strstr(pos,",v")) !=0  ) ||
+			    ((vpos=strstr(pos,",V")) !=0  )) {
+				*vpos='\0';
+				fl_cpubind_verbose=1;
+			}
+		}
+		if (mappos) {
+			*mappos='\0'; 
+			mappos++;
+			cmd_line_mapping=mappos;
+		}
+
+		/* convert parsed command line args into interface */
+		if (cmd_line_mapping) {
+			xfree(*cpu_bind);
+			*cpu_bind = xstrdup(cmd_line_mapping);
+		}
+		if (fl_cpubind_verbose) {
 		        *cpu_bind_type |= CPU_BIND_VERBOSE;
-		} else if ((strcasecmp(tok, "no") == 0) ||
-			   (strcasecmp(tok, "none") == 0)) {
-			*cpu_bind_type |=  CPU_BIND_NONE;
-			*cpu_bind_type &= ~CPU_BIND_RANK;
-			*cpu_bind_type &= ~CPU_BIND_MAP;
-			*cpu_bind_type &= ~CPU_BIND_MASK;
-		} else if (strcasecmp(tok, "rank") == 0) {
-			*cpu_bind_type &= ~CPU_BIND_NONE;
-			*cpu_bind_type |=  CPU_BIND_RANK;
-			*cpu_bind_type &= ~CPU_BIND_MAP;
-			*cpu_bind_type &= ~CPU_BIND_MASK;
-		} else if ((strncasecmp(tok, "map_cpu", 7) == 0) ||
-		           (strncasecmp(tok, "mapcpu", 6) == 0)) {
-			*cpu_bind_type &= ~CPU_BIND_NONE;
-			*cpu_bind_type &= ~CPU_BIND_RANK;
-			*cpu_bind_type |=  CPU_BIND_MAP;
-			*cpu_bind_type &= ~CPU_BIND_MASK;
-			char *arg;
-			arg = strsep(&tok, ":=");
-			arg = strsep(&tok, ":=");
-			if (arg && *arg) {
-				if (*cpu_bind) { xfree(*cpu_bind); }
-				*cpu_bind = xstrdup(arg);
+		}
+		if (cmd_line_affinity) {
+			*cpu_bind_type &= CPU_BIND_VERBOSE;	/* clear any
+								 * previous type */
+			if ((strcasecmp(cmd_line_affinity, "no") == 0) ||
+			    (strcasecmp(cmd_line_affinity, "none") == 0)) {
+				*cpu_bind_type |= CPU_BIND_NONE;
+			} else if (strcasecmp(cmd_line_affinity, "rank") == 0) {
+				*cpu_bind_type |= CPU_BIND_RANK;
+			} else if ((strcasecmp(cmd_line_affinity, "map_cpu") == 0) ||
+			           (strcasecmp(cmd_line_affinity, "mapcpu") == 0)) {
+				*cpu_bind_type |= CPU_BIND_MAPCPU;
+			} else if ((strcasecmp(cmd_line_affinity, "mask_cpu") == 0) ||
+			           (strcasecmp(cmd_line_affinity, "maskcpu") == 0)) {
+				*cpu_bind_type |= CPU_BIND_MASKCPU;
 			} else {
-				error("missing list for \"--cpu_bind=map_cpu:<list>\"");
+				error("unrecognized --cpu_bind argument \"%s\"", 
+					cmd_line_affinity);
 				xfree(buf);
 				return 1;
 			}
-		} else if ((strncasecmp(tok, "mask_cpu", 8) == 0) ||
-		           (strncasecmp(tok, "maskcpu", 7) == 0)) {
-			*cpu_bind_type &= ~CPU_BIND_NONE;
-			*cpu_bind_type &= ~CPU_BIND_RANK;
-			*cpu_bind_type &= ~CPU_BIND_MAP;
-			*cpu_bind_type |=  CPU_BIND_MASK;
-			char *arg;
-			arg = strsep(&tok, ":=");
-			arg = strsep(&tok, ":=");
-			if (arg && *arg) {
-				if (*cpu_bind) { xfree(*cpu_bind); }
-				*cpu_bind = xstrdup(arg);
-			} else {
-				error("missing list for \"--cpu_bind=mask_cpu:<list>\"");
-				xfree(buf);
-				return 1;
-			}
-		} else if ((strcasecmp(tok, "socket") == 0) ||
-		           (strcasecmp(tok, "sockets") == 0)) {
-			*cpu_bind_type |=  CPU_BIND_TO_SOCKETS;
-			*cpu_bind_type &= ~CPU_BIND_TO_CORES;
-			*cpu_bind_type &= ~CPU_BIND_TO_THREADS;
-		} else if ((strcasecmp(tok, "core") == 0) ||
-		           (strcasecmp(tok, "cores") == 0)) {
-			*cpu_bind_type &= ~CPU_BIND_TO_SOCKETS;
-			*cpu_bind_type |=  CPU_BIND_TO_CORES;
-			*cpu_bind_type &= ~CPU_BIND_TO_THREADS;
-		} else if ((strcasecmp(tok, "thread") == 0) ||
-		           (strcasecmp(tok, "threads") == 0)) {
-			*cpu_bind_type &= ~CPU_BIND_TO_SOCKETS;
-			*cpu_bind_type &= ~CPU_BIND_TO_CORES;
-			*cpu_bind_type |=  CPU_BIND_TO_THREADS;
-		} else {
-			error("unrecognized --cpu_bind argument \"%s\"", tok);
-			xfree(buf);
-			return 1;
 		}
 	}
 
@@ -348,111 +332,105 @@ static int _verify_cpu_bind(const char *arg, char **cpu_bind,
 static int _verify_mem_bind(const char *arg, char **mem_bind, 
 		mem_bind_type_t *mem_bind_type)
 {
-	if (!arg) {
-	    	return 0;
-	}
-	/* we support different memory binding names
+	char *buf = xstrdup(arg);
+	char *pos = buf;
+	/* we support different launch policy names
 	 * we also allow a verbose setting to be specified
 	 *     --mem_bind=v
 	 *     --mem_bind=rank,v
 	 *     --mem_bind=rank
-	 *     --mem_bind={MAP_MEM|MASK_MEM}:0,1,2,3,4
+	 *     --mem_bind={MAP_CPU|MAP_MASK}:0,1,2,3,4
 	 */
-    	char *buf = xstrdup(arg);
-    	char *p = buf;
-	/* change all ',' delimiters to ';' until a ':' is seen */
-	/* simplifies parsing tokens while keeping map/mask together */
-	int saw_colon = 0;
-	while (*p) {
-	    	if (*p == ':') {
-		    	saw_colon = 1;
+	if (*pos) {
+		/* parse --mem_bind command line arguments */
+		bool fl_membind_verbose = 0;
+		char *cmd_line_affinity = NULL;
+		char *cmd_line_mapping  = NULL;
+		char *mappos = strchr(pos,':');
+		if (!mappos) {
+			mappos = strchr(pos,'=');
 		}
-	    	if (!saw_colon && (*p == ',')) {
-			*p = ';';
-	    	}
-		*p++;
-	}
-
-	char *tok;
-	while (tok = strsep(&buf, ";")) {
-		if (strcasecmp(tok, "help") == 0) {
+		if (strncasecmp(pos, "help", 4) == 0) {
 			printf("Memory bind options:\n"
 	"\tq[uiet],        quietly bind before task runs (default)\n"
 	"\tv[erbose],      verbosely report binding before task runs\n"
 	"\tno[ne]          don't bind tasks to memory (default)\n"
 	"\trank            bind by task rank\n"
 	"\tlocal           bind to memory local to processor\n"
-	"\tmap_mem:<list>  specify a memory binding for each task\n"
+	"\tmap_mem:<list>  bind by mapping memory of CPU IDs to tasks as specified\n"
 	"\t                where <list> is <cpuid1>,<cpuid2>,...<cpuidN>\n"
-	"\tmask_mem:<list> specify a memory binding mask for each tasks\n"
+	"\tmask_mem:<list> bind by setting menory of CPU masks on tasks as specified\n"
 	"\t                where <list> is <mask1>,<mask2>,...<maskN>\n");
 			return 1;
 			
-		} else if ((strcasecmp(tok, "q") == 0) ||
-		    (strcasecmp(tok, "quiet") == 0)) {
-		        *mem_bind_type &= ~MEM_BIND_VERBOSE;
-		} else if ((strcasecmp(tok, "v") == 0) ||
-			   (strcasecmp(tok, "verbose") == 0)) {
-		        *mem_bind_type |= MEM_BIND_VERBOSE;
-		} else if ((strcasecmp(tok, "no") == 0) ||
-			   (strcasecmp(tok, "none") == 0)) {
-			*mem_bind_type |=  MEM_BIND_NONE;
-			*mem_bind_type &= ~MEM_BIND_RANK;
-			*mem_bind_type &= ~MEM_BIND_LOCAL;
-			*mem_bind_type &= ~MEM_BIND_MAP;
-			*mem_bind_type &= ~MEM_BIND_MASK;
-		} else if (strcasecmp(tok, "rank") == 0) {
-			*mem_bind_type &= ~MEM_BIND_NONE;
-			*mem_bind_type |=  MEM_BIND_RANK;
-			*mem_bind_type &= ~MEM_BIND_LOCAL;
-			*mem_bind_type &= ~MEM_BIND_MAP;
-			*mem_bind_type &= ~MEM_BIND_MASK;
-		} else if (strcasecmp(tok, "local") == 0) {
-			*mem_bind_type &= ~MEM_BIND_NONE;
-			*mem_bind_type &= ~MEM_BIND_RANK;
-			*mem_bind_type |=  MEM_BIND_LOCAL;
-			*mem_bind_type &= ~MEM_BIND_MAP;
-			*mem_bind_type &= ~MEM_BIND_MASK;
-		} else if ((strncasecmp(tok, "map_mem", 7) == 0) ||
-		           (strncasecmp(tok, "mapmem", 6) == 0)) {
-			*mem_bind_type &= ~MEM_BIND_NONE;
-			*mem_bind_type &= ~MEM_BIND_RANK;
-			*mem_bind_type &= ~MEM_BIND_LOCAL;
-			*mem_bind_type |=  MEM_BIND_MAP;
-			*mem_bind_type &= ~MEM_BIND_MASK;
-			char *arg;
-			arg = strsep(&tok, ":=");
-			arg = strsep(&tok, ":=");
-			if (arg && *arg) {
-				if (*mem_bind) { xfree(*mem_bind); }
-				*mem_bind = xstrdup(arg);
+		}
+		if (strncasecmp(pos, "quiet", 5) == 0) {
+			fl_membind_verbose = 0;
+			pos+=5;
+		} else if (*pos=='q' || *pos=='Q') {
+			fl_membind_verbose = 0;
+			pos++;
+		}
+		if (strncasecmp(pos, "verbose", 7) == 0) {
+			fl_membind_verbose = 1;
+			pos+=7;
+		} else if (*pos=='v' || *pos=='V') {
+			fl_membind_verbose = 1;
+			pos++;
+		}
+		if (*pos==',') {
+			pos++;
+		}
+		if (*pos) {
+			char *vpos=NULL;
+			cmd_line_affinity = pos;
+			if (((vpos=strstr(pos,",q")) !=0  ) ||
+			    ((vpos=strstr(pos,",Q")) !=0  )) {
+				*vpos='\0';
+				fl_membind_verbose = 0;
+			}
+			if (((vpos=strstr(pos,",v")) !=0  ) ||
+			    ((vpos=strstr(pos,",V")) !=0  )) {
+				*vpos='\0';
+				fl_membind_verbose = 1;
+			}
+		}
+		if (mappos) {
+			*mappos='\0';
+			mappos++;
+			cmd_line_mapping=mappos;
+		}
+
+		/* convert parsed command line args into interface */
+		if (cmd_line_mapping) {
+			xfree(*mem_bind);
+			*mem_bind = xstrdup(cmd_line_mapping);
+		}
+		if (fl_membind_verbose) {
+			*mem_bind_type |= MEM_BIND_VERBOSE;
+		}
+		if (cmd_line_affinity) {
+			*mem_bind_type &= MEM_BIND_VERBOSE;	/* clear any
+								 * previous type */
+			if ((strcasecmp(cmd_line_affinity, "no") == 0) ||
+			    (strcasecmp(cmd_line_affinity, "none") == 0)) {
+				*mem_bind_type |= MEM_BIND_NONE;
+			} else if (strcasecmp(cmd_line_affinity, "rank") == 0) {
+				*mem_bind_type |= MEM_BIND_RANK;
+			} else if (strcasecmp(cmd_line_affinity, "local") == 0) {
+				*mem_bind_type |= MEM_BIND_LOCAL;
+			} else if ((strcasecmp(cmd_line_affinity, "map_mem") == 0) ||
+			           (strcasecmp(cmd_line_affinity, "mapmem") == 0)) {
+				*mem_bind_type |= MEM_BIND_MAPCPU;
+			} else if ((strcasecmp(cmd_line_affinity, "mask_mem") == 0) ||
+			           (strcasecmp(cmd_line_affinity, "maskmem") == 0)) {
+				*mem_bind_type |= MEM_BIND_MASKCPU;
 			} else {
-				error("missing list for \"--mem_bind=map_mem:<list>\"");
+				error("unrecognized --mem_bind argument \"%s\"",
+					cmd_line_affinity);
 				xfree(buf);
 				return 1;
 			}
-		} else if ((strncasecmp(tok, "mask_mem", 8) == 0) ||
-		           (strncasecmp(tok, "maskmem", 7) == 0)) {
-			*mem_bind_type &= ~MEM_BIND_NONE;
-			*mem_bind_type &= ~MEM_BIND_RANK;
-			*mem_bind_type &= ~MEM_BIND_LOCAL;
-			*mem_bind_type &= ~MEM_BIND_MAP;
-			*mem_bind_type |=  MEM_BIND_MASK;
-			char *arg;
-			arg = strsep(&tok, ":=");
-			arg = strsep(&tok, ":=");
-			if (arg && *arg) {
-				if (*mem_bind) { xfree(*mem_bind); }
-				*mem_bind = xstrdup(arg);
-			} else {
-				error("missing list for \"--mem_bind=mask_mem:<list>\"");
-				xfree(buf);
-				return 1;
-			}
-		} else {
-			error("unrecognized --mem_bind argument \"%s\"", tok);
-			xfree(buf);
-			return 1;
 		}
 	}
 
@@ -1908,16 +1886,24 @@ _search_path(char *cmd, bool check_current_dir, int access_mode)
 }
 
 
-static char * 
-print_commandline()
+static char *
+print_remote_command()
 {
 	int i;
-	char buf[256];
+	char *buf = NULL;
+	char *space;
 
-	buf[0] = '\0';
-	for (i = 0; i < opt.argc; i++)
-		snprintf(buf, 256,  "%s", opt.argv[i]);
-	return xstrdup(buf);
+	for (i = 0; i < opt.argc; i++) {
+		if (i == opt.argc-1) {
+			space = "";
+		} else {
+			space = " ";
+		}
+
+		xstrfmtcat(buf, "\"%s\"%s", opt.argv[i], space);
+	}
+
+	return buf;
 }
 
 #define tf_(b) (b == true) ? "true" : "false"
@@ -1966,8 +1952,8 @@ static void _opt_list()
 	info("task_epilog    : %s", opt.task_epilog);
 	info("ctrl_comm_ifhn : %s", opt.ctrl_comm_ifhn);
 	info("multi_prog     : %s", opt.multi_prog ? "yes" : "no");
-	str = print_commandline();
-	info("remote command : \"%s\"", str);
+	str = print_remote_command();
+	info("remote command : %s", str);
 	xfree(str);
 
 }
@@ -2047,10 +2033,8 @@ static void _help(void)
 	if (conf->task_plugin != NULL
 	    && strcasecmp(conf->task_plugin, "task/affinity") == 0) {
 		printf(
-"      --cpu_bind=             Bind tasks to CPUs\n"
-"                              (see \"--cpu_bind=help\" for options)\n"
-"      --mem_bind=             Bind memory to locality domains (ldom)\n"
-"                              (see \"--mem_bind=help\" for options)\n"
+"      --cpu_bind=             Bind tasks to CPUs(\"--cpu_bind=help\" for options\n"
+"      --mem_bind=             Bind tasks to memory(\"--mem_bind=help\" for options\n"
 			);
 	}
 	slurm_conf_unlock();

@@ -134,6 +134,7 @@ int srun(int ac, char **av)
 	env_t *env = xmalloc(sizeof(env_t));
 	uint32_t job_id = 0;
 	log_options_t logopt = LOG_OPTS_STDERR_ONLY;
+	slurm_step_io_fds_t fds = SLURM_STEP_IO_FDS_INITIALIZER;
 	
 	env->stepid = -1;
 	env->procid = -1;
@@ -193,13 +194,6 @@ int srun(int ac, char **av)
 		exit (0);
 
 	} else if (opt.batch) {
-	    	/* allow binding with batch submissions */
-		env->cpu_bind_type = opt.cpu_bind_type;
-		env->cpu_bind = opt.cpu_bind;
-		env->mem_bind_type = opt.mem_bind_type;
-		env->mem_bind = opt.mem_bind;
-		setup_env(env);
-
 		if (_run_batch_job() < 0)
 			exit (1);
 		exit (0);
@@ -303,11 +297,6 @@ int srun(int ac, char **av)
 	env->nprocs = opt.nprocs;
 	env->cpus_per_task = opt.cpus_per_task;
 	env->distribution = opt.distribution;
-	env->plane_size = opt.plane_size;
-	env->cpu_bind_type = opt.cpu_bind_type;
-	env->cpu_bind = opt.cpu_bind;
-	env->mem_bind_type = opt.mem_bind_type;
-	env->mem_bind = opt.mem_bind;
 	env->overcommit = opt.overcommit;
 	env->slurmd_debug = opt.slurmd_debug;
 	env->labelio = opt.labelio;
@@ -334,29 +323,15 @@ int srun(int ac, char **av)
 	if (slurm_mpi_thr_create(job) < 0)
 		job_fatal (job, "Failed to initialize MPI");
 
-	{
-		int siglen;
-		char *sig;
-		slurm_step_io_fds_t fds = SLURM_STEP_IO_FDS_INITIALIZER;
-
-		srun_set_stdio_fds(job, &fds);
-
-		if (slurm_cred_get_signature(job->cred, &sig, &siglen)
-		    < 0) {
-			job_fatal(job, "Couldn't get cred signature");
-		}
-		
-		job->client_io = client_io_handler_create(
-			fds,
-			job->step_layout->task_cnt,
-			job->step_layout->node_cnt,
-			sig,
-			opt.labelio);
-		if (!job->client_io
-		    || (client_io_handler_start(job->client_io)
-			!= SLURM_SUCCESS))
-			job_fatal(job, "failed to start IO handler");
-	}
+	srun_set_stdio_fds(job, &fds);
+	job->client_io = client_io_handler_create(fds,
+						  job->step_layout->task_cnt,
+						  job->step_layout->node_cnt,
+						  job->cred,
+						  opt.labelio);
+	if (!job->client_io
+	    || (client_io_handler_start(job->client_io)	!= SLURM_SUCCESS))
+		job_fatal(job, "failed to start IO handler");
 
 	if (sig_thr_create(job) < 0)
 		job_fatal(job, "Unable to create signals thread: %m");

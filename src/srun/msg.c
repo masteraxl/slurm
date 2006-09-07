@@ -913,13 +913,13 @@ _accept_msg_connection(srun_job_t *job, int fdnum)
 	       uc[0], uc[1], uc[2], uc[3], ntohs(port));
 
 	msg = xmalloc(sizeof(slurm_msg_t));
-	slurm_init_slurm_msg(msg, NULL);
+	slurm_msg_t_init(msg);
 	msg->conn_fd = fd;
 		
 	/* multiple jobs (easily induced via no_alloc) and highly
 	 * parallel jobs using PMI sometimes result in slow message 
 	 * responses and timeouts. Raise the default timeout for srun. */
-	timeout = slurm_get_msg_timeout() * 8;
+	timeout = slurm_get_msg_timeout() * 8000;
 again:
 	ret_list = slurm_receive_msg(fd, msg, timeout);
 	if(!ret_list || errno != SLURM_SUCCESS) {

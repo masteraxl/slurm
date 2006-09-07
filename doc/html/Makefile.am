@@ -17,7 +17,6 @@ generated_html = \
 	jobcompplugins.html \
 	mail.html \
 	maui.html \
-	mc_support.html \
 	moab.html \
 	mpiplugins.html \
 	news.html \
@@ -43,7 +42,6 @@ html_DATA = \
 	coding_style.pdf \
 	entities.gif \
 	lll.gif \
-	mc_support.jpg \
 	slurm_banner_filler.jpg \
 	slurm_banner_left.jpg \
 	slurm_banner_right.jpg \

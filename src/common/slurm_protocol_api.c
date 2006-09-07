@@ -730,6 +730,7 @@ int slurm_close_accepted_conn(slurm_fd open_fd)
  *       and list_destroy function.
  * IN open_fd	- file descriptor to receive msg on
  * OUT msg	- a slurm_msg struct to be filled in by the function
+ * IN timeout	- how long to wait in milliseconds
  * RET List	- List containing the responses of the childern (if any) we 
  *                forwarded the message to. List containing type (ret_types_t).
  */
@@ -741,18 +742,28 @@ List slurm_receive_msg(slurm_fd fd, slurm_msg_t *msg, int timeout)
 	int rc;
 	void *auth_cred = NULL;
 	Buf buffer;
-	/* int count = 0; */
 	ret_types_t *ret_type = NULL;
-/* 	ListIterator itr; */
-	
 	List ret_list = list_create(destroy_ret_types);
-	slurm_init_slurm_msg(msg, NULL);
 
 	xassert(fd >= 0);
+
+	slurm_msg_t_init(msg);
+	msg->conn_fd = fd;
 	
 	if (timeout == 0)
-                timeout  = slurm_get_msg_timeout();
-        timeout *= 1000;        /* convert secs to msec */
+		/* convert secs to msec */
+                timeout  = slurm_get_msg_timeout() * 1000; 
+
+	if(timeout >= (slurm_get_msg_timeout() * 10000)) {
+		error("You are sending a message with timeout's greater "
+		      "than %d seconds, your's is %d seconds", 
+		      (slurm_get_msg_timeout() * 10), 
+		      (timeout/1000));
+	} else if(timeout < 1000) {
+		debug("You are sending a message with a very short timeout of "
+		      "%d milliseconds", timeout);
+	} 
+	
 
 	/*
 	 * Receive a msg. slurm_msg_recvfrom() will read the message
@@ -761,7 +772,6 @@ List slurm_receive_msg(slurm_fd fd, slurm_msg_t *msg, int timeout)
 	 */
 	if (_slurm_msg_recvfrom_timeout(fd, &buf, &buflen, 0, timeout) < 0) {
 		forward_init(&header.forward, NULL);
-		/* no need to init forward_struct_init here */
 		rc = errno;		
 		goto total_return;
 	}
@@ -801,7 +811,6 @@ List slurm_receive_msg(slurm_fd fd, slurm_msg_t *msg, int timeout)
 	if(header.forward.cnt > 0) {
 		debug("forwarding to %d", header.forward.cnt);
 		msg->forward_struct = xmalloc(sizeof(forward_struct_t));
-		msg->forward_struct_init = FORWARD_INIT;
 		msg->forward_struct->buf_len = remaining_buf(buffer);
 		msg->forward_struct->buf = 
 			xmalloc(sizeof(char) * msg->forward_struct->buf_len);
@@ -810,13 +819,15 @@ List slurm_receive_msg(slurm_fd fd, slurm_msg_t *msg, int timeout)
 		       msg->forward_struct->buf_len);
 		
 		msg->forward_struct->ret_list = ret_list;
-		/* convert back to milliseconds */ 
+		/* take out the amount of timeout from this hop */
 		msg->forward_struct->timeout = 
-			(timeout - header.forward.timeout)/1000;
+			(timeout - header.forward.timeout);
 		msg->forward_struct->fwd_cnt = header.forward.cnt;
 
-		debug3("forwarding messages to %d nodes!!!!", 
-		       msg->forward_struct->fwd_cnt);
+		debug3("forwarding messages to %d nodes!!!! "
+		       "with a timeout of %d", 
+		       msg->forward_struct->fwd_cnt,
+		       msg->forward_struct->timeout);
 		
 		if(forward_msg(msg->forward_struct, &header) == SLURM_ERROR) {
 			error("problem with forward msg");
@@ -994,7 +1005,6 @@ int slurm_send_node_msg(slurm_fd fd, slurm_msg_t * msg)
 
 	if(msg->forward.init != FORWARD_INIT) {
 		forward_init(&msg->forward, NULL);
-		/* no need to init forward_struct_init here */
 		msg->ret_list = NULL;
 	}
 	forward_wait(msg);
@@ -1392,7 +1402,6 @@ int slurm_send_rc_msg(slurm_msg_t *msg, int rc)
 	resp_msg.data     = &rc_msg;
 	resp_msg.forward = msg->forward;
 	resp_msg.forward_struct = msg->forward_struct;
-	resp_msg.forward_struct_init = msg->forward_struct_init;
 	resp_msg.ret_list = msg->ret_list;
 	resp_msg.orig_addr = msg->orig_addr;
 	resp_msg.srun_node_id = msg->srun_node_id;
@@ -1405,6 +1414,12 @@ int slurm_send_rc_msg(slurm_msg_t *msg, int rc)
  * Send and recv a slurm request and response on the open slurm descriptor
  * with a list containing the responses of the children (if any) we 
  * forwarded the message to. List containing type (ret_types_t).
+ * IN open_fd	- file descriptor to receive msg on
+ * IN req	- a slurm_msg struct to be sent by the function
+ * OUT resp	- a slurm_msg struct to be filled in by the function
+ * IN timeout	- how long to wait in milliseconds
+ * RET List	- List containing the responses of the childern (if any) we 
+ *                forwarded the message to. List containing type (ret_types_t).
  */
 static List 
 _send_and_recv_msg(slurm_fd fd, slurm_msg_t *req, 
@@ -1413,11 +1428,10 @@ _send_and_recv_msg(slurm_fd fd, slurm_msg_t *req,
 	int retry = 0;
 	List ret_list = NULL;
 	int steps = 0;
-
 	resp->auth_cred = NULL;
 	if(slurm_send_node_msg(fd, req) >= 0) {
 		if (!timeout)
-			timeout = slurm_get_msg_timeout();
+			timeout = slurm_get_msg_timeout() * 1000;
 		
 		if(req->forward.cnt>0) {
 			steps = req->forward.cnt/slurm_get_tree_width();
@@ -1459,7 +1473,13 @@ int slurm_send_recv_controller_msg(slurm_msg_t *req, slurm_msg_t *resp)
 	bool backup_controller_flag;
 	uint16_t slurmctld_timeout;
 
-	slurm_init_slurm_msg(req, NULL);
+	/* Just in case the caller didn't initialize his slurm_msg_t, and
+	 * since we KNOW that we are only sending to one node (the controller),
+	 * we initialize some forwarding variables to disable forwarding.
+	 */
+	forward_init(&req->forward, NULL);
+	req->ret_list = NULL;
+	req->forward_struct = NULL;
 	
 	if ((fd = slurm_open_controller_conn()) < 0) {
 		rc = -1;
@@ -1526,6 +1546,7 @@ int slurm_send_recv_controller_msg(slurm_msg_t *req, slurm_msg_t *resp)
  * for the response, then closes the connection
  * IN request_msg	- slurm_msg request
  * OUT response_msg	- slurm_msg response
+ * IN timeout	        - how long to wait in milliseconds
  * RET List		- return list from multiple nodes
  *                        List containing type (ret_types_t).
  */
@@ -1611,6 +1632,9 @@ int slurm_send_only_node_msg(slurm_msg_t *req)
 /*
  *  Send message and recv "return code" message on an already open
  *  slurm file descriptor return List containing type (ret_types_t).
+ * IN fd	- file descriptor to receive msg on
+ * IN req	- slurm_msg request
+ * IN timeout   - how long to wait in milliseconds
  */
 static List _send_recv_rc_msg(slurm_fd fd, slurm_msg_t *req, int timeout)
 {
@@ -1673,6 +1697,10 @@ static List _send_recv_rc_msg(slurm_fd fd, slurm_msg_t *req, int timeout)
  *  Open a connection to req->address, send message (forward if told), 
  *  req must contain the message already packed in it's buffer variable,
  *  and receive List of type ret_types_t from all childern nodes
+ * IN msg	- a slurm_msg struct to be sent by the function
+ * IN timeout	- how long to wait in milliseconds
+ * RET List	- List containing the responses of the childern (if any) we 
+ *                forwarded the message to. List containing type (ret_types_t).
  */
 List slurm_send_recv_rc_packed_msg(slurm_msg_t *msg, int timeout)
 {
@@ -1700,14 +1728,14 @@ List slurm_send_recv_rc_packed_msg(slurm_msg_t *msg, int timeout)
 
 	if(slurm_add_header_and_send(fd, msg) >= 0) {
 		if (!timeout)
-			timeout = slurm_get_msg_timeout();
+			timeout = slurm_get_msg_timeout() * 1000;
 		
 		if(msg->forward.cnt>0) {
 			steps = msg->forward.cnt/slurm_get_tree_width();
 			steps += 1;
 			timeout += (msg->forward.timeout*steps);
 		}
-
+				
 		ret_list = slurm_receive_msg(fd, &resp, timeout);
 	}
 	err = errno;
@@ -1767,6 +1795,10 @@ failed:
  *  Open a connection to the "address" specified in the the slurm msg "req"
  *    Then read back an "rc" message returning List containing 
  *    type (ret_types_t).
+ * IN req	- a slurm_msg struct to be sent by the function
+ * IN timeout	- how long to wait in milliseconds
+ * RET List	- List containing the responses of the childern (if any) we 
+ *                forwarded the message to. List containing type (ret_types_t).
  */
 List slurm_send_recv_rc_msg(slurm_msg_t *req, int timeout)
 {
@@ -1782,6 +1814,10 @@ List slurm_send_recv_rc_msg(slurm_msg_t *req, int timeout)
  *  Open a connection to the "address" specified in the the slurm msg "req"
  *    Then read back an "rc" message returning the "return_code" specified
  *    in the response in the "rc" parameter.
+ * IN req	- a slurm_msg struct to be sent by the function
+ * OUT rc	- return code from the sent message
+ * IN timeout	- how long to wait in milliseconds
+ * RET int either 0 for success or -1 for failure.
  */
 int slurm_send_recv_rc_msg_only_one(slurm_msg_t *req, int *rc, int timeout)
 {
@@ -1790,7 +1826,13 @@ int slurm_send_recv_rc_msg_only_one(slurm_msg_t *req, int *rc, int timeout)
 	ret_types_t *ret_type = NULL;
 	int ret_c = 0;
 
-	slurm_init_slurm_msg(req, NULL);
+	/* Just in case the caller didn't initialize his slurm_msg_t, and
+	 * since we KNOW that we are only sending to one node,
+	 * we initialize some forwarding variables to disable forwarding.
+	 */
+	forward_init(&req->forward, NULL);
+	req->ret_list = NULL;
+	req->forward_struct = NULL;
 		
 	if ((fd = slurm_open_msg_conn(&req->address)) < 0) {
 		return -1;
@@ -1828,7 +1870,13 @@ int slurm_send_recv_controller_rc_msg(slurm_msg_t *req, int *rc)
 	ret_types_t *ret_type = NULL;
 	int ret_val = 0;
 
-	slurm_init_slurm_msg(req, NULL);
+	/* Just in case the caller didn't initialize his slurm_msg_t, and
+	 * since we KNOW that we are only sending to one node (the controller),
+	 * we initialize some forwarding variables to disable forwarding.
+	 */
+	forward_init(&req->forward, NULL);
+	req->ret_list = NULL;
+	req->forward_struct = NULL;
 		
 	if ((fd = slurm_open_controller_conn()) < 0)
 		return -1;
@@ -1853,6 +1901,15 @@ int slurm_send_recv_controller_rc_msg(slurm_msg_t *req, int *rc)
 		ret_val = -1;
 	return ret_val;
 }
+
+/* this is used to set how many nodes are going to be on each branch
+ * of the tree.  
+ * IN total       - total number of nodes to send to
+ * IN tree_width  - how wide the tree should be on each hop
+ * RET int *      - int array tree_width in length each space
+ *                  containing the number of nodes to send to each hop
+ *                  on the span. 
+ */
 
 extern int *set_span(int total,  uint16_t tree_width)
 {
@@ -1916,6 +1973,7 @@ extern char *nodelist_nth_host(const char *nodelist, int inx)
 
 void convert_num_unit(float num, char *buf, int orig_type)
 {
+#ifdef HAVE_BG
 	char *unit = "\0KMGP?";
 	int i = (int)num % 512;
 	
@@ -1936,6 +1994,9 @@ void convert_num_unit(float num, char *buf, int orig_type)
 		sprintf(buf, "%d%c", i, unit[orig_type]);
 	else
 		sprintf(buf, "%.2f%c", num, unit[orig_type]);
+#else
+	sprintf(buf, "%d", (int)num);
+#endif
 }
 
 #if _DEBUG
