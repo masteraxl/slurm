@@ -1442,7 +1442,7 @@ extern int job_allocate(job_desc_msg_t * job_specs, int immediate, int will_run,
 
 	no_alloc = test_only || too_fragmented || 
 			(!top_prio) || (!independent);
-	error_code = select_nodes(job_ptr, no_alloc);
+	error_code = select_nodes(job_ptr, no_alloc, NULL);
 
 	if ((error_code == ESLURM_NODES_BUSY)
 	||  (error_code == ESLURM_JOB_HELD)
@@ -1707,7 +1707,7 @@ extern int job_complete(uint32_t job_id, uid_t uid, bool requeue,
 			job_ptr->job_state = JOB_CANCELLED| job_comp_flag;
 			if (job_ptr->requid == -1)
  				job_ptr->requid = uid;
-		} else if (job_return_code) {
+		} else if (WEXITSTATUS(job_return_code)) {
 			job_ptr->job_state = JOB_FAILED   | job_comp_flag;
 			job_ptr->exit_code = job_return_code;
 		}
