@@ -236,20 +236,21 @@ SLURM's active database. Set the values of \fBMaxJobCount\fR and
 its memory or other resources. The default value is 300 seconds. 
 A value of zero prevents any job record purging.
 May not exceed 65533.
+
 .TP
 \fBMpiDefault\fR
 Identifies the default type of MPI to be used. 
 Srun may override this configuration parameter in any case.
-Currently supported versions include: lam (which supports 
-LAM MPI and Open MPI, but specify "none" instead and let 
-LAM MPI and Open MPI select the plugin using an option of 
-the srun command), mpich\-gm, mvapich, 
-and none (default, which works for many other versions of MPI).
+Currently supported versions include: 
+\fBmpichgm\fR, 
+\fBmvapich\fR,
+\fBnone\fR (default, which works for many other versions of MPI including 
+LAM MPI and Open MPI).
 
 .TP
 \fBMessageTimeout\fR
 Time permitted for a round\-trip communication to complete
-in seconds. Default value is 5 seconds.
+in seconds. Default value is 10 seconds.
 
 .TP
 \fBPluginDir\fR
@@ -279,7 +280,7 @@ can become a child of the init process (when the parent process
 terminates) or change their process group. 
 To reliably track all processes, one of the other mechanisms 
 utilizing kernel modifications is preferable. 
-NOTE: "proctrack/linuxproc" is not compatable with "swich/elan."
+NOTE: "proctrack/linuxproc" is not compatible with "switch/elan."
 Acceptable values at present include:
 .RS
 .TP 
@@ -321,6 +322,7 @@ with the same priority (aka nice value) as the users process which
 launched the job on the submit node.
 If set to "0", or left unset, the users job will inherit the
 scheduling priority from the slurm daemon.
+
 .TP
 \fBPropagateResourceLimits\fR
 A list of comma separated resource limit names.
@@ -337,6 +339,41 @@ the default action is to propagate all limits.
 Only one of the parameters, either
 \fBPropagateResourceLimits\fR or \fBPropagateResourceLimitsExcept\fR,
 may be specified.
+The following limit names are supported by Slurm (although some 
+options may not be supported on some systems):
+.RS
+.TP 10
+\fBAS\fR
+The maximum address space for a processes
+.TP
+\fBCORE\fR
+The maximum size of core file
+.TP
+\fBCPU\fR
+The maximum amount of CPU time
+.TP
+\fBDATA\fR
+The maximum size of a process’s data segment
+.TP
+\fBFSIZE\fR
+The maximum size of files created
+.TP
+\fBMEMLOCK\fR
+The maximum size that may be locked into memory
+.TP
+\fBNOFILE\fR
+The maximum number of open files
+.TP
+\fBNPROC\fR
+The maximum number of processes available
+.TP
+\fBRSS\fR
+The maximum resident set size
+.TP
+\fBSTACK\fR
+The maximum stack size
+.RE
+
 .TP
 \fBPropagateResourceLimitsExcept\fR
 A list of comma separated resource limit names.
@@ -344,6 +381,8 @@ By default, all resource limits will be propagated, (as described by
 the \fBPropagateResourceLimits\fR parameter), except for the limits
 appearing in this list.   The user can override this by specifying which
 resource limits to propagate with the srun commands "\-\-propagate" option.
+See \fBPropagateResourceLimits\fR above for a list of valid limit names.
+
 .TP
 \fBReturnToService\fR
 If set to 1, then a non\-responding (DOWN) node will become available 
@@ -551,16 +590,16 @@ If any slurm daemons terminate abnormally, their core files will also be written
 into this directory.
 .TP
 \fBSrunEpilog\fR
-Fully qualified pathname of an executable to be run by \fBsrun\fR following the
+Fully qualified pathname of an executable to be run by srun following the
 completion of a job step.  The command line arguments for the executable will
 be the command and arguments of the job step.  This configuration parameter
-may be overridden by \fBsrun\fR\'s \fB\-\-epilog\fR parameter.
+may be overridden by srun's \fB\-\-epilog\fR parameter.
 .TP
 \fBSrunProlog\fR
-Fully qualified pathname of an executable to be run by \fBsrun\fR prior to the
+Fully qualified pathname of an executable to be run by srun prior to the
 launch of a job step.  The command line arguments for the executable will
 be the command and arguments of the job step.  This configuration parameter
-may be overridden by \fBsrun\fR\'s \fB\-\-prolog\fR parameter.
+may be overridden by srun's \fB\-\-prolog\fR parameter.
 .TP
 \fBSwitchType\fR
 Identifies the type of switch or interconnect used for application
@@ -620,8 +659,16 @@ environment variable
 .TP
 \fBTaskPluginParam\fR
 Optional parameters for the task plugin.
-The only acceptable parameter today is "cpusets".
-By default, there are no task plugin parameters.
+.RS
+.TP 10
+\fBCpusets\fR
+Use cpusets to perform task affinity functions
+.TP
+\fBSched\fR
+Use \fIsched_setaffinity\fR or \fIplpa_sched_setaffinity\fR
+(if available) to bind tasks to processors.
+This is the default mode of operation is no parameters are specified.
+.RE
 
 .TP
 \fBTaskProlog\fR
@@ -991,7 +1038,7 @@ Possible values are "FORCE", "YES", and "NO".
 without user means of disabling it.
 "YES" makes nodes in the partition available for sharing if and 
 only if the individual jobs permit sharing (see the srun 
-"\-\-shared" option).
+"\-\-share" option).
 "NO" makes nodes unavailable for sharing under all circumstances. 
 The default value is "NO".
 .TP
@@ -1140,7 +1187,7 @@ PartitionName=long Nodes=dev[9\-17] MaxTime=120 AllowGroups=admin
 .SH "COPYING"
 Copyright (C) 2002\-2006 The Regents of the University of California.
 Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
-UCRL\-CODE\-217948.
+UCRL\-CODE\-226842.
 .LP
 This file is part of SLURM, a resource management program.
 For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -1159,6 +1206,7 @@ details.
 .SH "SEE ALSO"
 .LP
 \fBbluegene.conf\fR(5),
+\fBgetrlimit\fR(2),
 \fBgethostbyname\fR(3), \fBgroup\fR(5), \fBhostname\fR(1), 
 \fBscontrol\fR(1), \fBslurmctld\fR(8), \fBslurmd\fR(8), \fBspank(8)\fR,
 \fBsyslog\fR(2), \fBwiki.conf\fR(5)

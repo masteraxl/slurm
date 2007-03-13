@@ -14,7 +14,7 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>.
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -99,6 +99,8 @@ typedef struct slurm_select_ops {
 	int             (*update_nodeinfo)     (struct job_record *job_ptr);
         int             (*update_block)        (update_part_msg_t
 						*part_desc_ptr);
+        int             (*update_sub_node)     (update_part_msg_t
+						*part_desc_ptr);
 	int             (*get_info_from_plugin)(enum select_data_info cr_info,
 						void *data);
 	int             (*update_node_state)   (int index, uint16_t state);
@@ -126,6 +128,7 @@ struct select_jobinfo {
 	uint16_t geometry[SYSTEM_DIMENSIONS];	/* node count in various
 						 * dimensions, e.g. XYZ */
 	uint16_t conn_type;	/* see enum connection_type */
+	uint16_t reboot;	/* reboot block before starting job */
 	uint16_t rotate;	/* permit geometry rotation if set */
 	char *bg_block_id;	/* Blue Gene block ID */
 	uint16_t magic;		/* magic number */
@@ -174,6 +177,7 @@ static slurm_select_ops_t * _select_get_ops(slurm_select_context_t *c)
                 "select_p_get_select_nodeinfo",
                 "select_p_update_nodeinfo",
 		"select_p_update_block",
+ 		"select_p_update_sub_node",
                 "select_p_get_info_from_plugin",
 		"select_p_update_node_state",
 		"select_p_alter_node_cnt"
@@ -425,7 +429,6 @@ extern int select_g_update_nodeinfo (struct job_record *job_ptr)
 
 /* 
  * Update specific block (usually something has gone wrong)  
- * IN cr_info   - type of data to update for a given job record
  * IN part_desc_ptr - information about the block
  */
 extern int select_g_update_block (update_part_msg_t *part_desc_ptr)
@@ -434,6 +437,18 @@ extern int select_g_update_block (update_part_msg_t *part_desc_ptr)
                return SLURM_ERROR;
 
        return (*(g_select_context->ops.update_block))(part_desc_ptr);
+}
+
+/* 
+ * Update specific sub nodes (usually something has gone wrong)  
+ * IN part_desc_ptr - information about the block
+ */
+extern int select_g_update_sub_node (update_part_msg_t *part_desc_ptr)
+{
+       if (slurm_select_init() < 0)
+               return SLURM_ERROR;
+
+       return (*(g_select_context->ops.update_sub_node))(part_desc_ptr);
 }
 
 /* 
@@ -480,7 +495,6 @@ extern int select_g_alter_node_cnt (enum select_node_cnt type, void *data)
 		/* default to one, so most plugins don't have to */
 		uint32_t *nodes = (uint32_t *)data;
 		*nodes = 1;
-		return SLURM_SUCCESS;
 	}	
 	return (*(g_select_context->ops.alter_node_cnt))(type, data);
 }
@@ -588,6 +602,7 @@ static void _free_node_info(bg_info_record_t *bg_info_record)
 	xfree(bg_info_record->owner_name);
 	xfree(bg_info_record->bg_block_id);
 	xfree(bg_info_record->bp_inx);
+	xfree(bg_info_record->ionode_inx);
 	xfree(bg_info_record->blrtsimage);
 	xfree(bg_info_record->linuximage);
 	xfree(bg_info_record->mloaderimage);
@@ -631,6 +646,13 @@ static int _unpack_node_info(bg_info_record_t *bg_info_record, Buf buffer)
 		bg_info_record->bp_inx = bitfmt2int(bp_inx_str);
 		xfree(bp_inx_str);
 	}
+	safe_unpackstr_xmalloc(&bp_inx_str, &uint16_tmp, buffer);
+	if (bp_inx_str == NULL) {
+		bg_info_record->ionode_inx = bitfmt2int("");
+	} else {
+		bg_info_record->ionode_inx = bitfmt2int(bp_inx_str);
+		xfree(bp_inx_str);
+	}
 	safe_unpackstr_xmalloc(&bg_info_record->blrtsimage, &uint16_tmp, 
 			       buffer);
 	safe_unpackstr_xmalloc(&bg_info_record->linuximage, &uint16_tmp, 
@@ -659,7 +681,7 @@ static char *_job_conn_type_string(uint16_t inx)
 		return "n/a";
 }
 
-static char *_job_rotate_string(uint16_t inx)
+static char *_yes_no_string(uint16_t inx)
 {
 	if (inx == (uint16_t) NO_VAL)
 		return "n/a";
@@ -685,6 +707,7 @@ extern int select_g_alloc_jobinfo (select_jobinfo_t *jobinfo)
 		(*jobinfo)->geometry[i] = (uint16_t) NO_VAL;
 	}
 	(*jobinfo)->conn_type = SELECT_NAV;
+	(*jobinfo)->reboot = (uint16_t) NO_VAL;
 	(*jobinfo)->rotate = (uint16_t) NO_VAL;
 	(*jobinfo)->bg_block_id = NULL;
 	(*jobinfo)->magic = JOBINFO_MAGIC;
@@ -729,6 +752,9 @@ extern int select_g_set_jobinfo (select_jobinfo_t jobinfo,
 	case SELECT_DATA_GEOMETRY:
 		for (i=0; i<SYSTEM_DIMENSIONS; i++) 
 			jobinfo->geometry[i] = uint16[i];
+		break;
+	case SELECT_DATA_REBOOT:
+		jobinfo->reboot = *uint16;
 		break;
 	case SELECT_DATA_ROTATE:
 		jobinfo->rotate = *uint16;
@@ -815,6 +841,9 @@ extern int select_g_get_jobinfo (select_jobinfo_t jobinfo,
 		for (i=0; i<SYSTEM_DIMENSIONS; i++) {
 			uint16[i] = jobinfo->geometry[i];
 		}
+		break;
+	case SELECT_DATA_REBOOT:
+		*uint16 = jobinfo->reboot;
 		break;
 	case SELECT_DATA_ROTATE:
 		*uint16 = jobinfo->rotate;
@@ -904,6 +933,7 @@ extern select_jobinfo_t select_g_copy_jobinfo(select_jobinfo_t jobinfo)
 			rc->geometry[i] = (uint16_t)jobinfo->geometry[i];
 		}
 		rc->conn_type = jobinfo->conn_type;
+		rc->reboot = jobinfo->reboot;
 		rc->rotate = jobinfo->rotate;
 		rc->bg_block_id = xstrdup(jobinfo->bg_block_id);
 		rc->magic = JOBINFO_MAGIC;
@@ -937,6 +967,7 @@ extern int select_g_free_jobinfo  (select_jobinfo_t *jobinfo)
 	} else {
 		(*jobinfo)->magic = 0;
 		xfree((*jobinfo)->bg_block_id);
+		xfree((*jobinfo)->ionodes);
 		xfree((*jobinfo)->blrtsimage);
 		xfree((*jobinfo)->linuximage);
 		xfree((*jobinfo)->mloaderimage);
@@ -959,13 +990,16 @@ extern int  select_g_pack_jobinfo  (select_jobinfo_t jobinfo, Buf buffer)
 		/* NOTE: If new elements are added here, make sure to 
 		 * add equivalant pack of zeros below for NULL pointer */
 		for (i=0; i<SYSTEM_DIMENSIONS; i++) {
-			pack16((uint16_t)jobinfo->start[i], buffer);
-			pack16((uint16_t)jobinfo->geometry[i], buffer);
+			pack16(jobinfo->start[i], buffer);
+			pack16(jobinfo->geometry[i], buffer);
 		}
-		pack16((uint16_t)jobinfo->conn_type, buffer);
-		pack16((uint16_t)jobinfo->rotate, buffer);
-		pack32((uint32_t)jobinfo->node_cnt, buffer);
-		pack32((uint32_t)jobinfo->max_procs, buffer);
+		pack16(jobinfo->conn_type, buffer);
+		pack16(jobinfo->reboot, buffer);
+		pack16(jobinfo->rotate, buffer);
+
+		pack32(jobinfo->node_cnt, buffer);
+		pack32(jobinfo->max_procs, buffer);
+
 		packstr(jobinfo->bg_block_id, buffer);
 		packstr(jobinfo->ionodes, buffer);
 		packstr(jobinfo->blrtsimage, buffer);
@@ -973,10 +1007,12 @@ extern int  select_g_pack_jobinfo  (select_jobinfo_t jobinfo, Buf buffer)
 		packstr(jobinfo->mloaderimage, buffer);
 		packstr(jobinfo->ramdiskimage, buffer);
 	} else {
-		for (i=0; i<((SYSTEM_DIMENSIONS*2)+2); i++)
+		for (i=0; i<((SYSTEM_DIMENSIONS*2)+3); i++)
 			pack16((uint16_t) 0, buffer);
+
 		pack32((uint32_t) 0, buffer);
 		pack32((uint32_t) 0, buffer);
+
 		packstr("", buffer);
 		packstr("", buffer);
 		packstr("", buffer);
@@ -1004,9 +1040,12 @@ extern int  select_g_unpack_jobinfo(select_jobinfo_t jobinfo, Buf buffer)
 		safe_unpack16(&(jobinfo->geometry[i]), buffer);
 	}
 	safe_unpack16(&(jobinfo->conn_type), buffer);
+	safe_unpack16(&(jobinfo->reboot), buffer);
 	safe_unpack16(&(jobinfo->rotate), buffer);
+
 	safe_unpack32(&(jobinfo->node_cnt), buffer);
 	safe_unpack32(&(jobinfo->max_procs), buffer);
+
 	safe_unpackstr_xmalloc(&(jobinfo->bg_block_id), &uint16_tmp, buffer);
 	safe_unpackstr_xmalloc(&(jobinfo->ionodes), &uint16_tmp, buffer);
 	safe_unpackstr_xmalloc(&(jobinfo->blrtsimage), &uint16_tmp, buffer);
@@ -1062,7 +1101,7 @@ extern char *select_g_sprint_jobinfo(select_jobinfo_t jobinfo,
 	switch (mode) {
 	case SELECT_PRINT_HEAD:
 		snprintf(buf, size,
-			 "CONNECT ROTATE MAX_PROCS GEOMETRY START BLOCK_ID");
+			 "CONNECT REBOOT ROTATE MAX_PROCS GEOMETRY START BLOCK_ID");
 		break;
 	case SELECT_PRINT_DATA:
 		if (jobinfo->max_procs == NO_VAL)
@@ -1078,9 +1117,10 @@ extern char *select_g_sprint_jobinfo(select_jobinfo_t jobinfo,
 				jobinfo->start[1], jobinfo->start[2]);
 		} 
 		snprintf(buf, size, 
-			 "%7.7s %6.6s %9s    %1ux%1ux%1u %5s %-16s",
+			 "%7.7s %6.6s %6.6s %9s    %1ux%1ux%1u %5s %-16s",
 			 _job_conn_type_string(jobinfo->conn_type),
-			 _job_rotate_string(jobinfo->rotate),
+			 _yes_no_string(jobinfo->reboot),
+			 _yes_no_string(jobinfo->rotate),
 			 max_procs_char,
 			 geometry[0], geometry[1], geometry[2],
 			 start_char, jobinfo->bg_block_id);
@@ -1100,10 +1140,11 @@ extern char *select_g_sprint_jobinfo(select_jobinfo_t jobinfo,
 		}
 		
 		snprintf(buf, size, 
-			 "Connection=%s Rotate=%s MaxProcs=%s "
+			 "Connection=%s Reboot=%s Rotate=%s MaxProcs=%s "
 			 "Geometry=%1ux%1ux%1u Start=%s Block_ID=%s",
 			 _job_conn_type_string(jobinfo->conn_type),
-			 _job_rotate_string(jobinfo->rotate),
+			 _yes_no_string(jobinfo->reboot),
+			 _yes_no_string(jobinfo->rotate),
 			 max_procs_char,
 			 geometry[0], geometry[1], geometry[2],
 			 start_char, jobinfo->bg_block_id);
@@ -1115,9 +1156,13 @@ extern char *select_g_sprint_jobinfo(select_jobinfo_t jobinfo,
 		snprintf(buf, size, "%s", 
 			 _job_conn_type_string(jobinfo->conn_type));
 		break;
+	case SELECT_PRINT_REBOOT:
+		snprintf(buf, size, "%s",
+			 _yes_no_string(jobinfo->reboot));
+		break;
 	case SELECT_PRINT_ROTATE:
 		snprintf(buf, size, "%s",
-			 _job_rotate_string(jobinfo->rotate));
+			 _yes_no_string(jobinfo->rotate));
 		break;
 	case SELECT_PRINT_GEOMETRY:
 		snprintf(buf, size, "%1ux%1ux%1u",
@@ -1182,9 +1227,8 @@ extern int select_g_unpack_node_info(node_select_info_msg_t **
 	buf->bg_info_array = xmalloc(sizeof(bg_info_record_t) * 
 		buf->record_count);
 	record_count = buf->record_count;
-
 	for(i=0; i<record_count; i++) {
-		if (_unpack_node_info(&(buf->bg_info_array[i]), buffer))
+		if (_unpack_node_info(&(buf->bg_info_array[i]), buffer)) 
 			goto unpack_error;
 	}
 	*node_select_info_msg_pptr = buf;
@@ -1213,6 +1257,7 @@ extern int select_g_free_node_info(node_select_info_msg_t **
 		buf->record_count = 0;
 	for(i=0; i<buf->record_count; i++)
 		_free_node_info(&(buf->bg_info_array[i]));
+	xfree(buf->bg_info_array);
 	xfree(buf);
 	return SLURM_SUCCESS;
 }

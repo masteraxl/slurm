@@ -5,7 +5,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>, et. al.
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -745,7 +745,7 @@ rwfail:
 static void 
 _print_exit_status(srun_job_t *job, hostlist_t hl, char *host, int status)
 {
-	char buf[1024];
+	char buf[MAXHOSTRANGELEN];
 	char *corestr = "";
 	bool signaled  = false;
 	void (*print) (const char *, ...) = (void *) &error; 
@@ -860,7 +860,7 @@ _exit_handler(srun_job_t *job, slurm_msg_t *exit_msg)
 		tasks_exited++;
 		debug2("looking for %d got %d", opt.nprocs, tasks_exited);
 		if ((tasks_exited == opt.nprocs) 
-		    || (slurm_mpi_single_task_per_node () 
+		    || (mpi_hook_client_single_task_per_node () 
 			&& (tasks_exited == job->nhosts))) {
 			debug2("All tasks exited");
 			update_job_state(job, SRUN_JOB_TERMINATED);
@@ -999,7 +999,7 @@ _accept_msg_connection(srun_job_t *job, int fdnum)
 	   in /etc/hosts. */
 	uc = (unsigned char *)&cli_addr.sin_addr.s_addr;
 	port = cli_addr.sin_port;
-	debug2("got message connection from %u.%u.%u.%u:%d",
+	debug2("got message connection from %u.%u.%u.%u:%hu",
 	       uc[0], uc[1], uc[2], uc[3], ntohs(port));
 
 	msg = xmalloc(sizeof(slurm_msg_t));
@@ -1401,7 +1401,7 @@ _print_pid_list(const char *host, int ntasks, uint32_t *pid,
 	if (_verbose) {
 		int i;
 		hostlist_t pids = hostlist_create(NULL);
-		char buf[1024];
+		char buf[MAXHOSTRANGELEN];
 		
 		for (i = 0; i < ntasks; i++) {
 			snprintf(buf, sizeof(buf), "pids:%d", pid[i]);

@@ -6,7 +6,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -39,6 +39,9 @@
 
 #ifndef _HOSTLIST_H
 #define _HOSTLIST_H
+
+/* max size of internal hostrange buffer */
+#define MAXHOSTRANGELEN 8192
 
 /* Notes:
  *

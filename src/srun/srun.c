@@ -5,7 +5,7 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <grondona@llnl.gov>, et. al.
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -99,6 +99,7 @@
 #define	TYPE_TEXT	1
 #define	TYPE_SCRIPT	2
 
+mpi_plugin_client_info_t mpi_job_info[1];
 
 /*
  * forward declaration of static funcs
@@ -135,6 +136,8 @@ int srun(int ac, char **av)
 	uint32_t job_id = 0;
 	log_options_t logopt = LOG_OPTS_STDERR_ONLY;
 	slurm_step_io_fds_t fds = SLURM_STEP_IO_FDS_INITIALIZER;
+	char **mpi_env = NULL;
+	mpi_plugin_client_state_t *mpi_state;
 	
 	env->stepid = -1;
 	env->procid = -1;
@@ -200,6 +203,7 @@ int srun(int ac, char **av)
 
 	} else if (opt.batch) {
 	    	/* allow binding with batch submissions */
+		env->distribution = opt.distribution;
 		env->cpu_bind_type = opt.cpu_bind_type;
 		env->cpu_bind = opt.cpu_bind;
 		env->mem_bind_type = opt.mem_bind_type;
@@ -260,22 +264,7 @@ int srun(int ac, char **av)
 			      job_id);
 			exit(1);
 		}
-		
-		/*
-                 * XXX: Kludgy fix to make sure job structure is created
-		 *  with the correct number of nodes. We reset opt.min_nodes
-		 *  here if it is not already set to simulate the
-		 *  user explicitly using -N or SLURM_NNODES.
-		 *
-		 *  This code needs to be redesigned so this isn't necessary.
-		 */
-		if (!opt.nodes_set) {
-			if (resp->node_cnt <= opt.nprocs)
-				opt.min_nodes = resp->node_cnt;
-                        else
-				opt.min_nodes = opt.nprocs;
-			opt.nodes_set = true;
-		}
+
 		job = job_step_create_allocation(job_id);
 
 		if(!job)
@@ -369,8 +358,13 @@ int srun(int ac, char **av)
 	if (msg_thr_create(job) < 0)
 		job_fatal(job, "Unable to create msg thread");
 
-	if (slurm_mpi_thr_create(job) < 0)
+	mpi_job_info->jobid = job->jobid;
+	mpi_job_info->stepid = job->stepid;
+	mpi_job_info->step_layout = job->step_layout;
+	if (!(mpi_state = mpi_hook_client_prelaunch(mpi_job_info, &mpi_env)))
 		job_fatal (job, "Failed to initialize MPI");
+	env_array_set_environment(mpi_env);
+	env_array_free(mpi_env);
 
 	srun_set_stdio_fds(job, &fds);
 	job->client_io = client_io_handler_create(fds,
@@ -450,7 +444,7 @@ int srun(int ac, char **av)
 	debug("done");
 	
 	
-	if (slurm_mpi_exit () < 0)
+	if (mpi_hook_client_fini (mpi_state) < 0)
 		; /* eh, ignore errors here */
 
 	_run_srun_epilog(job);
@@ -668,10 +662,10 @@ _get_shell (void)
 {
 	struct passwd *pw_ent_ptr;
 
-	pw_ent_ptr = getpwuid (getuid ());
+	pw_ent_ptr = getpwuid (opt.uid);
 	if ( ! pw_ent_ptr ) {
 		pw_ent_ptr = getpwnam( "nobody" );
-		info( "warning - no user information for user %d", getuid() );
+		info( "warning - no user information for user %d", opt.uid );
 	}
 	return pw_ent_ptr->pw_shell;
 }
@@ -861,6 +855,11 @@ _build_script (const char *argv0, char *fname, int file_type)
 	cbuf_destroy(cb);
 
 	_get_options(buffer);
+
+	if (strlen(buffer) >= 0xffff) {
+		error("Job script exceeds size supported by slurm");
+		xfree(buffer);
+	}
 
 	return buffer;
 }

@@ -6,7 +6,7 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov>, 
  *             Morris Jette <jette1@llnl.gov>, et. al.
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *    
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -187,9 +187,9 @@ static int _print_str(char *str, int width, bool right, bool cut_output)
 int _print_nodes(char *nodes, int width, bool right, bool cut)
 {
 	hostlist_t hl = hostlist_create(nodes);
-	char buf[1024];
+	char buf[MAXHOSTRANGELEN];
 	int retval;
-	hostlist_ranged_string(hl, 1024, buf);
+	hostlist_ranged_string(hl, MAXHOSTRANGELEN, buf);
 	retval = _print_str(buf, width, right, false);
 	hostlist_destroy(hl);
 	return retval;
@@ -1185,6 +1185,18 @@ int _print_step_nodes(job_step_info_t * step, int width, bool right,
 #endif
 	} else 
 		_print_nodes(step->nodes, width, right, false);
+	if (suffix)
+		printf("%s", suffix);
+	return SLURM_SUCCESS;
+}
+
+int _print_step_num_tasks(job_step_info_t * step, int width, bool right, 
+			  char* suffix)
+{
+	if (step == NULL)	/* Print the Header instead */
+		_print_str("TASKS", width, right, true);
+	else
+		_print_int(step->num_tasks, width, right, true);
 	if (suffix)
 		printf("%s", suffix);
 	return SLURM_SUCCESS;

@@ -5,7 +5,7 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov> and Kevin Tew <tew1@llnl.gov>.
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -92,6 +92,8 @@ static char *_task_plugin_param(uint16_t task_plugin_param)
 			return "none";
 		case TASK_PARAM_CPUSETS:
 			return "cpusets";
+		case TASK_PARAM_SCHED:
+			return "sched";
 		default:
 			return "unknown";
 	}

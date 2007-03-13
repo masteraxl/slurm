@@ -4,7 +4,7 @@
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -186,6 +186,6 @@ slurm_container_wait(uint32_t cont_id)
 extern int
 slurm_container_get_pids(uint32_t cont_id, pid_t **pids, int *npids)
 {
-	error("proctrack/aix does not implement slurm_container_get_pids");
+	error("proctrack/pgid does not implement slurm_container_get_pids");
 	return SLURM_ERROR;
 }

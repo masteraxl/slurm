@@ -4,7 +4,7 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <grondona1@llnl.gov>, et. al.
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *   
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -191,6 +191,25 @@ static void _print_version(void)
 }
 
 /*
+ * _isvalue
+ * returns 1 is the argument appears to be a value, 0 otherwise
+ */
+static int _isvalue(char *arg) {
+    	if (isdigit(*arg)) {	 /* decimal values and 0x... hex values */
+	    	return 1;
+	}
+
+	while (isxdigit(*arg)) { /* hex values not preceded by 0x */
+		arg++;
+	}
+	if (*arg == ',' || *arg == '\0') { /* end of field or string */
+	    	return 1;
+	}
+
+	return 0;	/* not a value */
+}
+
+/*
  * verify cpu_bind arguments
  * returns -1 on error, 0 otherwise
  */
@@ -216,7 +235,7 @@ static int _verify_cpu_bind(const char *arg, char **cpu_bind,
 	/* change all ',' delimiters not followed by a digit to ';'  */
 	/* simplifies parsing tokens while keeping map/mask together */
 	while (p[0] != '\0') {
-		if ((p[0] == ',') && (!isdigit(p[1])))
+	    	if ((p[0] == ',') && (!_isvalue(&(p[1]))))
 			p[0] = ';';
 		p++;
 	}
@@ -342,7 +361,7 @@ static int _verify_mem_bind(const char *arg, char **mem_bind,
 	/* change all ',' delimiters not followed by a digit to ';'  */
 	/* simplifies parsing tokens while keeping map/mask together */
 	while (p[0] != '\0') {
-		if ((p[0] == ',') && (!isdigit(p[1])))
+	    	if ((p[0] == ',') && (!_isvalue(&(p[1]))))
 			p[0] = ';';
 		p++;
 	}
@@ -746,6 +765,11 @@ env_vars_t env_vars[] = {
   {"SLAUNCH_WAIT",         OPT_INT,       &opt.max_wait,      NULL           },
   {"SLAUNCH_MPI_TYPE",     OPT_MPI,       NULL,               NULL           },
   {"SLAUNCH_COMM_HOSTNAME",OPT_STRING,    &opt.comm_hostname, NULL           },
+  {"SLAUNCH_PROLOG",       OPT_STRING,    &opt.prolog,        NULL           },
+  {"SLAUNCH_EPILOG",       OPT_STRING,    &opt.epilog,        NULL           },
+  {"SLAUNCH_TASK_PROLOG",  OPT_STRING,    &opt.task_prolog,   NULL           },
+  {"SLAUNCH_TASK_EPILOG",  OPT_STRING,    &opt.task_epilog,   NULL           },
+
   {NULL, 0, NULL, NULL}
 };
 
@@ -844,7 +868,7 @@ _process_env_var(env_vars_t *e, const char *val)
 		break;
 	    
 	case OPT_MPI:
-		if (srun_mpi_init((char *)val) == SLURM_ERROR) {
+		if (mpi_hook_client_init((char *)val) == SLURM_ERROR) {
 			fatal("\"%s=%s\" -- invalid MPI type, "
 			      "--mpi=list for acceptable types.",
 			      e->var, val);
@@ -1150,7 +1174,8 @@ void set_options(const int argc, char **argv)
 				       optarg);
 			break;
 		case LONG_OPT_MPI:
-			if (srun_mpi_init((char *)optarg) == SLURM_ERROR) {
+			if (mpi_hook_client_init((char *)optarg)
+			    == SLURM_ERROR) {
 				fatal("\"--mpi=%s\" -- long invalid MPI type, "
 				      "--mpi=list for acceptable types.",
 				      optarg);

@@ -5,7 +5,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark A. Grondona <mgrondona@llnl.gov>.
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -176,22 +176,18 @@ create_pidfile(const char *pidfile)
 
 	if (fd_get_write_lock(fileno(fp)) < 0) {
 		error ("Unable to lock pidfile `%s': %m", pidfile);
+		fclose(fp);
 		goto error;
 	}
 
 	if (fprintf(fp, "%lu\n", (unsigned long) getpid()) == EOF) {
 		error("Unable to write to pidfile `%s': %m", pidfile);
+		fclose(fp);
 		goto error;
 	}
 
 	fflush(fp);
 	
-	/*
-	 * if (fclose(fp) == EOF) {
-         *	error("Unable to close pidfile `%s': %m", pidfile);
-         *	goto error;
-         *}
-	 */
 	return (fileno(fp));
 
   error:

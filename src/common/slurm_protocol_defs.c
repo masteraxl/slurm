@@ -8,7 +8,7 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Kevin Tew <tew1@llnl.gov> et. al.
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -1071,13 +1071,6 @@ extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 	case REQUEST_JOB_ALLOCATION_INFO:
 		slurm_free_job_alloc_info_msg(data);
 		break;
-	case SLURM_SUCCESS:		
-	case REQUEST_PING:		
-	case REQUEST_RECONFIGURE:
-	case REQUEST_CONTROL:
-	case REQUEST_SHUTDOWN_IMMEDIATE:
-		/* No body to free */
-		break;
 	case REQUEST_SHUTDOWN:
 		slurm_free_shutdown_msg(data);
 		break;
@@ -1154,8 +1147,15 @@ extern int slurm_free_msg_data(slurm_msg_type_t type, void *data)
 	case RESPONSE_SLURM_RC:
 		slurm_free_return_code_msg(data);
 		break;
+	case SLURM_SUCCESS:		
+	case REQUEST_PING:		
+	case REQUEST_RECONFIGURE:
+	case REQUEST_CONTROL:
+	case REQUEST_SHUTDOWN_IMMEDIATE:
 	case RESPONSE_FORWARD_FAILED:
+		/* No body to free */
 		break;
+
 	default:
 		error("invalid type trying to be freed %u", type);
 		break; 

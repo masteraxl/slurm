@@ -6,7 +6,7 @@
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Christopher J. Morrone <morrone2@llnl.gov>
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -143,6 +143,8 @@ static int fill_job_desc_from_opts(job_desc_msg_t *desc)
 #endif
 	if (opt.conn_type != (uint16_t) NO_VAL)
 		desc->conn_type = opt.conn_type;
+	if (opt.reboot)
+		desc->reboot = 1;
 	if (opt.no_rotate)
 		desc->rotate = 0;
 	if (opt.blrtsimage)
@@ -288,6 +290,9 @@ static void *get_script_buffer(const char *filename, int *size)
 	 */
 	if (script_size == 0) {
 		error("Batch script is empty!");
+		goto fail;
+	} else if (script_size >= 0xffff) {
+		error("Job script exceeds size supported by slurm");
 		goto fail;
 	} else if (xstring_is_whitespace(buf)) {
 		error("Batch script contains only whitespace!");

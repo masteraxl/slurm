@@ -11,7 +11,7 @@
 # Copyright (C) 2005-2006 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-217948.
+# UCRL-CODE-226842.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -173,7 +173,7 @@ if {$task_mask != $task_cnt} {
 set verbose_cnt 0
 send "$slaunch -n $available_cpus --cpu_bind=verbose,map_cpu:0 $file_prog\n"
 expect {
-	-re "setting affinity of task" {
+	-re "cpu_bind=MAP" {
 		incr verbose_cnt
 		exp_continue
 	}

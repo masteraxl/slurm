@@ -1,7 +1,7 @@
 /*****************************************************************************\
  *  Copyright (C) 2006 Hewlett-Packard Development Company, L.P.
  *  Written by Susanne M. Balle, <susanne.balle@hp.com>
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -63,6 +63,9 @@ static int _task_layout_lllp_plane(launch_tasks_request_msg_t *req,
 				   const uint32_t *gtid,
 				   const uint32_t maxtasks,
 				   bitstr_t ***masks_p);
+static void _lllp_enlarge_masks(launch_tasks_request_msg_t *req,
+				const uint32_t maxtasks,
+				bitstr_t **masks);
 static void _lllp_use_available(launch_tasks_request_msg_t *req,
 				const uint32_t maxtasks,
 				bitstr_t **masks);
@@ -112,7 +115,7 @@ static uint16_t _block_map(uint16_t index, uint16_t *map);
 /* 
  * lllp_distribution
  *
- * Note: lllp stands for lowest level of logical processors. 
+ * Note: lllp stands for Lowest Level of Logical Processors. 
  *
  * When automatic binding is enabled:
  *      - no binding flags set >= CPU_BIND_NONE, and
@@ -179,6 +182,10 @@ void lllp_distribution(launch_tasks_request_msg_t *req, uint32_t node_id)
 	}
 
 	if (masks) {
+		_task_layout_display_masks(req, gtid, maxtasks, masks); 
+		if (req->cpus_per_task > 1) {
+			_lllp_enlarge_masks(req, maxtasks, masks);
+		}
 		_task_layout_display_masks(req, gtid, maxtasks, masks); 
 	    	_lllp_use_available(req, maxtasks, masks);
 		_task_layout_display_masks(req, gtid, maxtasks, masks); 
@@ -266,6 +273,74 @@ _compute_min_overlap(bitstr_t *bitmask, uint32_t *resv,
 }
 
 /*
+ * _lllp_enlarge_masks
+ *
+ * Given an array of masks, update the masks to honor the number
+ * of cpus requested per task in req->cpus_per_task.  Note: not
+ * concerned with mask overlap between tasks as _lllp_use_available
+ * will take care of that.
+ *
+ * IN- job launch request
+ * IN- maximum number of tasks
+ * IN/OUT- array of masks
+ */
+static void _lllp_enlarge_masks (launch_tasks_request_msg_t *req,
+				const uint32_t maxtasks,
+				bitstr_t **masks)
+{
+	int i, j, k, l;
+	int cpus_per_task = req->cpus_per_task;
+
+	debug3("_lllp_enlarge_masks");
+
+	/* enlarge each mask */
+	for (i = 0; i < maxtasks; i++) {
+		bitstr_t *bitmask = masks[i];
+		bitstr_t *addmask;
+		int bitmask_size = bit_size(bitmask);
+		int num_added = 0;
+
+		/* get current number of set bits in bitmask */
+		int num_set = bit_set_count(bitmask);
+		if (num_set >= cpus_per_task) {
+			continue;
+		}
+
+		/* add bits by selecting disjoint cores first, then threads */
+		for (j = conf->threads; j > 0; j--) {
+			/* rotate current bitmask to find new candidate bits */
+		        for (k = 1; k < bitmask_size / j; k++) {
+				addmask = bit_rotate_copy(bitmask, k*j,
+								bitmask_size);
+
+			    	/* check candidate bits to add into to bitmask */
+				for (l = 0; l < bitmask_size; l++) {
+					if (bit_test(addmask,l) &&
+					    !bit_test(bitmask,l)) {
+						bit_set(bitmask,l);
+						num_set++;
+						num_added++;
+					}
+					if (num_set >= cpus_per_task) {
+						break;
+					}
+				}
+
+				/* done with candidate mask */
+				bit_free(addmask);
+				if (num_set >= cpus_per_task) {
+					break;
+				}
+			}
+			if (num_set >= cpus_per_task) {
+				break;
+			}
+		}
+		debug3("  mask %d => added %d bits", i, num_added);
+	}
+}
+
+/*
  * _lllp_use_available
  *
  * Given an array of masks, update the masks to make best use of
@@ -283,20 +358,16 @@ static void _lllp_use_available (launch_tasks_request_msg_t *req,
 	int resv_incr, i;
 	uint32_t *resv;
 	int rotval, prev_rotval;
-	bool recheck_threads = FALSE;
 
 	/* select the unit of reservation rotation increment based on CR type */
 	if ((conf->cr_type == CR_SOCKET) 
 	    || (conf->cr_type == CR_SOCKET_MEMORY)) {
-		resv_incr = conf->cores * conf->threads;
+		resv_incr = conf->cores * conf->threads; /* socket contents */
 	} else if ((conf->cr_type == CR_CORE) 
 		   || (conf->cr_type == CR_CORE_MEMORY)) {
-		resv_incr = conf->threads;
+		resv_incr = conf->threads;		 /* core contents */
 	} else {
-		resv_incr = conf->threads;
-		if (resv_incr > 1) {
-			recheck_threads = TRUE;
-		}
+		resv_incr = conf->threads;		 /* core contents */
 	}
 	if (resv_incr < 1) {		/* make sure increment is non-zero */ 
 		debug3("_lllp_use_available changed resv_incr %d to 1", resv_incr);
@@ -326,11 +397,11 @@ static void _lllp_use_available (launch_tasks_request_msg_t *req,
 
 		/* make sure the reservation increment is larger than the number
 		 * of contiguous bits in the mask to maintain any properties
-		 * present in the mask (e.g. use both cores on one socket
+		 * present in the mask (e.g. use both cores on one socket)
 		 */
 		int this_resv_incr = resv_incr;
 		while (this_resv_incr < contig_bits) {
-			this_resv_incr *= 2;
+			this_resv_incr += resv_incr;
 		}
 
 		/* rotate mask to find the minimum reservation overlap starting
@@ -343,18 +414,20 @@ static void _lllp_use_available (launch_tasks_request_msg_t *req,
 					&min_overlap, &min_rotval);
 
 		/* if we didn't find a zero overlap, recheck at a thread
-		 * granularity if allowed with current settings
+		 * granularity
 		 */
-		if ((min_overlap != 0) && recheck_threads) {
+		if (min_overlap != 0) {
 		        int prev_resv_incr = this_resv_incr;
 			this_resv_incr = 1;
-			while (this_resv_incr < contig_bits) {
-				this_resv_incr *= 2;
-			}
 			if (this_resv_incr != prev_resv_incr) {
+				int this_min_overlap, this_min_rotval;
 				_compute_min_overlap(bitmask, resv,
 					rotmask_size, rotval, this_resv_incr,
-					&min_overlap, &min_rotval);
+					&this_min_overlap, &this_min_rotval);
+				if (this_min_overlap < min_overlap) {
+					min_overlap = this_min_overlap;
+					min_rotval  = this_min_rotval;
+				}
 			}
 		}
 
@@ -1012,23 +1085,25 @@ static int _task_layout_lllp_plane(launch_tasks_request_msg_t *req,
  *  
  */
 typedef struct {
-        uint32_t jobid;
+	uint32_t jobid;
+	uint32_t jobstepid;
 	uint32_t numtasks;
-        cpu_bind_type_t cpu_bind_type;
-        char *cpu_bind;
+	cpu_bind_type_t cpu_bind_type;
+	char *cpu_bind;
 } lllp_job_state_t;
 
 static lllp_job_state_t *
-_lllp_job_state_create(uint32_t job_id,
+_lllp_job_state_create(uint32_t job_id, uint32_t job_step_id,
 		       cpu_bind_type_t cpu_bind_type, char *cpu_bind,
 		       uint32_t numtasks)
 {
 	lllp_job_state_t *j;
-        debug3("creating job %d lllp state", job_id);
+	debug3("creating job [%u.%u] lllp state", job_id, job_step_id);
 
 	j = xmalloc(sizeof(lllp_job_state_t));
 
 	j->jobid	 = job_id;
+	j->jobstepid	 = job_step_id;
 	j->numtasks	 = numtasks;
 	j->cpu_bind_type = cpu_bind_type;
 	j->cpu_bind	 = NULL;
@@ -1042,13 +1117,16 @@ _lllp_job_state_create(uint32_t job_id,
 static void
 _lllp_job_state_destroy(lllp_job_state_t *j)
 {
-        debug3("destroying job %d lllp state", j->jobid);
+	debug3("destroying job [%u.%u] lllp state", j->jobid, j->jobstepid);
         if (j) {
 		if (j->cpu_bind)
 			xfree(j->cpu_bind);
 	    	xfree(j);
 	}
 }
+
+#if 0
+/* Note: now inline in cr_release_lllp to support multiple job steps */
 static lllp_job_state_t *
 _find_lllp_job_state(uint32_t jobid)
 {
@@ -1074,9 +1152,10 @@ _remove_lllp_job_state(uint32_t jobid)
 	}
         list_iterator_destroy(i);
 }
+#endif
 
 void
-_insert_lllp_job_state(lllp_job_state_t *j)
+_append_lllp_job_state(lllp_job_state_t *j)
 {
         list_append(lllp_ctx->job_list, j);
 }
@@ -1403,19 +1482,23 @@ void get_bitmap_from_cpu_bind(bitstr_t *bitmap_test,
 	char opt_dist[10];
 	char *dist_str = NULL;
 	char *dist_str_next = NULL;
+	int bitmap_size = bit_size(bitmap_test);
+	unsigned int i;
 	dist_str = cpu_bind;
 	
 	if (cpu_bind_type & CPU_BIND_RANK) {
-		unsigned int i = 0;
-		for (i = 0; i < MIN(numtasks,bit_size(bitmap_test)); i++) {
+		for (i = 0; i < MIN(numtasks,bitmap_size); i++) {
 			bit_set(bitmap_test, i);
 		}
 		return;
 	}
 
+	i = 0;
 	while (dist_str != NULL) {
-	    	/* get next mask from cpu_bind */
-		if (*dist_str == ',') {
+		if (i >= numtasks) {	/* no more tasks need masks */
+		    	break;
+		}
+		if (*dist_str == ',') {	/* get next mask from cpu_bind */
 			dist_str++;
 		}
 		dist_str_next = strchr(dist_str, ',');
@@ -1437,11 +1520,14 @@ void get_bitmap_from_cpu_bind(bitstr_t *bitmap_test,
 			} else {
 				mycpu = strtoul(opt_dist, NULL, 10);
 			}
-			bit_set(bitmap_test, mycpu);
+			if (mycpu < bitmap_size) {
+				bit_set(bitmap_test, mycpu);
+			}
 		}
 
 		dist_str = dist_str_next;
 		dist_str_next = NULL;
+	    	i++;
 	}
 }
 
@@ -1468,7 +1554,7 @@ static void _cr_update_reservation(int reserve, uint32_t *reserved,
 	}
 }
 
-static void _cr_update_lllp(int reserve,
+static void _cr_update_lllp(int reserve, uint32_t job_id, uint32_t job_step_id,
 			    cpu_bind_type_t cpu_bind_type, char *cpu_bind,
 			    uint32_t numtasks)
 {
@@ -1496,14 +1582,14 @@ static void _cr_update_lllp(int reserve,
 		_cr_update_reservation(reserve, lllp_reserved, 
 				       bitmap_test);
 
-		bit_free(bitmap_test);	/*** fixme: store with job_id? ***/
+		bit_free(bitmap_test);	/* not currently stored with job_id */
 
 		/*** display the updated lllp_reserved counts ***/
 		buffer[0] = '\0';
-		for (i=0; i < num_bits; i++) {
+		for (i=num_bits-1; i >=0; i--) {
 			sprintf(buftmp, "%d", lllp_reserved[i]);
 			if (strlen(buftmp) + strlen(buffer) + 1 < buf_len) {
-			        if (i) strcat(buffer,",");
+			        if (i < (num_bits-1)) strcat(buffer,",");
 				strcat(buffer,buftmp);
 			} else {/* out of space...indicate incomplete string */
 				buffer[strlen(buffer)-1] = '*';
@@ -1516,7 +1602,8 @@ static void _cr_update_lllp(int reserve,
 		} else {
 			strcpy(buf_action, "release");
 		}
-		info("LLLP update %s %s ", buf_action, buffer);
+		info("LLLP update %s [%u.%u]: %s (CPU IDs: %d...0)",
+			buf_action, job_id, job_step_id, buffer, num_bits-1);
 	}
 }
 
@@ -1530,15 +1617,15 @@ void cr_reserve_lllp(uint32_t job_id,
 	uint32_t numtasks = 0;
 	char buf_type[100];
 
-	debug3("reserve LLLP %d\n", job_id);
+	debug3("reserve LLLP job [%u.%u]\n", job_id, req->job_step_id);
 
 	if (req->tasks_to_launch) {
 		numtasks = req->tasks_to_launch[node_id];
 	}
 
 	slurm_sprint_cpu_bind_type(buf_type, cpu_bind_type);
-	debug3("reserve lllp job %d: %d tasks; %s[%d], %s",
-	       job_id, numtasks,
+	debug3("reserve lllp job [%u.%u]: %d tasks; %s[%d], %s",
+	       job_id, req->job_step_id, numtasks,
 	       buf_type, cpu_bind_type, cpu_bind);
 	if (cpu_bind_type == 0)
 		return;
@@ -1547,46 +1634,49 @@ void cr_reserve_lllp(uint32_t job_id,
     	/* store job_id, cpu_bind_type, cpu_bind */
 	slurm_mutex_lock(&lllp_ctx->mutex);
 
-	if ((j = _find_lllp_job_state(job_id))) {
-		_remove_lllp_job_state(job_id);	/* clear any stale state */
-	}
-
-	j = _lllp_job_state_create(job_id, cpu_bind_type, cpu_bind, numtasks);
+	j = _lllp_job_state_create(job_id, req->job_step_id,
+					cpu_bind_type, cpu_bind, numtasks);
 
 	if (j) {
-		_insert_lllp_job_state(j);
-		_cr_update_lllp(1, cpu_bind_type, cpu_bind, numtasks);
+		_append_lllp_job_state(j);
+		_cr_update_lllp(1, job_id, req->job_step_id,
+					cpu_bind_type, cpu_bind, numtasks);
 	}
 	slurm_mutex_unlock(&lllp_ctx->mutex);
 }
 
 void cr_release_lllp(uint32_t job_id)
 {
+	ListIterator  i = NULL;
 	lllp_job_state_t *j;
 	cpu_bind_type_t cpu_bind_type = 0;
 	char *cpu_bind = NULL;
 	uint32_t numtasks = 0;
 	char buf_type[100];
 
-	debug3("release LLLP %d", job_id);
+	debug3("release LLLP job [%u.*]", job_id);
 
     	/* retrieve cpu_bind_type, cpu_bind from job_id */
 	slurm_mutex_lock(&lllp_ctx->mutex);
-	j = _find_lllp_job_state(job_id);
-	if (j) {
-	    	cpu_bind_type = j->cpu_bind_type;
-		cpu_bind      = j->cpu_bind;
-		numtasks      = j->numtasks;
-		slurm_sprint_cpu_bind_type(buf_type, cpu_bind_type);
-		debug3("release search lllp job %d: %d tasks; %s[%d], %s",
-		       j->jobid, numtasks,
-		       buf_type, cpu_bind_type, cpu_bind);
+	i = list_iterator_create(lllp_ctx->job_list);
+	while ((j = list_next(i))) {
+		if (j->jobid == job_id) {
+			cpu_bind_type = j->cpu_bind_type;
+			cpu_bind      = j->cpu_bind;
+			numtasks      = j->numtasks;
+			slurm_sprint_cpu_bind_type(buf_type, cpu_bind_type);
+			debug3("release search lllp job %u: %d tasks; %s[%d], %s",
+			       j->jobid, numtasks,
+			       buf_type, cpu_bind_type, cpu_bind);
 
-		_cr_update_lllp(0, cpu_bind_type, cpu_bind, numtasks);
+			_cr_update_lllp(0, job_id, j->jobstepid,
+					cpu_bind_type, cpu_bind, numtasks);
 
-		/* done with saved state, remove entry */
-		_remove_lllp_job_state(job_id);
+			/* done with saved state, remove entry */
+			list_delete(i);
+		}
 	}
+	list_iterator_destroy(i);
 	slurm_mutex_unlock(&lllp_ctx->mutex);
 }
 

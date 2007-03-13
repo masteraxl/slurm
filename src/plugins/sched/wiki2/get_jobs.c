@@ -4,7 +4,7 @@
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -37,6 +37,7 @@
 
 #include <grp.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 
 #include "./msg.h"
 #include "src/common/list.h"
@@ -48,6 +49,7 @@ static char *	_dump_all_jobs(int *job_cnt, int state_info);
 static char *	_dump_job(struct job_record *job_ptr, int state_info);
 static char *	_get_group_name(gid_t gid);
 static uint32_t	_get_job_end_time(struct job_record *job_ptr);
+static char *	_get_job_features(struct job_record *job_ptr);
 static uint32_t	_get_job_min_disk(struct job_record *job_ptr);
 static uint32_t	_get_job_min_mem(struct job_record *job_ptr);
 static uint32_t	_get_job_min_nodes(struct job_record *job_ptr);
@@ -56,6 +58,7 @@ static uint32_t	_get_job_submit_time(struct job_record *job_ptr);
 static uint32_t	_get_job_suspend_time(struct job_record *job_ptr);
 static uint32_t	_get_job_tasks(struct job_record *job_ptr);
 static uint32_t	_get_job_time_limit(struct job_record *job_ptr);
+static char *	_full_task_list(struct job_record *job_ptr);
 
 #define SLURM_INFO_ALL		0
 #define SLURM_INFO_VOLITILE	1
@@ -68,12 +71,32 @@ static uint32_t	_get_job_time_limit(struct job_record *job_ptr);
  * RET 0 on success, -1 on failure
  *
  * Response format
- * ARG=<cnt>#<JOBID>;UPDATE_TIME=<uts>;STATE=<state>;UCLIMIT=<time_limit>;
- *                    TASKS=<cpus>;QUEUETIME=<submit_time>;STARTTIME=<time>;
- *                    UNAME=<user>;GNAME=<group>;RCLASS=<part>;
- *                    NODES=<node_cnt>;RMEM=<mem_size>;RDISK=<disk_space>;
- *                    COMMENT=<comment>;[COMPLETETIME=<end_time>;]
- *         [#<JOBID>;...];
+ * ARG=<cnt>#<JOBID>;
+ *	STATE=<state>;			Moab equivalent job state
+ *	[EXITCODE=<number>;]		Job exit code, if completed
+ *	[RFEATURES=<features>;]		required features, if any, 
+ *					NOTE: OR operator not supported
+ *	[HOSTLIST=<node1:node2>;]	list of required nodes, if any
+ *	[STARTDATE=<uts>;]		earliest start time, if any
+ *	[TASKLIST=<node1:node2>;]	nodes in use, if running or completing
+ *	[REJMESSAGE=<str>;]		reason job is not running, if any
+ *	UPDATETIME=<uts>;		time last active
+ *	[FLAGS=INTERACTIVE;]		set if interactive (not batch) job
+ *	WCLIMIT=<secs>;			wall clock time limit, seconds
+ *	TASKS=<cpus>;			CPUs required
+ *	QUEUETIME=<uts>;		submission time
+ *	STARTTIME=<uts>;		time execution started
+ *	RCLASS=<partition>;		SLURM partition name
+ *	NODES=<nodes>;			nodes required
+ *	RMEM=<MB>;			MB of memory required
+ *	RDISK=<MB>;			MB of disk space required
+ *	[COMMENT=<whatever>;]		job dependency or account number
+ *	[COMPLETETIME=<uts>;]		termination time
+ *	[SUSPENDTIME=<secs>;]		seconds that job has been suspended
+ *	UNAME=<user_name>;		user name
+ *	GNAME=<group_name>;		group name
+ * [#<JOBID>;...];			additional jobs, if any
+ *
  */
 /* RET 0 on success, -1 on failure */
 extern int	get_jobs(char *cmd_ptr, int *err_code, char **err_msg)
@@ -97,6 +120,12 @@ extern int	get_jobs(char *cmd_ptr, int *err_code, char **err_msg)
 		*err_code = -300;
 		*err_msg = "Invalid ARG value";
 		error("wiki: GETJOBS has invalid ARG value");
+		return -1;
+	}
+	if (job_list == NULL) {
+		*err_code = -140;
+		*err_msg = "Still performing initialization";
+		error("wiki: job_list not yet initilized");
 		return -1;
 	}
 	tmp_char++;
@@ -164,7 +193,7 @@ static char *   _dump_all_jobs(int *job_cnt, int state_info)
 
 static char *	_dump_job(struct job_record *job_ptr, int state_info)
 {
-	char tmp[512], *buf = NULL;
+	char tmp[16384], *buf = NULL;
 	uint32_t end_time, suspend_time;
 
 	if (!job_ptr)
@@ -179,15 +208,43 @@ static char *	_dump_job(struct job_record *job_ptr, int state_info)
 		return buf;
 
 	/* SLURM_INFO_VOLITILE or SLURM_INFO_ALL */
-	if ((job_ptr->job_state == JOB_PENDING)
-	&&  (job_ptr->details)
-	&&  (job_ptr->details->req_nodes)
-	&&  (job_ptr->details->req_nodes[0])) {
+	if (job_ptr->job_state == JOB_PENDING) {
+		char *req_features = _get_job_features(job_ptr);
+		if (req_features) {
+			snprintf(tmp, sizeof(tmp),
+				"RFEATURES=%s;", req_features);
+			xstrcat(buf, tmp);
+			xfree(req_features);
+		}
+		if ((job_ptr->details)
+		&&  (job_ptr->details->req_nodes)
+		&&  (job_ptr->details->req_nodes[0])) {
+			char *hosts = bitmap2wiki_node_name(
+				job_ptr->details->req_node_bitmap);
+			snprintf(tmp, sizeof(tmp),
+				"HOSTLIST=%s;", hosts);
+			xstrcat(buf, tmp);
+			xfree(hosts);
+		}
+		if ((job_ptr->details)
+		&&  (job_ptr->details->begin_time)) {
+			snprintf(tmp, sizeof(tmp),
+				"STARTDATE=%u;", (uint32_t)
+				job_ptr->details->begin_time);
+			xstrcat(buf, tmp);
+		}
+	} else if (!IS_JOB_FINISHED(job_ptr)) {
+		char *hosts;
+		if (job_ptr->cr_enabled) {
+			hosts = _full_task_list(job_ptr);
+		} else {
+			hosts = bitmap2wiki_node_name(
+				job_ptr->node_bitmap);
+		}
 		snprintf(tmp, sizeof(tmp),
-			"HOSTLIST=%s;",
-			bitmap2wiki_node_name(
-			job_ptr->details->req_node_bitmap));
+			"TASKLIST=%s;", hosts);
 		xstrcat(buf, tmp);
+		xfree(hosts);
 	}
 
 	if (job_ptr->job_state == JOB_FAILED) {
@@ -196,6 +253,9 @@ static char *	_dump_job(struct job_record *job_ptr, int state_info)
 			job_reason_string(job_ptr->state_reason));
 		xstrcat(buf, tmp);
 	}
+
+	if (job_ptr->batch_flag == 0)
+		xstrcat(buf, "FLAGS=INTERACTIVE;");
 
 	snprintf(tmp, sizeof(tmp), 
 		"UPDATETIME=%u;WCLIMIT=%u;",
@@ -222,9 +282,15 @@ static char *	_dump_job(struct job_record *job_ptr, int state_info)
 		_get_job_min_disk(job_ptr));
 	xstrcat(buf, tmp);
 
-	if (job_ptr->comment && job_ptr->comment[0]) {
+	if (job_ptr->dependency) {
+		/* Kludge for job dependency set via srun */
 		snprintf(tmp, sizeof(tmp),
-			"COMMENT=\"%s\";", job_ptr->account);
+			"COMMENT=\"DEPEND=afterany:%u\";",
+			job_ptr->dependency);
+		xstrcat(buf, tmp);
+	} else if (job_ptr->comment && job_ptr->comment[0]) {
+		snprintf(tmp, sizeof(tmp),
+			"COMMENT=\"%s\";", job_ptr->comment);
 		xstrcat(buf, tmp);
 	}
 
@@ -329,6 +395,8 @@ static char *	_get_job_state(struct job_record *job_ptr)
 		return "Idle";
 	if (base_state == JOB_RUNNING)
 		return "Running";
+	if (base_state == JOB_SUSPENDED)
+		return "Suspended";
 
 	if (state & JOB_COMPLETING) {
 		/* Give configured KillWait+10 for job
@@ -341,14 +409,12 @@ static char *	_get_job_state(struct job_record *job_ptr)
 			return "Running";
 	}
 
-	if (base_state == JOB_COMPLETE)
+	if ((base_state == JOB_COMPLETE) || (base_state == JOB_FAILED))
 		state_str = "Completed";
-	else if (base_state == JOB_SUSPENDED)
-		state_str = "Suspended";
-	else /* JOB_CANCELLED, JOB_FAILED, JOB_TIMEOUT, JOB_NODE_FAIL */
+	else /* JOB_CANCELLED, JOB_TIMEOUT, JOB_NODE_FAIL */
 		state_str = "Removed";
 	snprintf(return_msg, sizeof(return_msg), "%s;EXITCODE=%u",
-		state_str, job_ptr->exit_code);
+		state_str, WEXITSTATUS(job_ptr->exit_code));
 	return return_msg;
 }
 
@@ -357,6 +423,35 @@ static uint32_t	_get_job_end_time(struct job_record *job_ptr)
 	if (IS_JOB_FINISHED(job_ptr))
 		return (uint32_t) job_ptr->end_time;
 	return (uint32_t) 0;
+}
+
+/* Return a job's required features, if any joined with AND.
+ * If required features are joined by OR, then return NULL.
+ * Returned string must be xfreed. */
+static char * _get_job_features(struct job_record *job_ptr)
+{
+	int i;
+	char *rfeatures;
+
+	if ((job_ptr->details == NULL)
+	||  (job_ptr->details->features == NULL)
+	||  (job_ptr->details->features[0] == '\0'))
+		return NULL;
+
+	rfeatures = xstrdup(job_ptr->details->features);
+	/* Translate "&" to ":" */
+	for (i=0; ; i++) {
+		if (rfeatures[i] == '\0')
+			return rfeatures;
+		if (rfeatures[i] == '|')
+			break;
+		if (rfeatures[i] == '&')
+			rfeatures[i] = ':';
+	}
+
+	/* Found '|' (OR), which is not supported by Moab */
+	xfree(rfeatures);
+	return NULL;
 }
 
 /* returns how long job has been suspended, in seconds */
@@ -369,3 +464,38 @@ static uint32_t	_get_job_suspend_time(struct job_record *job_ptr)
 	}
 	return (uint32_t) 0;
 }
+
+/* Return a job's task list. 
+ * List hostname once for each allocated CPU on that node. 
+ * NOTE: xfree the return value.  */
+static char * _full_task_list(struct job_record *job_ptr)
+{
+	int i, j;
+	char *buf = NULL, *host;
+	hostlist_t hl = hostlist_create(job_ptr->nodes);
+
+	if (hl == NULL) {
+		error("hostlist_create error for job %u, %s",
+			job_ptr->job_id, job_ptr->nodes);
+		return buf;
+	}
+
+	for (i=0; i<job_ptr->alloc_lps_cnt; i++) {
+		host = hostlist_shift(hl);
+		if (host == NULL) {
+			error("bad alloc_lps_cnt for job %u (%s, %d)", 
+				job_ptr->job_id, job_ptr->nodes,
+				job_ptr->alloc_lps_cnt);
+			break;
+		}
+		for (j=0; j<job_ptr->alloc_lps[i]; j++) {
+			if (buf)
+				xstrcat(buf, ":");
+			xstrcat(buf, host);
+		}
+		free(host);
+	}
+	hostlist_destroy(hl);
+	return buf;
+}
+

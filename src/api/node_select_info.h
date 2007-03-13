@@ -10,7 +10,7 @@
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -59,6 +59,10 @@ typedef struct {
 	int nodecard;
 	int node_cnt;
 	int *bp_inx;            /* list index pairs into node_table for *nodes:
+				 * start_range_1, end_range_1,
+				 * start_range_2, .., -1  */
+	int *ionode_inx;        /* list index pairs for ionodes in the
+				 * node listed for *ionodes:
 				 * start_range_1, end_range_1,
 				 * start_range_2, .., -1  */
 	char *blrtsimage;       /* BlrtsImage for this block */

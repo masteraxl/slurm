@@ -4,7 +4,7 @@
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -51,7 +51,7 @@ extern int	start_job(char *cmd_ptr, int *err_code, char **err_msg)
 	int i;
 	uint32_t jobid;
 	hostlist_t hl;
-	char host_string[2048];
+	char host_string[MAXHOSTRANGELEN];
 	static char reply_msg[128];
 
 	arg_ptr = strstr(cmd_ptr, "ARG=");
@@ -166,16 +166,15 @@ static int	_start_job(uint32_t jobid, char *hostlist,
 		error("wiki: clearing exc_nodes for job %u", jobid);
 		xfree(job_ptr->details->exc_nodes);
 		if (job_ptr->details->exc_node_bitmap)
-			bit_free(job_ptr->details->exc_node_bitmap);
+			FREE_NULL_BITMAP(job_ptr->details->exc_node_bitmap);
 	}
 
 	/* start it now */
 	xfree(job_ptr->details->req_nodes);
 	job_ptr->details->req_nodes = new_node_list;
-	if (job_ptr->details->req_node_bitmap)
-		bit_free(job_ptr->details->req_node_bitmap);
+	FREE_NULL_BITMAP(job_ptr->details->req_node_bitmap);
 	job_ptr->details->req_node_bitmap = new_bitmap;
-	job_ptr->priority = 1000000;
+	job_ptr->priority = 100000000;
 
  fini:	unlock_slurmctld(job_write_lock);
 	if (rc == 0) {	/* New job to start ASAP */
@@ -188,12 +187,26 @@ static int	_start_job(uint32_t jobid, char *hostlist,
 			uint16_t wait_reason = 0;
 			char *wait_string;
 
-			error("wiki: failed to start job %u", jobid);
+			/* restore job state */
 			job_ptr->priority = 0;
+			if (job_ptr->details) {
+				/* Details get cleared on job abort; happens
+				 * if the request is sufficiently messed up.
+				 * This happens when Moab tries to start a
+				 * a job on invalid nodes (wrong partition). */
+				xfree(job_ptr->details->req_nodes);
+				FREE_NULL_BITMAP(job_ptr->details->
+						 req_node_bitmap);
+			}
 			if (job_ptr->job_state == JOB_FAILED)
 				wait_string = "Invalid request, job aborted";
 			else {
 				wait_reason = job_ptr->state_reason;
+				if (wait_reason == WAIT_HELD) {
+					/* some job is completing, slurmctld did
+					 * not even try to schedule this job */
+					wait_reason = WAIT_RESOURCES;
+				}
 				wait_string = job_reason_string(wait_reason);
 				job_ptr->state_reason = WAIT_HELD;
 			}

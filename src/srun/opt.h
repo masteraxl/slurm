@@ -5,7 +5,7 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <grondona1@llnl.gov>, et. al.
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -52,7 +52,7 @@
 #include "src/common/env.h"
 #include "src/srun/fname.h"
 
-#define MAX_THREADS	32
+#define MAX_THREADS	60
 #define MAX_USERNAME	9
 
 #define INT_UNASSIGNED ((int)-1)
@@ -95,7 +95,8 @@ typedef struct srun_options {
 	uid_t euid;		/* effective user --uid=user	*/
 	gid_t egid;		/* effective group --gid=group	*/
 	char *cwd;		/* current working directory	*/
-
+	bool cwd_set;		/* true if cwd is explicitly set */
+	
 	int  nprocs;		/* --nprocs=n,      -n n	*/
 	bool nprocs_set;	/* true if nprocs explicitly set */
 	int  cpus_per_task;	/* --cpus-per-task=n, -c n	*/
@@ -126,6 +127,7 @@ typedef struct srun_options {
 				 * when -m plane=<# of lllp per
 				 * plane> */      
 	char *job_name;		/* --job-name=,     -J name	*/
+	bool job_name_set;	/* true if job_name explicitly set */
 	unsigned int jobid;     /* --jobid=jobid                */
 	bool jobid_set;		/* true if jobid explicitly set */
 	char *mpi_type;		/* --mpi=type			*/
@@ -194,6 +196,7 @@ typedef struct srun_options {
 
 	/* BLUEGENE SPECIFIC */
 	uint16_t geometry[SYSTEM_DIMENSIONS]; /* --geometry, -g	*/
+	bool reboot;		/* --reboot			*/
 	bool no_rotate;		/* --no_rotate, -R		*/
 	uint16_t conn_type;	/* --conn-type 			*/
 	char *blrtsimage;       /* --blrtsimage BlrtsImage for block */
@@ -208,7 +211,7 @@ typedef struct srun_options {
 	uint16_t mail_type;	/* --mail-type			*/
 	char *mail_user;	/* --mail-user			*/
 	char *ctrl_comm_ifhn;	/* --ctrl-comm-ifhn		*/
-	
+	bool get_user_env;	/* --get-user-env		*/
 } opt_t;
 
 extern opt_t opt;

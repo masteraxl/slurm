@@ -8,7 +8,7 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -86,7 +86,7 @@
 #define JOB_HASH_INX(_job_id)	(_job_id % hash_table_size)
 
 /* Change JOB_STATE_VERSION value when changing the state save format */
-#define JOB_STATE_VERSION      "VER004"
+#define JOB_STATE_VERSION      "VER005"
 
 /* Global variables */
 List   job_list = NULL;		/* job_record list */
@@ -1490,13 +1490,13 @@ extern int job_signal(uint32_t job_id, uint16_t signal, uint16_t batch_flag,
 	if ((job_ptr->user_id != uid) && (!super_user)) {
 		error("Security violation, JOB_CANCEL RPC from uid %d",
 		      uid);
-		return ESLURM_USER_ID_MISSING;
+		return ESLURM_ACCESS_DENIED;
 	}
 	if ((!super_user) && job_ptr->part_ptr
 	    &&  (job_ptr->part_ptr->root_only)) {
 		info("Attempt to cancel job in RootOnly partition from uid %d",
 		     uid);
-		return ESLURM_USER_ID_MISSING;
+		return ESLURM_ACCESS_DENIED;
 	}
 
 	if (IS_JOB_FINISHED(job_ptr))
@@ -1710,6 +1710,7 @@ static int _job_create(job_desc_msg_t * job_desc, int allocate, int will_run,
 	uint32_t total_nodes, max_procs;
 #if SYSTEM_DIMENSIONS
 	uint16_t geo[SYSTEM_DIMENSIONS];
+	uint16_t reboot;
 	uint16_t rotate;
 	uint16_t conn_type;
 #endif
@@ -1839,9 +1840,16 @@ static int _job_create(job_desc_msg_t * job_desc, int allocate, int will_run,
 		job_desc->min_nodes = tot;
 	}
 	select_g_get_jobinfo(job_desc->select_jobinfo,
+			     SELECT_DATA_REBOOT, &reboot);
+	if (reboot == (uint16_t) NO_VAL) {
+		reboot = 0;	/* default is no reboot */
+		select_g_set_jobinfo(job_desc->select_jobinfo,
+				     SELECT_DATA_REBOOT, &reboot);
+	}
+	select_g_get_jobinfo(job_desc->select_jobinfo,
 			     SELECT_DATA_ROTATE, &rotate);
 	if (rotate == (uint16_t) NO_VAL) {
-		rotate = (uint16_t) 1;
+		rotate = 1;	/* refault is to rotate */
 		select_g_set_jobinfo(job_desc->select_jobinfo,
 				     SELECT_DATA_ROTATE, &rotate);
 	}
@@ -2576,7 +2584,21 @@ static void _job_timed_out(struct job_record *job_ptr)
  */
 static int _validate_job_desc(job_desc_msg_t * job_desc_msg, int allocate, 
 			      uid_t submit_uid)
-{	
+{
+	static bool wiki_sched = false;
+	static bool wiki_sched_test = false;
+
+	/* Permit normal user to specify job id only for sched/wiki
+	 * and sched/wiki2 */
+	if (!wiki_sched_test) {
+		char *sched_type = slurm_get_sched_type();
+		if ((strcmp(sched_type, "sched/wiki") == 0) ||
+		    (strcmp(sched_type, "sched/wiki2") == 0))
+			wiki_sched = true;
+		xfree(sched_type);
+		wiki_sched_test = true;
+	}
+
 	if ((job_desc_msg->num_procs == NO_VAL)
 	    &&  (job_desc_msg->min_nodes == NO_VAL)
 	    &&  (job_desc_msg->req_nodes == NULL)) {
@@ -2615,7 +2637,7 @@ static int _validate_job_desc(job_desc_msg_t * job_desc_msg, int allocate,
 
 	if (job_desc_msg->job_id != NO_VAL) {
 		struct job_record *dup_job_ptr;
-		if ((submit_uid != 0) && 
+		if ((submit_uid != 0) && (!wiki_sched) &&
 		    (submit_uid != slurmctld_conf.slurm_user_id)) {
 			info("attempt by uid %u to set job_id", submit_uid);
 			return ESLURM_INVALID_JOB_ID;
@@ -2644,8 +2666,6 @@ static int _validate_job_desc(job_desc_msg_t * job_desc_msg, int allocate,
 			job_desc_msg->nice = NICE_OFFSET;
 	}
 
-	if (job_desc_msg->num_procs == NO_VAL)
-		job_desc_msg->num_procs = 1;	/* default cpu count of 1 */
 	if (job_desc_msg->min_sockets == (uint16_t) NO_VAL)
 		job_desc_msg->min_sockets = 1;	/* default socket count of 1 */
 	if (job_desc_msg->min_cores == (uint16_t) NO_VAL)
@@ -2654,6 +2674,8 @@ static int _validate_job_desc(job_desc_msg_t * job_desc_msg, int allocate,
 		job_desc_msg->min_threads = 1;	/* default thread count of 1 */
 	if (job_desc_msg->min_nodes == NO_VAL)
 		job_desc_msg->min_nodes = 1;	/* default node count of 1 */
+	if (job_desc_msg->num_procs == NO_VAL)
+		job_desc_msg->num_procs = job_desc_msg->min_nodes;
 	if (job_desc_msg->min_sockets == (uint16_t) NO_VAL)
 		job_desc_msg->min_sockets = 1;	/* default socket count of 1 */
 	if (job_desc_msg->min_cores == (uint16_t) NO_VAL)
@@ -3321,11 +3343,13 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 		if (super_user ||
 		    (job_ptr->time_limit > job_specs->time_limit)) {
 			time_t old_time =  job_ptr->time_limit;
+			if (old_time == INFINITE)	/* one year in mins */
+				old_time = (365 * 24 * 60);
 			job_ptr->time_limit = job_specs->time_limit;
-			if (job_ptr->time_limit == INFINITE)	/* one year */
+			if (job_ptr->time_limit == INFINITE) {	/* one year */
 				job_ptr->end_time = now +
 					(365 * 24 * 60 * 60);
-			else {
+			} else {
 				/* Update end_time based upon change
 				 * to preserve suspend time info */
 				job_ptr->end_time = job_ptr->end_time +
@@ -3669,6 +3693,7 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 
 #ifdef HAVE_BG
  {
+	 uint16_t reboot = (uint16_t) NO_VAL;
 	 uint16_t rotate = (uint16_t) NO_VAL;
 	 uint16_t geometry[SYSTEM_DIMENSIONS] = {(uint16_t) NO_VAL};
 	 char *image = NULL;
@@ -3685,6 +3710,19 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 					      SELECT_DATA_ROTATE, &rotate);
 		 }
 	 }
+
+	 select_g_get_jobinfo(job_specs->select_jobinfo,
+			      SELECT_DATA_REBOOT, &reboot);
+	 if (reboot != (uint16_t) NO_VAL) {
+		if (!IS_JOB_PENDING(job_ptr))
+			error_code = ESLURM_DISABLED;
+		else {
+			info("update_job: setting reboot to %u for "
+			     "jobid %u", reboot, job_ptr->job_id);
+			select_g_set_jobinfo(job_ptr->select_jobinfo,
+					     SELECT_DATA_REBOOT, &reboot);
+		}
+	}
 	
 	 select_g_get_jobinfo(job_specs->select_jobinfo,
 			      SELECT_DATA_GEOMETRY, geometry);
@@ -3695,7 +3733,7 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 			 uint32_t i, tot = 1;
 			 for (i=0; i<SYSTEM_DIMENSIONS; i++)
 				 tot *= geometry[i];
-			 info("update_job: setting rotate to %ux%ux%u "
+			 info("update_job: setting geometry to %ux%ux%u "
 			      "min_nodes=%u for jobid %u", 
 			      geometry[0], geometry[1], 
 			      geometry[2], tot, job_ptr->job_id);
@@ -4576,11 +4614,9 @@ extern int job_suspend(suspend_msg_t *sus_ptr, uid_t uid,
 
 	job_ptr->time_last_active = now;
 	job_ptr->suspend_time = now;
-	
-    reply:
-	if(job_ptr)
-		jobacct_g_suspend_slurmctld(job_ptr);
+	jobacct_g_suspend_slurmctld(job_ptr);
 
+    reply:
 	if (conn_fd >= 0) {
 		slurm_msg_t_init(&resp_msg);
 		resp_msg.msg_type  = RESPONSE_SLURM_RC;

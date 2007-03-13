@@ -4,7 +4,7 @@
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -53,28 +53,38 @@ extern int	job_requeue_wiki(char *cmd_ptr, int *err_code, char **err_msg)
 	arg_ptr = strstr(cmd_ptr, "ARG=");
 	if (arg_ptr == NULL) {
 		*err_code = -300;
-		*err_msg = "JOBREQUEUE lacks ARG";
-		error("wiki: JOBREQUEUE lacks ARG");
+		*err_msg = "REQUEUEJOB lacks ARG";
+		error("wiki: REQUEUEJOB lacks ARG");
 		return -1;
 	}
 	jobid = strtoul(arg_ptr+4, &tmp_char, 10);
 	if ((tmp_char[0] != '\0') && (!isspace(tmp_char[0]))) {
 		*err_code = -300;
 		*err_msg = "Invalid ARG value";
-		error("wiki: JOBREQUEUE has invalid jobid");
+		error("wiki: REQUEUEJOB has invalid jobid");
 		return -1;
 	}
 
 	lock_slurmctld(job_write_lock);
 	slurm_rc = job_requeue(0, jobid, -1);
-	unlock_slurmctld(job_write_lock);
-	if (slurm_rc != SLURM_SUCCESS) {
+	if (slurm_rc == SLURM_SUCCESS) {
+		/* We need to clear the required node list here.
+		 * If the job was submitted with srun and a 
+		 * required node list, it gets lost here. */
+		struct job_record *job_ptr;
+		job_ptr = find_job_record(jobid);
+		if (job_ptr && job_ptr->details) {
+			xfree(job_ptr->details->req_nodes);
+			FREE_NULL_BITMAP(job_ptr->details->
+					 req_node_bitmap);
+		}
+	} else {
 		*err_code = -700;
 		*err_msg = slurm_strerror(slurm_rc);
 		error("wiki: Failed to requeue job %u (%m)", jobid);
 		return -1;
 	}
-
+	unlock_slurmctld(job_write_lock);
 	snprintf(reply_msg, sizeof(reply_msg),
 		"job %u requeued successfully", jobid);
 	*err_msg = reply_msg;

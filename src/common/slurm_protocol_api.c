@@ -4,7 +4,7 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Kevin Tew <tew1@llnl.gov>, et. al.
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -802,16 +802,12 @@ int slurm_receive_msg(slurm_fd fd, slurm_msg_t *msg, int timeout)
 		/* convert secs to msec */
                 timeout  = slurm_get_msg_timeout() * 1000; 
 
-	if(timeout >= (slurm_get_msg_timeout() * 10000)) {
-		error("slurm_receive_msg: "
-		      "You are sending a message with timeout's greater "
-		      "than %d seconds, your's is %d seconds", 
-		      (slurm_get_msg_timeout() * 10), 
-		      (timeout/1000));
+	else if(timeout > (slurm_get_msg_timeout() * 10000)) {
+		error("You are sending a message with very long "
+		      "timeout of %d seconds", (timeout/1000));
 	} else if(timeout < 1000) {
-		debug("slurm_receive_msg: "
-		      "You are sending a message with a very short timeout of "
-		      "%d milliseconds", timeout);
+		error("You are sending a message with a very short "
+		      "timeout of %d msecs", timeout);
 	} 
 	
 
@@ -1847,12 +1843,11 @@ int slurm_send_recv_controller_msg(slurm_msg_t *req, slurm_msg_t *resp)
 			g_slurm_auth_destroy(resp->auth_cred);
 		else 
 			rc = -1;
-			
+
 		if ((rc == 0)
 		    && (resp->msg_type == RESPONSE_SLURM_RC)
 		    && ((((return_code_msg_t *) resp->data)->return_code) 
 			== ESLURM_IN_STANDBY_MODE)
-		    && (req->msg_type != MESSAGE_NODE_REGISTRATION_STATUS)
 		    && (backup_controller_flag)
 		    && (difftime(time(NULL), start_time)
 			< (slurmctld_timeout + (slurmctld_timeout / 2)))) {
@@ -2065,6 +2060,7 @@ List slurm_send_recv_msgs(const char *nodelist, slurm_msg_t *msg,
 				}
 			list_iterator_destroy(itr);
 		}
+		xfree(msg->forward.nodelist);
 		free(name);
 		break;		
 	}
@@ -2158,6 +2154,7 @@ int slurm_send_recv_rc_msg_only_one(slurm_msg_t *req, int *rc, int timeout)
 		if(resp.auth_cred)
 			g_slurm_auth_destroy(resp.auth_cred);	
 		*rc = slurm_get_return_code(resp.msg_type, resp.data);
+		slurm_free_msg_data(resp.msg_type, resp.data);
 		ret_c = 0;
 	} else 
 		ret_c = -1;
@@ -2165,35 +2162,23 @@ int slurm_send_recv_rc_msg_only_one(slurm_msg_t *req, int *rc, int timeout)
 }
 
 /*
- *  Same as above, but send message to controller
+ *  Send message to controller and get return code.
+ *  Make use of slurm_send_recv_controller_msg(), which handles 
+ *  support for backup controller and retry during transistion.
  */
 int slurm_send_recv_controller_rc_msg(slurm_msg_t *req, int *rc)
 {
-	slurm_fd fd = -1;
-	int ret_c = 0;
-	slurm_addr ctrl_addr;
+	int ret_c;
 	slurm_msg_t resp;
 
-	slurm_msg_t_init(&resp);
-	
-	/* Just in case the caller didn't initialize his slurm_msg_t, and
-	 * since we KNOW that we are only sending to one node (the controller),
-	 * we initialize some forwarding variables to disable forwarding.
-	 */
-	forward_init(&req->forward, NULL);
-	req->ret_list = NULL;
-	req->forward_struct = NULL;
-		
-	if ((fd = slurm_open_controller_conn(&ctrl_addr)) < 0)
-		return -1;
-	
-	if(!_send_and_recv_msg(fd, req, &resp, 0)) {
-		if(resp.auth_cred)
-			g_slurm_auth_destroy(resp.auth_cred);	
+	if(!slurm_send_recv_controller_msg(req, &resp)) {
 		*rc = slurm_get_return_code(resp.msg_type, resp.data);
+		slurm_free_msg_data(resp.msg_type, resp.data);
 		ret_c = 0;
-	} else 
+	} else {
 		ret_c = -1;
+	}
+	
 	return ret_c;
 }
 
@@ -2256,6 +2241,7 @@ extern void slurm_free_msg(slurm_msg_t * msg)
 		list_destroy(msg->ret_list);
 		msg->ret_list = NULL;
 	}
+
 	xfree(msg);
 }
 

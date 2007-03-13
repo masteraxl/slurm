@@ -4,7 +4,7 @@
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -41,17 +41,17 @@
 #include "src/slurmctld/state_save.h"
 
 static char *	_copy_nodelist_no_dup(char *node_list);
-static int	_start_job(uint32_t jobid, char *hostlist, 
+static int	_start_job(uint32_t jobid, int task_cnt, char *hostlist, 
 			int *err_code, char **err_msg);
 
 /* RET 0 on success, -1 on failure */
 extern int	start_job(char *cmd_ptr, int *err_code, char **err_msg)
 {
 	char *arg_ptr, *task_ptr, *node_ptr, *tmp_char;
-	int i;
+	int i, task_cnt = 0;
 	uint32_t jobid;
 	hostlist_t hl;
-	char host_string[2048];
+	char host_string[MAXHOSTRANGELEN];
 	static char reply_msg[128];
 
 	arg_ptr = strstr(cmd_ptr, "ARG=");
@@ -77,9 +77,13 @@ extern int	start_job(char *cmd_ptr, int *err_code, char **err_msg)
 		return -1;
 	}
 	node_ptr = task_ptr + 9;
+	if (node_ptr[0])
+		task_cnt = 1;
 	for (i=0; node_ptr[i]!='\0'; i++) {
-		if (node_ptr[i] == ':')
+		if (node_ptr[i] == ':') {
 			node_ptr[i] = ',';
+			task_cnt++;
+		}
 	}
 	hl = hostlist_create(node_ptr);
 	if (hl == NULL) {
@@ -100,7 +104,7 @@ extern int	start_job(char *cmd_ptr, int *err_code, char **err_msg)
 			host_string);
 		return -1;
 	}
-	if (_start_job(jobid, host_string, err_code, err_msg) != 0)
+	if (_start_job(jobid, task_cnt, host_string, err_code, err_msg) != 0)
 		return -1;
 
 	snprintf(reply_msg, sizeof(reply_msg), 
@@ -109,10 +113,10 @@ extern int	start_job(char *cmd_ptr, int *err_code, char **err_msg)
 	return 0;
 }
 
-static int	_start_job(uint32_t jobid, char *hostlist,
+static int	_start_job(uint32_t jobid, int task_cnt, char *hostlist,
 			int *err_code, char **err_msg)
 {
-	int rc = 0;
+	int rc = 0, old_task_cnt = 1;
 	struct job_record *job_ptr;
 	/* Write lock on job info, read lock on node info */
 	slurmctld_lock_t job_write_lock = {
@@ -161,21 +165,22 @@ static int	_start_job(uint32_t jobid, char *hostlist,
 		goto fini;
 	}
 
-	/* Remove any excluded nodes, incompatable with Wiki */
-	if (job_ptr->details->exc_nodes) {
-		error("wiki: clearing exc_nodes for job %u", jobid);
-		xfree(job_ptr->details->exc_nodes);
-		if (job_ptr->details->exc_node_bitmap)
-			bit_free(job_ptr->details->exc_node_bitmap);
+	/* User excluded node list incompatable with Wiki
+	 * Exclude all nodes not explicitly requested */
+	if (job_ptr->cr_enabled && task_cnt) {
+		FREE_NULL_BITMAP(job_ptr->details->exc_node_bitmap);
+		job_ptr->details->exc_node_bitmap = bit_copy(new_bitmap);
+		bit_not(job_ptr->details->exc_node_bitmap);
 	}
 
 	/* start it now */
 	xfree(job_ptr->details->req_nodes);
 	job_ptr->details->req_nodes = new_node_list;
-	if (job_ptr->details->req_node_bitmap)
-		bit_free(job_ptr->details->req_node_bitmap);
+	FREE_NULL_BITMAP(job_ptr->details->req_node_bitmap);
 	job_ptr->details->req_node_bitmap = new_bitmap;
-	job_ptr->priority = 1000000;
+	old_task_cnt = job_ptr->num_procs;
+	job_ptr->num_procs = MAX(task_cnt, old_task_cnt); 
+	job_ptr->priority = 100000000;
 
  fini:	unlock_slurmctld(job_write_lock);
 	if (rc == 0) {	/* New job to start ASAP */
@@ -188,12 +193,27 @@ static int	_start_job(uint32_t jobid, char *hostlist,
 			uint16_t wait_reason = 0;
 			char *wait_string;
 
-			error("wiki: failed to start job %u", jobid);
+			/* restore job state */
 			job_ptr->priority = 0;
+			job_ptr->num_procs = old_task_cnt;
+			if (job_ptr->details) {
+				/* Details get cleared on job abort; happens 
+				 * if the request is sufficiently messed up.
+				 * This happens when Moab tries to start a
+				 * a job on invalid nodes (wrong partition). */ 
+				xfree(job_ptr->details->req_nodes);
+				FREE_NULL_BITMAP(job_ptr->details->
+						 req_node_bitmap);
+			}
 			if (job_ptr->job_state == JOB_FAILED)
 				wait_string = "Invalid request, job aborted";
 			else {
 				wait_reason = job_ptr->state_reason;
+				if (wait_reason == WAIT_HELD) {
+					/* some job is completing, slurmctld did
+					 * not even try to schedule this job */
+					wait_reason = WAIT_RESOURCES;
+				}
 				wait_string = job_reason_string(wait_reason);
 				job_ptr->state_reason = WAIT_HELD;
 			}

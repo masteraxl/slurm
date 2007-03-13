@@ -4,7 +4,7 @@
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -54,11 +54,16 @@ static char *	_get_node_state(struct node_record *node_ptr);
  * RET 0 on success, -1 on failure
  *
  * Response format
- * ARG=<cnt>#<NODEID>:STATE=<state>;
- *                    FEATURE=<feature:feature>;
- *                    CCLASS=<part>:<cpus>[,<part>:<cpus>];
- *                    CMEMORY=<mb>;CDISK=<mb>;CPROC=<cpus>;
- *         [#<NODEID>:...];
+ * ARG=<cnt>#<NODEID>:
+ *	STATE=<state>;		Moab equivalent node state
+ *	CCLASS=<[part:cpus]>;	SLURM partition with CPU count of node,
+ *				make have more than one partition
+ *	CMEMORY=<MB>;		MB of memory on node
+ *	CDISK=<MB>;		MB of disk space on node
+ *	CPROCS=<cpus>;		CPU count on node
+ *	[FEATURE=<feature>;]	features associated with node, if any,
+ *				colon separator
+ *  [#<NODEID>:...];
  */
 extern int	get_nodes(char *cmd_ptr, int *err_code, char **err_msg)
 {
@@ -172,13 +177,9 @@ static char *	_dump_node(struct node_record *node_ptr, int state_info)
 		cpu_cnt = node_ptr->cpus;
 	}
 	for (i=0; i<node_ptr->part_cnt; i++) {
-		char *header;
 		if (i == 0)
-			header = "CCLASS=";
-		else
-			header = ",";
-		snprintf(tmp, sizeof(tmp), "%s%s:%u", 
-			header,
+			xstrcat(buf, "CCLASS=");
+		snprintf(tmp, sizeof(tmp), "[%s:%u]", 
 			node_ptr->part_pptr[i]->name,
 			cpu_cnt);
 		xstrcat(buf, tmp);
@@ -210,12 +211,11 @@ static char *	_dump_node(struct node_record *node_ptr, int state_info)
 
 	if (node_ptr->config_ptr
 	&&  node_ptr->config_ptr->feature) {
-		snprintf(tmp, sizeof(tmp), "FEATURES=%s;",
+		snprintf(tmp, sizeof(tmp), "FEATURE=%s;",
 			node_ptr->config_ptr->feature);
-		/* comma separated to colon */
+		/* comma separator to colon */
 		for (i=0; (tmp[i] != '\0'); i++) {
-			if ((tmp[i] == ',')
-			||  (tmp[i] == '|'))
+			if (tmp[i] == ',')
 				tmp[i] = ':';
 		}
 		xstrcat(buf, tmp);

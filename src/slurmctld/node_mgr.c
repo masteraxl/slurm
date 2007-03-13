@@ -9,7 +9,7 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>, et. al.
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -1094,8 +1094,7 @@ int update_node ( update_node_msg_t * update_node_msg )
 	}
 	hostlist_destroy (host_list);
 
-	if ((error_code == 0) && (update_node_msg->features) &&
-	    (update_node_msg->features[0])) {
+	if ((error_code == 0) && (update_node_msg->features)) {
 		error_code = _update_node_features(
 			update_node_msg->node_names, 
 			update_node_msg->features);
@@ -1190,7 +1189,10 @@ static int _update_node_features(char *node_names, char *features)
 		} else if (tmp_cnt == config_cnt) {
 			/* all nodes changed, update in situ */
 			xfree(config_ptr->feature);
-			config_ptr->feature = xstrdup(features);
+			if (features[0])
+				config_ptr->feature = xstrdup(features);
+			else
+				config_ptr->feature = NULL;
 		} else {
 			/* partial update, split config_record */
 			new_config_ptr = create_config_record();
@@ -1198,7 +1200,10 @@ static int _update_node_features(char *node_names, char *features)
 				first_new = new_config_ptr;
 			memcpy(new_config_ptr, config_ptr, 
 				sizeof(struct config_record));
-			new_config_ptr->feature = xstrdup(features);
+			if (features[0])
+				new_config_ptr->feature = xstrdup(features);
+			else
+				config_ptr->feature = NULL;
 			new_config_ptr->node_bitmap = 
 				bit_copy(tmp_bitmap);
 			new_config_ptr->nodes = 
@@ -1508,6 +1513,8 @@ validate_node_specs (char *node_name, uint16_t cpus,
 			last_node_update = time (NULL);
 			node_ptr->node_state &= (~NODE_STATE_COMPLETING);
 		}
+		select_g_update_node_state((node_ptr - node_record_table_ptr),
+					   node_ptr->node_state);
 		_sync_bitmaps(node_ptr, job_count);
 	}
 
@@ -1696,6 +1703,9 @@ extern int validate_nodes_via_front_end(uint32_t job_count,
 				updated_job = true;
 				node_ptr->node_state &= (~NODE_STATE_COMPLETING);
 			}
+			select_g_update_node_state(
+				(node_ptr - node_record_table_ptr),
+				node_ptr->node_state);
 			_sync_bitmaps(node_ptr, jobs_on_node);
 		}
 	}

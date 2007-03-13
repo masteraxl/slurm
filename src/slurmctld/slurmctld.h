@@ -6,7 +6,7 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -108,6 +108,10 @@
 /* Check for jobs reaching their time limit every PERIODIC_TIMEOUT seconds */
 #define	PERIODIC_TIMEOUT	60
 
+/* Attempt to purge defunct job records and resend job kill requests
+ * every PURGE_JOB_INTERVAL seconds */
+#define PURGE_JOB_INTERVAL 60
+
 /* Pathname of group file record for checking update times */
 #define GROUP_FILE	"/etc/group"
 
@@ -116,7 +120,7 @@
 #define	PERIODIC_GROUP_CHECK	600
 
 /* Seconds to wait for backup controller response to REQUEST_CONTROL RPC */
-#define CONTROL_TIMEOUT 4000	/* milliseconds */
+#define CONTROL_TIMEOUT 4	/* seconds */
 
 /*****************************************************************************\
  *  General configuration parameters and data structures

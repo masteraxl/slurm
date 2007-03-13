@@ -7,7 +7,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Jim Garlick <garlick@llnl.gov>, Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -69,7 +69,6 @@ strong_alias(bit_or,		slurm_bit_or);
 strong_alias(bit_set_count,	slurm_bit_set_count);
 strong_alias(bit_clear_count,	slurm_bit_clear_count);
 strong_alias(bit_nset_max_count,slurm_bit_nset_max_count);
-strong_alias(bit_and_set_count,	slurm_bit_and_set_count);
 strong_alias(int_and_set_count,	slurm_int_and_set_count);
 strong_alias(bit_rotate_copy,	slurm_bit_rotate_copy);
 strong_alias(bit_rotate,	slurm_bit_rotate);
@@ -83,6 +82,7 @@ strong_alias(bit_unfmt_binmask,	slurm_bit_unfmt_binmask);
 strong_alias(bit_fls,		slurm_bit_fls);
 strong_alias(bit_fill_gaps,	slurm_bit_fill_gaps);
 strong_alias(bit_super_set,	slurm_bit_super_set);
+strong_alias(bit_overlap,	slurm_bit_overlap);
 strong_alias(bit_equal,		slurm_bit_equal);
 strong_alias(bit_copy,		slurm_bit_copy);
 strong_alias(bit_pick_cnt,	slurm_bit_pick_cnt);
@@ -338,7 +338,7 @@ bit_noc(bitstr_t *b, int n, int seed)
 		}
 	}
 
-	cnt = 0;					/* start at beginning */
+	cnt = 0;	/* start at beginning */
 	for (bit = 0; bit < _bitstr_bits(b); bit++) {
 		if (bit_test(b, bit)) {		/* fail */
 			if (bit >= seed)
@@ -665,6 +665,25 @@ bit_set_count(bitstr_t *b)
 }
 
 /*
+ * return number of bits set in b1 that are also set in b2, 0 if no overlap
+ */
+extern int
+bit_overlap(bitstr_t *b1, bitstr_t *b2)
+{
+	int count = 0;
+	bitoff_t bit;
+	
+	_assert_bitstr_valid(b1);
+	_assert_bitstr_valid(b2);
+	assert(_bitstr_bits(b1) == _bitstr_bits(b2));
+
+	for (bit = 0; bit < _bitstr_bits(b1); bit += sizeof(bitstr_t)*8)
+		count += hweight(b1[_bit_word(bit)] & b2[_bit_word(bit)]);
+
+	return count;
+}
+
+/*
  * Count the number of bits clear in bitstring.
  *   b (IN)		bitstring to check
  *   RETURN		count of clear bits 
@@ -706,29 +725,6 @@ bit_nset_max_count(bitstr_t *b)
 	}
 
 	return maxcnt;
-}
-
-/*
- * And two bitstrings and count the number of set bits: SUM(b1 & b2)
- *   b1 (IN)		first bitstring
- *   b2 (IN)		second bitstring
- */
-int
-bit_and_set_count(bitstr_t *b1, bitstr_t *b2) {
-	bitoff_t bit;
-	bitstr_t word;
-	int sum;
-
-	_assert_bitstr_valid(b1);
-	_assert_bitstr_valid(b2);
-	assert(_bitstr_bits(b1) == _bitstr_bits(b2));
-
-	sum = 0;
-	for (bit = 0; bit < _bitstr_bits(b1); bit += sizeof(bitstr_t)*8) {
-		word = b1[_bit_word(bit)] & b2[_bit_word(bit)];
-		sum += hweight(word);
-	}
-	return(sum);
 }
 
 /*
@@ -1219,3 +1215,4 @@ bit_get_pos_num(bitstr_t *b, bitoff_t pos)
 
 	return cnt;
 }
+

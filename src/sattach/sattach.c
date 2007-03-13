@@ -6,7 +6,7 @@
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Christopher J. Morrone <morrone2@llnl.gov>
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -474,7 +474,7 @@ static int _message_socket_accept(eio_obj_t *obj, List objs)
 	   in /etc/hosts. */
 	uc = (unsigned char *)&((struct sockaddr_in *)&addr)->sin_addr.s_addr;
 	port = ((struct sockaddr_in *)&addr)->sin_port;
-	debug2("got message connection from %u.%u.%u.%u:%d",
+	debug2("got message connection from %u.%u.%u.%u:%hu",
 	       uc[0], uc[1], uc[2], uc[3], ntohs(port));
 	fflush(stdout);
 
@@ -600,7 +600,7 @@ _handle_msg(message_thread_state_t *mts, slurm_msg_t *msg)
 
 /**********************************************************************
  * Functions for manipulating the MPIR_* global variables which
- * are accessed by parallel debuggers which trace slaunch.
+ * are accessed by parallel debuggers which trace sattach.
  **********************************************************************/
 static void
 _mpir_init(int num_tasks)

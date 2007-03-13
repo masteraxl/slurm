@@ -5,7 +5,7 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Kevin Tew <tew1@llnl.gov>, 
  *	Jim Garlick <garlick@llnl.gov>, et. al.
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -94,6 +94,8 @@ enum {
 	SLURM_PROTOCOL_IO_STREAM_VERSION_ERROR,
 	SLURM_PROTOCOL_AUTHENTICATION_ERROR,
 	SLURM_PROTOCOL_INSANE_MSG_LENGTH,
+	SLURM_MPI_PLUGIN_NAME_INVALID,
+	SLURM_MPI_PLUGIN_PRELAUNCH_SETUP_FAILED,
 
 	/* communication failures to/from slurmctld */
 	SLURMCTLD_COMMUNICATIONS_CONNECTION_ERROR =     1800,

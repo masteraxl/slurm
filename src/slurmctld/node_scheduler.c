@@ -7,7 +7,7 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -1590,6 +1590,7 @@ extern void re_kill_job(struct job_record *job_ptr)
 	agent_arg_t *agent_args;
 	hostlist_t kill_hostlist = hostlist_create("");
 	char host_str[64];
+	static uint32_t last_job_id = 0;
 
 	xassert(job_ptr);
 	xassert(job_ptr->details);
@@ -1644,12 +1645,23 @@ extern void re_kill_job(struct job_record *job_ptr)
 	hostlist_ranged_string(kill_hostlist, 
 			sizeof(host_str), host_str);
 #ifdef HAVE_BG
-	info("Resending TERMINATE_JOB request JobId=%u BPlist=%s",
+	if (job_ptr->job_id != last_job_id) {
+		info("Resending TERMINATE_JOB request JobId=%u BPlist=%s",
 			job_ptr->job_id, host_str);
+	} else {
+		debug("Resending TERMINATE_JOB request JobId=%u BPlist=%s",
+			job_ptr->job_id, host_str);
+	}
 #else
-	info("Resending TERMINATE_JOB request JobId=%u Nodelist=%s",
+	if (job_ptr->job_id != last_job_id) {
+		info("Resending TERMINATE_JOB request JobId=%u Nodelist=%s",
 			job_ptr->job_id, host_str);
+	} else {
+		debug("Resending TERMINATE_JOB request JobId=%u Nodelist=%s",
+			job_ptr->job_id, host_str);
+	}
 #endif
+	last_job_id = job_ptr->job_id;
 	hostlist_destroy(kill_hostlist);
 	agent_args->msg_args = kill_job;
 	agent_queue_request(agent_args);

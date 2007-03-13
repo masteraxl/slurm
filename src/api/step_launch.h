@@ -6,7 +6,7 @@
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Christopher J. Morrone <morrone2@llnl.gov>
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -41,6 +41,7 @@
 #include "src/common/slurm_step_layout.h"
 #include "src/common/eio.h"
 #include "src/common/bitstring.h"
+#include "src/common/mpi.h"
 
 #include "src/api/step_io.h"
 
@@ -61,7 +62,8 @@ struct step_launch_state {
 	/* message thread variables */
 	eio_handle_t *msg_handle;
 	pthread_t msg_thread;
-	/* set to -1 if slaunch message handler should not attempt to handle */
+	/* set to -1 if step launch message handler should not attempt
+	   to handle */
 	int slurmctld_socket_fd;
 	uint16_t num_resp_port;
 	uint16_t *resp_port; /* array of message response ports */
@@ -72,11 +74,14 @@ struct step_launch_state {
 		client_io_t *normal;
 		user_managed_io_t *user;
 	} io;
+
 	slurm_step_layout_t *layout; /* a pointer into the ctx
 					step_resp, do not free */
+	mpi_plugin_client_info_t mpi_info[1];
+	mpi_plugin_client_state_t *mpi_state;
 
 	/* user registered callbacks */
-	slurm_job_step_launch_callbacks_t callback;
+	slurm_step_launch_callbacks_t callback;
 };
 
 /*

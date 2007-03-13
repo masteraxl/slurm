@@ -4,7 +4,7 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -187,7 +187,7 @@ scontrol_print_completing_job(job_info_t *job_ptr,
 	node_info_t *node_info;
 	uint16_t node_state, base_state;
 	hostlist_t all_nodes, comp_nodes, down_nodes;
-	char node_buf[1024];
+	char node_buf[MAXHOSTRANGELEN];
 
 	all_nodes  = hostlist_create(job_ptr->nodes);
 	comp_nodes = hostlist_create("");
@@ -461,12 +461,14 @@ _list_pids_one_step(const char *node_name, uint32_t jobid, uint32_t stepid)
 
 	stepd_task_info(fd, &task_info, &tcount);
 	for (i = 0; i < (int)tcount; i++) {
-		printf("%-8d %-8u %-6u %-7d %-8d\n",
-		       task_info[i].pid,
-		       jobid,
-		       stepid,
-		       task_info[i].id,
-		       task_info[i].gtid);
+		if (!task_info[i].exited) {
+			printf("%-8d %-8u %-6u %-7d %-8d\n",
+			       task_info[i].pid,
+			       jobid,
+			       stepid,
+			       task_info[i].id,
+			       task_info[i].gtid);
+		}
 	}
 
 	stepd_list_pids(fd, &pids, &count);

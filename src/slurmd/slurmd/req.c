@@ -5,7 +5,7 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -389,12 +389,15 @@ _send_slurmstepd_init(int fd, slurmd_step_type_t type, void *req,
 	free_buf(buffer);
 	
 	/* send cached group ids array for the relevant uid */
+	debug3("_send_slurmstepd_init: call to getpwuid");
 	if (!(pw = getpwuid(uid))) {
 		error("_send_slurmstepd_init getpwuid: %m");
 		len = 0;
 		safe_write(fd, &len, sizeof(int));
 		return -1;
 	}
+	debug3("_send_slurmstepd_init: return from getpwuid");
+
 	if ((gids = _gids_cache_lookup(pw->pw_name, pw->pw_gid))) {
 		int i;
 		uint32_t tmp32;
@@ -699,7 +702,6 @@ _rpc_launch_tasks(slurm_msg_t *msg)
 
 #ifndef HAVE_FRONT_END
 	if (first_job_run) {
-		slurm_cred_insert_jobid(conf->vctx, req->job_id);
 		if (_run_prolog(req->job_id, req->uid, NULL) != 0) {
 			error("[job %u] prolog failed", req->job_id);
 			errnum = ESLURMD_PROLOG_FAILED;
@@ -710,8 +712,10 @@ _rpc_launch_tasks(slurm_msg_t *msg)
 	adlen = sizeof(self);
 	_slurm_getsockname(msg->conn_fd, (struct sockaddr *)&self, &adlen);
 
+	debug3("_rpc_launch_tasks: call to _forkexec_slurmstepd");
 	errnum = _forkexec_slurmstepd(LAUNCH_TASKS, (void *)req, cli, &self,
 				      step_hset);
+	debug3("_rpc_launch_tasks: return from _forkexec_slurmstepd");
 
     done:
 	if (step_hset)
@@ -847,8 +851,10 @@ _rpc_batch_job(slurm_msg_t *msg)
 		info("Launching batch job %u.%u for UID %d",
 			req->job_id, req->step_id, req->uid);
 
+	debug3("_rpc_batch_job: call to _forkexec_slurmstepd");
 	rc = _forkexec_slurmstepd(LAUNCH_BATCH_JOB, (void *)req, cli, NULL,
 				  (hostset_t)NULL);
+	debug3("_rpc_batch_job: return from _forkexec_slurmstepd");
 
 	slurm_mutex_unlock(&launch_mutex);
 
@@ -871,6 +877,7 @@ _abort_job(uint32_t job_id)
 	complete_batch_script_msg_t  resp;
 	slurm_msg_t resp_msg;
 	slurm_msg_t_init(&resp_msg);
+	int rc;		/* Note: we are ignoring return code */
 
 	resp.job_id       = job_id;
 	resp.job_rc       = 1;
@@ -878,7 +885,7 @@ _abort_job(uint32_t job_id)
 	resp.node_name    = NULL;	/* unused */
 	resp_msg.msg_type = REQUEST_COMPLETE_BATCH_SCRIPT;
 	resp_msg.data     = &resp;
-	return slurm_send_only_controller_msg(&resp_msg);
+	return slurm_send_recv_controller_rc_msg(&resp_msg, &rc);
 }
 
 static int
@@ -887,7 +894,8 @@ _abort_step(uint32_t job_id, uint32_t step_id)
 	step_complete_msg_t resp;
 	slurm_msg_t resp_msg;
 	slurm_msg_t_init(&resp_msg);
-	
+	int rc;		/* Note: we are ignoring return code */
+
 	resp.job_id       = job_id;
 	resp.job_step_id  = step_id;
 	resp.range_first  = 0;
@@ -896,7 +904,7 @@ _abort_step(uint32_t job_id, uint32_t step_id)
 	resp.jobacct      = jobacct_g_alloc(NULL);
 	resp_msg.msg_type = REQUEST_STEP_COMPLETE;
 	resp_msg.data     = &resp;
-	return slurm_send_only_controller_msg(&resp_msg);
+	return slurm_send_recv_controller_rc_msg(&resp_msg, &rc);
 }
 
 static void
@@ -1708,6 +1716,8 @@ _epilog_complete(uint32_t jobid, int rc)
 	msg.msg_type    = MESSAGE_EPILOG_COMPLETE;
 	msg.data        = &req;
 	
+	/* Note: No return code to message, slurmctld will resend
+	 * TERMINATE_JOB request if message send fails */
 	if (slurm_send_only_controller_msg(&msg) < 0) {
 		error("Unable to send epilog complete message: %m");
 		ret = SLURM_ERROR;

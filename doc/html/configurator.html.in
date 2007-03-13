@@ -90,6 +90,21 @@ function get_select_type_params()
   }
 }
 
+// When generating TaskPluginParam return the parameters that
+// correspond to the checked task_plugin
+function get_task_plugin_param()
+{
+  for (var i=0; i<document.config.task_plugin.length; i++) {
+    if (document.config.task_plugin[i].checked) {
+       if (document.config.task_plugin[i].value == "affinity") {
+         return "TaskPluginParam=" + 
+		get_radio_value(document.config.task_plugin_param)
+       }
+    }
+  }
+  return "#TaskPluginParam="
+}
+
 
 function displayfile()
 {
@@ -132,7 +147,7 @@ function displayfile()
    get_field("TaskProlog",document.config.task_prolog) + "<br>" +
    get_field("TaskEpilog",document.config.task_epilog) + "<br>" +
    "TaskPlugin=task/" + get_radio_value(document.config.task_plugin) + "<br>" +
-   "#TaskPluginParam= <br>" +
+   get_task_plugin_param() + "<br>" +
    "#TmpFs= <br>" +
    "#UsePAM= <br>" +
    "# <br>" +
@@ -398,8 +413,8 @@ variables accordingly. Users can over-ride this specification with an srun optio
 Select one value for <B>MpiDefault</B>:<BR>
 <input type="radio" name="mpi_default" value="mpichgm"> <B>Mpich-Gm</B><BR>
 <input type="radio" name="mpi_default" value="mvapich"> <B>MVAPICH</B><BR>
-<input type="radio" name="mpi_default" value="none" checked> <B>None</B>: This works 
-for most other MPI types including LAM MPI and Open MPI<BR>
+<input type="radio" name="mpi_default" value="none" checked> <B>None</B>: 
+This works for most other MPI types including LAM MPI and Open MPI.<BR>
 <P>
 
 <H2>Process Tracking</H2>
@@ -486,6 +501,16 @@ Select one value for <B>TaskPlugin</B>:<BR>
 <input type="radio" name="task_plugin" value="affinity"> <B>Affinity</B>: 
 CPU affinity support
 (see srun man pages for the --cpu_bind, --mem_bind, and -E options)
+<DL><DL>
+<DT><B>TaskPluginParam</B> (As used by <I>TaskPlugin=Affinity</I> only):
+<DT><input type="radio" name="task_plugin_param" value="Cpusets">
+    <B>Cpusets</B>: Use <I>cpusets</I> to control task binding.
+    To become available in the Spring of 2007.
+<DT><input type="radio" name="task_plugin_param" value="Sched" checked>
+    <B>Sched</B>: Use <I>sched_setaffinity</I> or <I>plpa_sched_setaffinity</I>
+    (if available) to bind tasks to processors. This is the default mode of
+    operation.
+</DL></DL>
 <P>
 
 <H2>Prolog and Epilog</H2>
@@ -555,8 +580,10 @@ determined by system type<BR>
 Select one value for <B>JobAcctType</B>:<BR>
 <input type="radio" name="job_acct_type" value="none" checked> <B>None</B>: No 
 job accounting<BR>
+<input type="radio" name="job_acct_type" value="aix"> <B>AIX</B>: Specifc
+AIX process table information gathered, use with AIX systems only<BR>
 <input type="radio" name="job_acct_type" value="linux"> <B>Linux</B>: Specifc
-Linux proc table information gathered, use with Linux systems only<BR>
+Linux process table information gathered, use with Linux systems only<BR>
 <input type="text" name="job_acct_frequency" value=""> <B>JobAcctFrequency</B>:
 polling interval in seconds.<BR>
 <input type="text" name="job_acct_logfile" value=""> <B>JobAcctLogFile</B>:
@@ -618,6 +645,6 @@ before terminating all remaining tasks. A value of zero indicates unlimited wait
 </FORM>
 <HR>
 <p class="footer">UCRL-WEB-225274<br>
-Last modified 29 September 2006</p>
+Last modified 19 December 2006</p>
 </BODY>
 

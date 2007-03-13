@@ -1269,7 +1269,7 @@ extern int select_p_state_restore(char *dir_name)
 	info("cons_res: select_p_state_restore");
 
 	if (!dir_name) {
-		error ("Starting cons_res with clean slate");
+		info("Starting cons_res with clean slate");
 		return SLURM_SUCCESS;
 	}
 	file_name = xstrdup(dir_name);
@@ -2290,6 +2290,11 @@ extern int select_p_update_nodeinfo(struct job_record *job_ptr)
 }
 
 extern int select_p_update_block (update_part_msg_t *part_desc_ptr)
+{
+	return SLURM_SUCCESS;
+}
+
+extern int select_p_update_sub_node (update_part_msg_t *part_desc_ptr)
 {
 	return SLURM_SUCCESS;
 }

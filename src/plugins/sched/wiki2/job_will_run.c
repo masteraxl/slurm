@@ -4,7 +4,7 @@
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -52,7 +52,7 @@ extern int	job_will_run(char *cmd_ptr, int *err_code, char **err_msg)
 	char *arg_ptr, *task_ptr, *node_ptr, *tmp_char;
 	int i;
 	uint32_t jobid;
-	char host_string[1024];
+	char host_string[MAXHOSTRANGELEN];
 
 	arg_ptr = strstr(cmd_ptr, "ARG=");
 	if (arg_ptr == NULL) {
@@ -206,7 +206,7 @@ static int	_will_run_test(uint32_t jobid, char *hostlist,
 	FREE_NULL_BITMAP(picked_node_bitmap);
 	xfree(new_node_list);
 	bit_free(new_bitmap);
-	bit_free(job_ptr->details->req_node_bitmap);
+	FREE_NULL_BITMAP(job_ptr->details->req_node_bitmap);
 	job_ptr->details->exc_node_bitmap = save_exc_bitmap;
 	job_ptr->details->req_node_bitmap = save_req_bitmap;
 	job_ptr->priority = save_prio;
@@ -245,7 +245,7 @@ static char *	_copy_nodelist_no_dup(char *node_list)
  */
 extern char *	bitmap2wiki_node_name(bitstr_t *bitmap)
 {
-	int i, first = 1;
+	int i;
 	char *buf = NULL;
 
 	if (use_host_exp)
@@ -257,9 +257,8 @@ extern char *	bitmap2wiki_node_name(bitstr_t *bitmap)
 	for (i = 0; i < node_record_count; i++) {
 		if (bit_test (bitmap, i) == 0)
 			continue;
-		if (first == 0)
+		if (buf)
 			xstrcat(buf, ":");
-		first = 0;
 		xstrcat(buf, node_record_table_ptr[i].name);
 	}
 	return buf;

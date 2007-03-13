@@ -3,7 +3,7 @@
  *****************************************************************************
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -54,7 +54,7 @@
 #include "src/common/job_options.h"
 
 #include "src/slurmd/slurmstepd/slurmstepd_job.h"
-#include "src/srun/srun_job.h"
+/*#include "src/srun/srun_job.h"*/
 
 #include <slurm/spank.h>
 
@@ -947,6 +947,8 @@ int spank_print_options(FILE * fp, int left_pad, int width)
 
 	if ((option_cache == NULL) || (list_count(option_cache) == 0))
 		return (0);
+
+	fprintf(fp, "Options provided by plugins:\n");
 
 	i = list_iterator_create(option_cache);
 	while ((p = list_next(i))) {

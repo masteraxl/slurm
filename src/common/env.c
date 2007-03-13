@@ -5,7 +5,7 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>, Danny Auble <da@llnl.gov>.
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -44,10 +44,12 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <sys/types.h>
 
+#include "src/common/macros.h"
 #include "slurm/slurm.h"
 #include "src/common/log.h"
-#include "src/common/macros.h"
 #include "src/common/env.h"
 #include "src/common/xassert.h"
 #include "src/common/xmalloc.h"
@@ -59,9 +61,17 @@
  * Define slurm-specific aliases for use by plugins, see slurm_xlator.h 
  * for details. 
  */
-strong_alias(setenvf,		slurm_setenvpf);
-strong_alias(unsetenvp,		slurm_unsetenvp);
-strong_alias(getenvp,		slurm_getenvp);
+strong_alias(setenvf,			slurm_setenvpf);
+strong_alias(unsetenvp,			slurm_unsetenvp);
+strong_alias(getenvp,			slurm_getenvp);
+strong_alias(env_array_create,		slurm_env_array_create);
+strong_alias(env_array_merge,		slurm_env_array_merge);
+strong_alias(env_array_copy,		slurm_env_array_copy);
+strong_alias(env_array_free,		slurm_env_array_free);
+strong_alias(env_array_append,		slurm_env_array_append);
+strong_alias(env_array_append_fmt,	slurm_env_array_append_fmt);
+strong_alias(env_array_overwrite,	slurm_env_array_overwrite);
+strong_alias(env_array_overwrite_fmt,	slurm_env_array_overwrite_fmt);
 
 /*
  *  Return pointer to `name' entry in environment if found, or
@@ -621,7 +631,7 @@ int setup_env(env_t *env)
 
 /**********************************************************************
  * From here on are the new environment variable management functions,
- * used by the "new" commands: salloc, sbatch, an slaunch.
+ * used by the "new" commands: salloc, sbatch, and the step launch APIs.
  **********************************************************************/
 
 /*
@@ -907,10 +917,12 @@ char **env_array_create(void)
  * if and only if a variable by that name does not already exist in the
  * array.
  *
+ * "value_fmt" supports printf-style formatting.
+ *
  * Return 1 on success, and 0 on error.
  */
-int env_array_append(char ***array_ptr, const char *name,
-		     const char *value_fmt, ...)
+int env_array_append_fmt(char ***array_ptr, const char *name,
+			 const char *value_fmt, ...)
 {
 	char buf[BUFSIZ];
 	char **ep = NULL;
@@ -943,10 +955,45 @@ int env_array_append(char ***array_ptr, const char *name,
 }
 
 /*
+ * Append a single environment variable to an environment variable array,
+ * if and only if a variable by that name does not already exist in the
+ * array.
+ *
+ * Return 1 on success, and 0 on error.
+ */
+int env_array_append(char ***array_ptr, const char *name,
+		     const char *value)
+{
+	char **ep = NULL;
+	char *str = NULL;
+
+	if (array_ptr == NULL) {
+		return 0;
+	}
+
+	if (*array_ptr == NULL) {
+		*array_ptr = env_array_create();
+	}
+
+	ep = _find_name_in_env(*array_ptr, name);
+	if (*ep != NULL) {
+		return 0;
+	}
+
+	xstrfmtcat (str, "%s=%s", name, value);
+	ep = _extend_env(array_ptr);
+	*ep = str;
+	
+	return 1;
+}
+
+/*
  * Append a single environment variable to an environment variable array
  * if a variable by that name does not already exist.  If a variable
  * by the same name is found in the array, it is overwritten with the
  * new value.
+ *
+ * "value_fmt" supports printf-style formatting.
  *
  * Return 1 on success, and 0 on error.
  */
@@ -1134,3 +1181,81 @@ void env_array_merge(char ***dest_array, const char **src_array)
 	}
 }
 
+/*
+ * Strip out trailing carriage returns and newlines
+ */
+static void _strip_cr_nl(char *line)
+{
+	int len = strlen(line);
+	char *ptr;
+
+	for (ptr = line+len-1; ptr >= line; ptr--) {
+		if (*ptr=='\r' || *ptr=='\n') {
+			*ptr = '\0';
+		} else {
+			return;
+		}
+	}
+}
+
+/*
+ * Return an array of strings representing the specified user's default
+ * environment variables, as determined by calling (more-or-less)
+ * "/bin/su - <username> -c /usr/bin/env".
+ *
+ * On error, returns NULL.
+ *
+ * NOTE: The calling process must have an effective uid of root for
+ * this function to succeed.
+ */
+char **env_array_user_default(const char *username)
+{
+	FILE *su;
+	char line[BUFSIZ];
+	char name[BUFSIZ];
+	char value[BUFSIZ];
+	char *cmdstr = xstrdup("");
+	char **env = NULL;
+	char *starttoken = "XXXXSLURMSTARTPARSINGHEREXXXX";
+	char *stoptoken =  "XXXXSLURMSTOPPARSINGHEREXXXXX";
+	int len;
+
+	if (geteuid() != (uid_t)0) {
+		info("WARNING: you must be root to use --get-user-env");
+		return NULL;
+	}
+
+	xstrfmtcat(cmdstr, "/bin/su - %s -c \"echo; echo; echo; echo %s; env; echo %s\" 2>/dev/null",
+		   username, starttoken, stoptoken);
+	su = popen(cmdstr, "r");
+	xfree(cmdstr);
+	if (su == NULL) {
+		return NULL;
+	}
+
+	env = env_array_create();
+
+	/* First look for the start token in the output */
+	len = strlen(starttoken);
+	while (fgets(line, BUFSIZ, su) != NULL) {
+		if (0 == strncmp(line, starttoken, len)) {
+			break;
+		}
+	}
+
+	/* Now read in the environment variable strings. */
+	len = strlen(stoptoken);
+	while (fgets(line, BUFSIZ, su) != NULL) {
+		/* stop at the line containing the stoptoken string */
+		if (0 == strncmp(line, stoptoken, len)) {
+			break;
+		}
+
+		_strip_cr_nl(line);
+		_env_array_entry_splitter(line, name, BUFSIZ, value, BUFSIZ);
+		env_array_overwrite(&env, name, value);
+	}
+	pclose(su);
+
+	return env;
+}

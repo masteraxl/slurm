@@ -2,10 +2,10 @@
  * src/srun/allocate.c - srun functions for managing node allocations
  * $Id$
  *****************************************************************************
- *  Copyright (C) 2002 The Regents of the University of California.
+ *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -41,8 +41,10 @@
 #endif
 
 #include <stdlib.h>
+#include <unistd.h>
 #include <sys/poll.h>
-
+#include <sys/types.h>
+#include <pwd.h>
 
 #include "src/common/log.h"
 #include "src/common/macros.h"
@@ -52,6 +54,7 @@
 #include "src/common/xsignal.h"
 #include "src/common/xstring.h"
 #include "src/common/forward.h"
+#include "src/common/env.h"
 
 #include "src/srun/allocate.h"
 #include "src/srun/msg.h"
@@ -61,6 +64,8 @@
 #define MAX_ALLOC_WAIT 60	/* seconds */
 #define MIN_ALLOC_WAIT  5	/* seconds */
 #define MAX_RETRIES    10
+
+extern char **environ;
 
 /*
  * Static Prototypes
@@ -275,7 +280,7 @@ _accept_msg_connection(slurm_fd slurmctld_fd,
 	}
 
 	slurm_get_addr(&cli_addr, &port, host, sizeof(host));
-	debug2("got message connection from %s:%d", host, port);
+	debug2("got message connection from %s:%hu", host, port);
 
 	msg = xmalloc(sizeof(slurm_msg_t));
 	slurm_msg_t_init(msg);
@@ -388,7 +393,6 @@ _intr_handler(int signo)
 job_desc_msg_t *
 job_desc_msg_create_from_opts (char *script)
 {
-	extern char **environ;
 	job_desc_msg_t *j = xmalloc(sizeof(*j));
 	char buf[8192];
 	hostlist_t hl = NULL;
@@ -493,6 +497,8 @@ job_desc_msg_create_from_opts (char *script)
 	if (opt.conn_type != (uint16_t) NO_VAL)
 		j->conn_type = opt.conn_type;
 			
+	if (opt.reboot)
+		j->reboot = 1;
 	if (opt.no_rotate)
 		j->rotate = 0;
 
@@ -564,8 +570,19 @@ job_desc_msg_create_from_opts (char *script)
 		 */
 		xassert (opt.batch);
 
-		j->environment = environ;
-		j->env_size = envcount (environ);
+		j->environment = NULL;
+		if (opt.get_user_env) {
+			struct passwd *pw = NULL;
+			pw = getpwuid(opt.uid);
+			if (pw != NULL) {
+				j->environment =
+					env_array_user_default(pw->pw_name);
+				/* FIXME - should we abort if j->environment
+				   is NULL? */
+			}
+		}
+		env_array_merge(&j->environment, (const char **)environ);
+		j->env_size = envcount (j->environment);
 		j->script = script;
 		j->argv = remote_argv;
 		j->argc = remote_argc;
@@ -613,7 +630,7 @@ _step_req_create(srun_job_t *j)
 	r->name       = xstrdup(opt.job_name);
 	r->relative   = (uint16_t)opt.relative;
 	r->overcommit = opt.overcommit ? 1 : 0;
-	debug("requesting job %d, user %d, nodes %d (%s)", 
+	debug("requesting job %d, user %d, nodes %d including (%s)", 
 	      r->job_id, r->user_id, r->node_count, r->node_list);
 	debug("cpus %d, tasks %d, name %s, relative %d", 
 	      r->cpu_count, r->num_tasks, r->name, r->relative);
@@ -650,6 +667,7 @@ _step_req_create(srun_job_t *j)
 		break;
 
 	}
+	opt.distribution = r->task_dist;
 	
 	if (slurmctld_comm_addr.port) {
 		r->host = xstrdup(slurmctld_comm_addr.hostname);

@@ -4,7 +4,7 @@
  *  Copyright (C) 2004-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Jay Windley <jwindley@lnxi.com>
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -59,6 +59,11 @@ extern int slurm_sched_fini(void);
  *                          P L U G I N   C A L L S                       *
  **************************************************************************
  */
+
+/*
+ * Perform reconfig, re-read any configuration files
+ */
+int slurm_sched_reconfig( void );
 
 /*
  * For passive schedulers, invoke a scheduling pass.

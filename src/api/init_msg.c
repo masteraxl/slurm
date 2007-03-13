@@ -5,7 +5,7 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>.
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -64,7 +64,6 @@ void slurm_init_job_desc_msg(job_desc_msg_t * job_desc_msg)
 	job_desc_msg->ntasks_per_node   = (uint16_t) NO_VAL;
 	job_desc_msg->ntasks_per_socket = (uint16_t) NO_VAL;
 	job_desc_msg->ntasks_per_core   = (uint16_t) NO_VAL;
-	job_desc_msg->task_dist   = SLURM_DIST_CYCLIC;
 	job_desc_msg->dependency  = NO_VAL;
 	job_desc_msg->environment = ((char **) NULL);
 	job_desc_msg->env_size    = 0;
@@ -128,6 +127,7 @@ void slurm_init_job_desc_msg(job_desc_msg_t * job_desc_msg)
 }
 #endif
 	job_desc_msg->conn_type   = (uint16_t) NO_VAL;
+	job_desc_msg->reboot      = (uint16_t) NO_VAL;
 	job_desc_msg->rotate      = (uint16_t) NO_VAL;
 	job_desc_msg->blrtsimage = NULL;
 	job_desc_msg->linuximage = NULL;

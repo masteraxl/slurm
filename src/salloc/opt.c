@@ -4,7 +4,7 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <grondona1@llnl.gov>, et. al.
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -106,6 +106,7 @@
 #define LONG_OPT_BELL        0x116
 #define LONG_OPT_NO_BELL     0x117
 #define LONG_OPT_COMMENT     0x118
+#define LONG_OPT_REBOOT      0x119
 
 /*---- global variables, defined in opt.h ----*/
 opt_t opt;
@@ -459,6 +460,7 @@ static void _opt_default()
 
 	for (i=0; i<SYSTEM_DIMENSIONS; i++)
 		opt.geometry[i]	    = (uint16_t) NO_VAL;
+	opt.reboot          = false;
 	opt.no_rotate	    = false;
 	opt.conn_type	    = -1;
 
@@ -582,7 +584,7 @@ _process_env_var(env_vars_t *e, const char *val)
 	case OPT_CONN_TYPE:
 		opt.conn_type = _verify_conn_type(val);
 		break;
-	
+
 	case OPT_NO_ROTATE:
 		opt.no_rotate = true;
 		break;
@@ -683,6 +685,7 @@ void set_options(const int argc, char **argv)
 		{"no-bell",       no_argument,       0, LONG_OPT_NO_BELL},
 		{"jobid",         required_argument, 0, LONG_OPT_JOBID},
 		{"comment",       required_argument, 0, LONG_OPT_COMMENT},
+		{"reboot",	  no_argument,       0, LONG_OPT_REBOOT},
 		{NULL,            0,                 0, 0}
 	};
 	char *opt_string = "+a:c:C:d:F:g:hHIJ:kK::n:N:p:qR:st:uU:vVw:W:x:";
@@ -885,7 +888,7 @@ void set_options(const int argc, char **argv)
 			}
 			break;
 		case LONG_OPT_MAIL_TYPE:
-			opt.mail_type = _parse_mail_type(optarg);
+			opt.mail_type |= _parse_mail_type(optarg);
 			if (opt.mail_type == 0)
 				fatal("--mail-type=%s invalid", optarg);
 			break;
@@ -916,6 +919,9 @@ void set_options(const int argc, char **argv)
 		case LONG_OPT_COMMENT:
 			xfree(opt.comment);
 			opt.comment = xstrdup(optarg);
+			break;
+		case LONG_OPT_REBOOT:
+			opt.reboot = true;
 			break;
 		default:
 			fatal("Unrecognized command line parameter %c",
@@ -1055,6 +1061,7 @@ static char *_print_mail_type(const uint16_t type)
 {
 	if (type == 0)
 		return "NONE";
+
 	if (type == MAIL_JOB_BEGIN)
 		return "BEGIN";
 	if (type == MAIL_JOB_END)
@@ -1064,7 +1071,7 @@ static char *_print_mail_type(const uint16_t type)
 	if (type == (MAIL_JOB_BEGIN |  MAIL_JOB_END |  MAIL_JOB_FAIL))
 		return "ALL";
 
-	return "UNKNOWN";
+	return "MULTIPLE";
 }
 
 /* helper function for printing options
@@ -1237,6 +1244,7 @@ static void _opt_list()
 	str = print_geometry();
 	info("geometry       : %s", str);
 	xfree(str);
+	info("reboot         : %s", opt.reboot ? "no" : "yes");
 	info("rotate         : %s", opt.no_rotate ? "yes" : "no");
 	if (opt.begin) {
 		char time_str[32];
@@ -1263,7 +1271,7 @@ static void _usage(void)
 "              [--contiguous] [--mincpus=n] [--mem=MB] [--tmp=MB] [-C list]\n"
 "              [--account=name] [--dependency=jobid] [--comment=name]\n"
 #ifdef HAVE_BG		/* Blue gene specific options */
-"              [--geometry=XxYxZ] [--conn-type=type] [--no-rotate]\n"
+"              [--geometry=XxYxZ] [--conn-type=type] [--no-rotate] [ --reboot]\n"
 #endif
 "              [--mail-type=type] [--mail-user=user][--nice[=value]]\n"
 "              [-w hosts...] [-x hosts...] executable [args...]\n");
@@ -1318,6 +1326,7 @@ static void _help(void)
   "Blue Gene related options:\n"
   "  -g, --geometry=XxYxZ        geometry constraints of the job\n"
   "  -R, --no-rotate             disable geometry rotation\n"
+  "      --reboot                reboot nodes before starting job\n"
   "      --conn-type=type        constraint on type of connection, MESH or TORUS\n"
   "                              if not set, then tries to fit TORUS else MESH\n"
   "\n"

@@ -4,7 +4,7 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -188,7 +188,19 @@ void env_array_free(char **env_array);
  * Return 1 on success, and 0 on error.
  */
 int env_array_append(char ***array_ptr, const char *name,
-		     const char *value_fmt, ...);
+		     const char *value);
+
+/*
+ * Append a single environment variable to an environment variable array,
+ * if and only if a variable by that name does not already exist in the
+ * array.
+ *
+ * "value_fmt" supports printf-style formatting.
+ *
+ * Return 1 on success, and 0 on error.
+ */
+int env_array_append_fmt(char ***array_ptr, const char *name,
+			 const char *value_fmt, ...);
 
 /*
  * Append a single environment variable to an environment variable array
@@ -207,15 +219,29 @@ int env_array_overwrite(char ***array_ptr, const char *name,
  * by the same name is found in the array, it is overwritten with the
  * new value.  The "value_fmt" string may contain printf-style options.
  *
+ * "value_fmt" supports printf-style formatting.
+ *
  * Return 1 on success, and 0 on error.
  */
 int env_array_overwrite_fmt(char ***array_ptr, const char *name,
 			    const char *value_fmt, ...);
 
 /*
- * Set all of the environment variables in a supplied environment
- * variable array.
+ * Set in the running process's environment all of the environment
+ * variables in a supplied environment variable array.
  */
 void env_array_set_environment(char **env_array);
+
+/*
+ * Return an array of strings representing the specified user's default
+ * environment variables, as determined by calling (more-or-less)
+ * "/bin/su - <username> -c /usr/bin/env".
+ *
+ * On error, returns NULL.
+ *
+ * NOTE: The calling process must have an effective uid of root for
+ * this function to succeed.
+ */
+char **env_array_user_default(const char *username);
 
 #endif

@@ -4,7 +4,7 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette@llnl.gov>, Kevin Tew <tew1@llnl.gov>, et. al.
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -359,8 +359,8 @@ static int _background_process_msg(slurm_msg_t * msg)
 			debug3("Ignoring RPC: REQUEST_CONTROL");
 			error_code = ESLURM_DISABLED;
 		} else {
-			error("Invalid RPC received %d from uid %u", 
-			      msg->msg_type, uid);
+			error("Invalid RPC received %d while in standby mode", 
+			      msg->msg_type);
 			error_code = ESLURM_IN_STANDBY_MODE;
 		}
 	}

@@ -5,7 +5,7 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *   
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -106,7 +106,7 @@ char *slurm_sprint_partition_info ( partition_info_t * part_ptr,
 {
 	int j;
 	char tmp1[7], tmp2[7];
-	char tmp_line[128];
+	char tmp_line[MAXHOSTRANGELEN];
 	char *out = NULL;
 
 	/****** Line 1 ******/
@@ -200,9 +200,11 @@ char *slurm_sprint_partition_info ( partition_info_t * part_ptr,
 	
 	/****** Line 4 ******/
 #ifdef HAVE_BG
-	sprintf(tmp_line, "BasePartitions=%s BPIndices=", part_ptr->nodes);
+	snprintf(tmp_line, sizeof(tmp_line), "BasePartitions=%s BPIndices=", 
+		part_ptr->nodes);
 #else
-	sprintf(tmp_line, "Nodes=%s NodeIndices=", part_ptr->nodes);
+	snprintf(tmp_line, sizeof(tmp_line), "Nodes=%s NodeIndices=", 
+		part_ptr->nodes);
 #endif
 	xstrcat(out, tmp_line);
 	for (j = 0; (part_ptr->node_inx && (part_ptr->node_inx[j] != -1)); 

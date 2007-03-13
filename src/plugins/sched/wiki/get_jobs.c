@@ -4,7 +4,7 @@
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -68,7 +68,7 @@ static uint32_t	_get_job_time_limit(struct job_record *job_ptr);
  * RET 0 on success, -1 on failure
  *
  * Response format
- * ARG=<cnt>#<JOBID>;UPDATE_TIME=<uts>;STATE=<state>;UCLIMIT=<time_limit>;
+ * ARG=<cnt>#<JOBID>;UPDATE_TIME=<uts>;STATE=<state>;WCLIMIT=<time_limit>;
  *                    TASKS=<cpus>;QUEUETIME=<submit_time>;STARTTIME=<time>;
  *                    UNAME=<user>;GNAME=<group>;PARTITIONMASK=<part>;
  *                    NODES=<node_cnt>;RMEM=<mem_size>;RDISK=<disk_space>;
@@ -97,6 +97,12 @@ extern int	get_jobs(char *cmd_ptr, int *err_code, char **err_msg)
 		*err_code = -300;
 		*err_msg = "Invalid ARG value";
 		error("wiki: GETJOBS has invalid ARG value");
+		return -1;
+	}
+	if (job_list == NULL) {
+		*err_code = -140;
+		*err_msg = "Still performing initialization";
+		error("wiki: job_list not yet initilized");
 		return -1;
 	}
 	tmp_char++;
@@ -164,7 +170,7 @@ static char *   _dump_all_jobs(int *job_cnt, int state_info)
 
 static char *	_dump_job(struct job_record *job_ptr, int state_info)
 {
-	char tmp[512], *buf = NULL;
+	char tmp[16384], *buf = NULL;
 	uint32_t end_time, suspend_time;
 
 	if (!job_ptr)
@@ -183,11 +189,19 @@ static char *	_dump_job(struct job_record *job_ptr, int state_info)
 	&&  (job_ptr->details)
 	&&  (job_ptr->details->req_nodes)
 	&&  (job_ptr->details->req_nodes[0])) {
+		char *hosts = bitmap2wiki_node_name(
+			job_ptr->details->req_node_bitmap);
 		snprintf(tmp, sizeof(tmp),
-			"HOSTLIST=%s;",
-			bitmap2wiki_node_name(
-			job_ptr->details->req_node_bitmap));
+			"HOSTLIST=%s;", hosts);
 		xstrcat(buf, tmp);
+		xfree(hosts);
+	} else if (!IS_JOB_FINISHED(job_ptr)) {
+		char *hosts = bitmap2wiki_node_name(
+			job_ptr->node_bitmap);
+		snprintf(tmp, sizeof(tmp),
+			"TASKLIST=%s;", hosts);
+		xstrcat(buf, tmp);
+		xfree(hosts);
 	}
 
 	if (job_ptr->job_state == JOB_FAILED) {
@@ -321,6 +335,8 @@ static char *	_get_job_state(struct job_record *job_ptr)
 		return "Idle";
 	if (base_state == JOB_RUNNING)
 		return "Running";
+	if (base_state == JOB_SUSPENDED)
+		return "Suspended";
 
 	if (state & JOB_COMPLETING) {
 		/* Give configured KillWait+10 for job
@@ -335,8 +351,6 @@ static char *	_get_job_state(struct job_record *job_ptr)
 
 	if (base_state == JOB_COMPLETE)
 		return "Completed";
-	if (base_state == JOB_SUSPENDED)
-		return "Suspended";
 	else /* JOB_CANCELLED, JOB_FAILED, JOB_TIMEOUT, JOB_NODE_FAIL */
 		return "Removed";
 }
@@ -357,4 +371,33 @@ static uint32_t	_get_job_suspend_time(struct job_record *job_ptr)
 				job_ptr->suspend_time);
 	}
 	return (uint32_t) 0;
+}
+
+/*
+ * bitmap2wiki_node_name  - given a bitmap, build a list of colon separated
+ *	node names (if we can't use node range expressions), or the
+ *	normal slurm node name expression
+ *
+ * IN bitmap - bitmap pointer
+ * RET pointer to node list or NULL on error
+ * globals: node_record_table_ptr - pointer to node table
+ * NOTE: the caller must xfree the memory at node_list when no longer required
+ */
+extern char *   bitmap2wiki_node_name(bitstr_t *bitmap)
+{
+	int i, first = 1;
+	char *buf = NULL;
+
+	if (bitmap == NULL)
+		return xstrdup("");
+
+	for (i = 0; i < node_record_count; i++) {
+		if (bit_test (bitmap, i) == 0)
+			continue;
+		if (first == 0)
+			xstrcat(buf, ":");
+		first = 0;
+		xstrcat(buf, node_record_table_ptr[i].name);
+	}
+	return buf;
 }

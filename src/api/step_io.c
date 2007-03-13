@@ -5,7 +5,7 @@
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <grondona@llnl.gov>, et. al.
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -170,7 +170,6 @@ struct file_read_info {
 	uint32_t nodeid;
 
 	bool eof;
-	bool was_blocking;
 };
 
 
@@ -720,12 +719,6 @@ create_file_read_eio_obj(int fd, uint32_t taskid, uint32_t nodeid,
 	info->header.ltaskid = (uint16_t)-1;
 	info->eof = false;
 
-	if (fd_is_blocking(fd)) {
-		fd_set_nonblocking(fd);
-		info->was_blocking = true;
-	} else {
-		info->was_blocking = false;
-	}
 	eio = eio_obj_create(fd, &file_read_ops, (void *)info);
 
 	return eio;
@@ -748,11 +741,6 @@ static bool _file_readable(eio_obj_t *obj)
 	}
 	if (obj->shutdown == true) {
 		debug3("  false, shutdown");
-		/* if the file descriptor was in blocking mode before we set it
-		 * to O_NONBLOCK, then set it back to blocking mode before
-		 * closing */
-		if (info->was_blocking)
-			fd_set_blocking(obj->fd);
 		close(obj->fd);
 		obj->fd = -1;
 		info->eof = true;
@@ -1267,11 +1255,15 @@ client_io_handler_destroy(client_io_t *cio)
 {
 	xassert(cio);
 
-	/* FIXME - need to make certain that IO engine is shutdown
+	/* FIXME - perhaps should make certain that IO engine is shutdown
 	   (by calling client_io_handler_finish()) before freeing anything */
 
-	bit_free(cio->ioservers_ready_bits);
 	pthread_mutex_destroy(&cio->ioservers_lock);
+	bit_free(cio->ioservers_ready_bits);
+	xfree(cio->ioserver); /* need to destroy the obj first? */
+	xfree(cio->listenport);
+	xfree(cio->listensock);
+	eio_handle_destroy(cio->eio);
 	xfree(cio->io_key);
 	xfree(cio);
 }

@@ -88,6 +88,10 @@ EXTRA_DIST = \
 	test1.89.prog.c			\
 	test1.90			\
 	test1.90.prog.c			\
+	test1.91			\
+	test1.91.prog.c			\
+	test1.92			\
+	test1.92.bash			\
 	test2.1				\
 	test2.2				\
 	test2.3				\
@@ -155,6 +159,8 @@ EXTRA_DIST = \
 	test7.7.prog.c			\
 	test7.8				\
 	test7.8.prog.c			\
+	test7.9				\
+	test7.9.prog.c			\
 	test8.1				\
 	test8.2				\
 	test8.3				\

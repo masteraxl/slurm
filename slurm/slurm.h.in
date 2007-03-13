@@ -5,7 +5,7 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>, 
  *	Joey Ekstrom <ekstrom1@llnl.gov> et. al.
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -86,6 +86,29 @@ BEGIN_C_DECLS
 #include <stdio.h>		/* for FILE definitions */
 #include <time.h>		/* for time_t definitions */
 #include <stdbool.h>
+
+#ifdef CRAPPY_COMPILER
+  /*
+   * 'bool' can be implemented in a variety of ways.
+   * C++ may define it one way.
+   * <stdbool.h> may declare 'bool' to be a different type, such as 
+   * an enum which is not necessarily compatible with C++.
+   *
+   * If your compiler can't resolve 'bool', just add 
+   * "#define CRAPPY_COMPILER" before "#include <slurm/slurm.h> 
+   * in order for Slurm to define it's own version of bool.
+   */
+
+   #undef  TRUE
+   #define TRUE   1
+
+   #undef  FALSE
+   #define FALSE  0
+
+   typedef unsigned char SLURM_BOOL;
+   #undef  bool
+   #define bool SLURM_BOOL
+#endif
 
 /* Define slurm_addr below to avoid including extraneous slurm headers */
 #ifdef	HAVE_SYS_SOCKET_H
@@ -237,7 +260,8 @@ enum select_data_type {
 	SELECT_DATA_BLRTS_IMAGE,/* data-> char *blrtsimage */
 	SELECT_DATA_LINUX_IMAGE,/* data-> char *linuximage */
 	SELECT_DATA_MLOADER_IMAGE,/* data-> char *mloaderimage */
-	SELECT_DATA_RAMDISK_IMAGE/* data-> char *ramdiskimage */
+	SELECT_DATA_RAMDISK_IMAGE,/* data-> char *ramdiskimage */
+	SELECT_DATA_REBOOT	/* data-> uint16_t reboot */
 };
 
 enum select_print_mode {
@@ -253,7 +277,8 @@ enum select_print_mode {
 	SELECT_PRINT_BLRTS_IMAGE,/* Print just the BLRTS IMAGE */
 	SELECT_PRINT_LINUX_IMAGE,/* Print just the LINUX IMAGE */
 	SELECT_PRINT_MLOADER_IMAGE,/* Print just the MLOADER IMAGE */
-	SELECT_PRINT_RAMDISK_IMAGE/* Print just the RAMDISK IMAGE */
+	SELECT_PRINT_RAMDISK_IMAGE,/* Print just the RAMDISK IMAGE */
+	SELECT_PRINT_REBOOT	/* Print just the REBOOT */
 };
 
 enum select_node_cnt {
@@ -284,7 +309,8 @@ enum jobacct_data_type {
 
 /* Possible task distributions across the nodes */
 typedef enum task_dist_states {
-	SLURM_DIST_CYCLIC,	/* distribute tasks 1 per node, round robin */
+	/* NOTE: start SLURM_DIST_CYCLIC at 1 for HP MPI */
+	SLURM_DIST_CYCLIC = 1,	/* distribute tasks 1 per node, round robin */
 	SLURM_DIST_BLOCK,	/* distribute tasks filling node by node */
 	SLURM_DIST_ARBITRARY,	/* arbitrary task distribution  */
 	SLURM_DIST_PLANE,	/* distribute tasks by filling up
@@ -360,8 +386,7 @@ enum node_states {
  * Values can be can be ORed */
 #define SHOW_ALL	1	/* Show info for "hidden" partitions */
 
-/* Define keys for ctx_key argument of slurm_step_ctx_get() and
- * slurm_step_ctx_set() */
+/* Define keys for ctx_key argument of slurm_step_ctx_get() */
 enum ctx_keys {
 	SLURM_STEP_CTX_STEPID,	/* get the created job step id */
 	SLURM_STEP_CTX_TASKS,	/* get array of task count on each node */
@@ -389,12 +414,13 @@ typedef enum select_type_plugin_info {
 		    * be co-allocated within cores */
 	CR_SOCKET_MEMORY, /* Socket and Memory are CRs */
 	CR_CORE_MEMORY,   /* Core and Memory are CRs */
-	CR_CPU_MEMORY,    /* CPU and Memory are CRs */
+	CR_CPU_MEMORY     /* CPU and Memory are CRs */
 } select_type_plugin_info_t ;
 
 /* Values for slurm_ctl_conf.task_plugin_param */
 #define TASK_PARAM_NONE    0x0000
 #define TASK_PARAM_CPUSETS 0x0001
+#define TASK_PARAM_SCHED   0x0002
 
 /*****************************************************************************\
  *	PROTOCOL DATA STRUCTURE DEFINITIONS
@@ -512,6 +538,7 @@ typedef struct job_descriptor {	/* For submit, allocate, and update requests */
 				 * dimensions, e.g. X, Y, and Z */
 #endif
 	uint16_t conn_type;	/* see enum connection_type */
+	uint16_t reboot;	/* force node reboot before startup */
 	uint16_t rotate;	/* permit geometry rotation if set */
 	char *blrtsimage;       /* BlrtsImage for block */
 	char *linuximage;       /* LinuxImage for block */
@@ -598,25 +625,6 @@ typedef struct job_info_msg {
 	job_info_t *job_array;	/* the job records */
 } job_info_msg_t;
 
-typedef struct job_step_specs {
-	uint32_t job_id;	/* job ID */
-	uint32_t user_id;	/* user the job runs as */
-	uint32_t node_count;	/* count of required nodes */
-	uint32_t cpu_count;	/* count of required processors */
-	uint32_t num_tasks;	/* number of tasks required */
-	uint16_t relative;	/* first node to use of job's allocation */
-	uint16_t task_dist;	/* see enum task_dist_state */
-	uint16_t plane_size;	/* plane size when task_dist =
-				   SLURM_DIST_PLANE */
-	uint16_t port;		/* port to contact initiating srun */
-	char *host;		/* host to contact initiating srun */
-	char *node_list;	/* list of required nodes */
-	char *network;		/* network use spec */
-	char *name;		/* name of the job step, default "" */
-	uint8_t overcommit;     /* flag, 1 to allow overcommit of processors,
-				   0 to disallow overcommit. */
-} job_step_create_request_msg_t;
-
 typedef struct slurm_step_layout {
 	uint16_t node_cnt;	/* node count */
 	uint32_t task_cnt;	/* total number of tasks in the step */
@@ -634,15 +642,6 @@ typedef struct slurm_step_layout {
 	uint16_t plane_size;	/* plane size when task_dist =
 				   SLURM_DIST_PLANE */
 } slurm_step_layout_t;
-
-typedef struct job_step_create_response_msg {
-	uint32_t job_step_id;	/* assigned job step id */
-	slurm_step_layout_t *step_layout; /* information about how the 
-                                             step is laid out */
-	slurm_cred_t cred;      /* slurm job credential */
-	switch_jobinfo_t switch_job;	/* switch context, opaque 
-                                           data structure */
-} job_step_create_response_msg_t;
 
 typedef struct slurm_step_io_fds {
 	struct {
@@ -672,6 +671,26 @@ typedef struct task_ext_msg {
 } task_exit_msg_t;
 
 typedef struct {
+	uint32_t job_id;	/* job ID */
+	uid_t uid;
+	char *name;		/* name of the job step */
+	uint32_t node_count;	/* number of required nodes */
+	uint32_t cpu_count;	/* number of required processors */
+	uint32_t task_count;	/* number of tasks required */
+	uint16_t relative;	/* first node to use of job's allocation */
+	uint16_t task_dist;	/* see enum task_dist_state, default
+				   is SLURM_DIST_CYCLIC */
+	uint16_t plane_size;	/* plane size when task_dist =
+				   SLURM_DIST_PLANE */
+	char *node_list;	/* list of required nodes */
+	char *network;		/* network use spec */
+	bool overcommit;	/* "true" to allow the allocation of more tasks
+				   to a node than available processors,
+				   "false" to accept at most one task per
+				   processor. "false" by default. */
+} slurm_step_ctx_params_t;
+
+typedef struct {
 	uint16_t argc;
 	char **argv;
 	uint16_t envc;
@@ -698,12 +717,21 @@ typedef struct {
 	char *cpu_bind;
 	uint16_t mem_bind_type;	/* use mem_bind_type_t */
 	char *mem_bind;
-} slurm_job_step_launch_t;
+
+	uint16_t cpus_per_task;
+	uint16_t ntasks_per_node;
+	uint16_t ntasks_per_socket;
+	uint16_t ntasks_per_core;
+	uint16_t task_dist;
+	uint16_t plane_size;
+
+	char *mpi_plugin_name;
+} slurm_step_launch_params_t;
 
 typedef struct {
 	void (*task_start)(launch_tasks_response_msg_t *);
 	void (*task_finish)(task_exit_msg_t *);
-} slurm_job_step_launch_callbacks_t;
+} slurm_step_launch_callbacks_t;
 
 
 typedef struct {
@@ -999,17 +1027,6 @@ extern int slurm_allocation_lookup_lite PARAMS((
 	uint32_t job_id, resource_allocation_response_msg_t **info));
 
 /*
- * slurm_job_step_create - create a job step for a given job id
- * IN slurm_step_alloc_req_msg - description of job step request
- * OUT slurm_step_alloc_resp_msg - response to request
- * RET 0 on success, otherwise return -1 and set errno to indicate the error
- * NOTE: free the response using slurm_free_job_step_create_response_msg
- */
-extern int slurm_job_step_create PARAMS((
-	job_step_create_request_msg_t * slurm_step_alloc_req_msg, 
-	job_step_create_response_msg_t ** slurm_step_alloc_resp_msg));
-
-/*
  * slurm_read_hostfile - Read a SLURM hostfile specified by "filename".
  *	"filename" must contain a list of SLURM NodeNames, one per line.
  *	Reads up to "n" number of hostnames from the file. Returns a
@@ -1025,15 +1042,6 @@ extern int slurm_job_step_create PARAMS((
  * NOTE: Returned string must be freed with free().
  */
 extern char *slurm_read_hostfile PARAMS((char *filename, int n));
-
-/*
- * slurm_free_job_step_create_response_msg - free slurm 
- *	job step create response message
- * IN msg - pointer to job step create response message
- * NOTE: buffer is loaded by slurm_job_step_create
- */
-extern void slurm_free_job_step_create_response_msg PARAMS((
-	job_step_create_response_msg_t *msg));
 
 /*
  * slurm_submit_batch_job - issue RPC to submit a job for later execution
@@ -1149,14 +1157,23 @@ extern int slurm_terminate_job_step PARAMS((
  *	SLURM TASK SPAWNING FUNCTIONS
 \*****************************************************************************/
 
+/* 
+ * slurm_step_ctx_params_t_init - This initializes parameters
+ *	in the structure that you will pass to slurm_step_ctx_create().
+ *	This function will NOT allocate any new memory.
+ * IN ptr - pointer to a structure allocated by the user.  The structure will
+ *      be intialized.
+ */
+extern void slurm_step_ctx_params_t_init PARAMS((slurm_step_ctx_params_t *ptr));
+
 /*
  * slurm_step_ctx_create - Create a job step and its context. 
- * IN step_req - description of job step request
+ * IN step_params - job step parameters
  * RET the step context or NULL on failure with slurm errno set
  * NOTE: Free allocated memory using slurm_step_ctx_destroy.
  */
 extern slurm_step_ctx slurm_step_ctx_create PARAMS((
-	const job_step_create_request_msg_t *step_req));
+	const slurm_step_ctx_params_t *step_params));
 
 /*
  * slurm_step_ctx_get - get parameters from a job step context.
@@ -1198,13 +1215,14 @@ extern int slurm_step_ctx_daemon_per_node_hack PARAMS((slurm_step_ctx ctx));
 extern int slurm_step_ctx_destroy PARAMS((slurm_step_ctx ctx));
 
 /* 
- * slurm_job_step_launch_t_init - initialize a user-allocated
- *      slurm_job_step_launch_t structure with default values.
+ * slurm_step_launch_params_t_init - initialize a user-allocated
+ *      slurm_step_launch_params_t structure with default values.
  *	default values.  This function will NOT allocate any new memory.
  * IN ptr - pointer to a structure allocated by the use.  The structure will
  *      be intialized.
  */
-extern void slurm_job_step_launch_t_init PARAMS((slurm_job_step_launch_t *ptr));
+extern void slurm_step_launch_params_t_init
+	PARAMS((slurm_step_launch_params_t *ptr));
 
 /*
  * slurm_step_launch - launch a parallel job step
@@ -1212,8 +1230,8 @@ extern void slurm_job_step_launch_t_init PARAMS((slurm_job_step_launch_t *ptr));
  * RET SLURM_SUCCESS or SLURM_ERROR (with errno set)
  */
 extern int slurm_step_launch PARAMS((slurm_step_ctx ctx,
-	const slurm_job_step_launch_t *params,
-	const slurm_job_step_launch_callbacks_t *callbacks));
+	const slurm_step_launch_params_t *params,
+	const slurm_step_launch_callbacks_t *callbacks));
 
 /*
  * Block until all tasks have started.

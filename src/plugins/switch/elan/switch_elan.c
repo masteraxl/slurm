@@ -5,7 +5,7 @@
  *  Copyright (C) 2003-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Kevin Tew <tew1@llnl.gov>, et. al.
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -694,7 +694,7 @@ int switch_p_job_attach ( switch_jobinfo_t jobinfo, char ***env,
 	 * Tell libelan the key to use for Elan state shmem segment
 	 */
 	if (qsw_statkey ((qsw_jobinfo_t) jobinfo, &id) >= 0)
-		slurm_setenvpf (env, "ELAN_STATKEY", "0x%x", id);
+		slurm_setenvpf (env, "ELAN_STATKEY", "%d", id);
 
 	return SLURM_SUCCESS;
 }

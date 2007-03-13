@@ -12,7 +12,7 @@
 # Copyright (C) 2004 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-217948.
+# UCRL-CODE-226842.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -114,7 +114,7 @@ expect {
 		exp_continue
 	}
 	timeout {
-		send_user "\nFAILURE: spawn_task not responding\n"
+		send_user "\nFAILURE: spawn IO not responding\n"
 		cancel_job $job_id
 		set exit_code 1
 	}
@@ -124,7 +124,7 @@ expect {
 }
 
 if {$matches != [expr $task_cnt * 3]} {
-	send_user "\nFAILURE: spawn_task communications failure\n"
+	send_user "\nFAILURE: spawn IO communications failure\n"
 	set exit_code 1
 }
 

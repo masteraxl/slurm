@@ -5,7 +5,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <grondona@llnl.gov>.
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -164,18 +164,12 @@ job_step_create_allocation(uint32_t job_id)
 	hostlist_t hl = NULL;
 	char buf[8192];
 	int count = 0;
+	uint32_t alloc_count = 0;
 	char *tasks_per_node = xstrdup(getenv("SLURM_TASKS_PER_NODE"));
 	
 	ai->jobid          = job_id;
 	ai->stepid         = NO_VAL;
 
-	if(!opt.max_nodes)
-		opt.max_nodes = opt.min_nodes;
-	
-	/* The reason we read in from the hostfile here is so if we don't 
-	 * need all the hostfile we only get what the user asked for 
-	 * (i.e. opt.max_nodes)
-	 */
 	if (opt.nodelist == NULL) {
 		char *nodelist = NULL;
 		char *hostfile = getenv("SLURM_HOSTFILE");
@@ -196,52 +190,160 @@ job_step_create_allocation(uint32_t job_id)
 			}
 		}
 	}
-	ai->nodelist       = opt.alloc_nodelist;
+
+	ai->nodelist = opt.alloc_nodelist;
+	hl = hostlist_create(ai->nodelist);
+	hostlist_uniq(hl);
+	alloc_count = hostlist_count(hl);
+	ai->nnodes = alloc_count;
+	hostlist_destroy(hl);
 	
 	if (opt.exc_nodes) {
 		hostlist_t exc_hl = hostlist_create(opt.exc_nodes);
+		hostlist_t inc_hl = NULL;
 		char *node_name = NULL;
-		if(opt.nodelist)
-			hl = hostlist_create(opt.nodelist);
-		else
-			hl = hostlist_create(ai->nodelist);
+		
+		hl = hostlist_create(ai->nodelist);
+		if(opt.nodelist) {
+			inc_hl = hostlist_create(opt.nodelist);
+		}
+		hostlist_uniq(hl);
 		//info("using %s or %s", opt.nodelist, ai->nodelist);
 		while ((node_name = hostlist_shift(exc_hl))) {
 			int inx = hostlist_find(hl, node_name);
 			if (inx >= 0) {
 				debug("excluding node %s", node_name);
 				hostlist_delete_nth(hl, inx);
+				ai->nnodes--;	/* decrement node count */
+			}
+			if(inc_hl) {
+				inx = hostlist_find(inc_hl, node_name);
+				if (inx >= 0) {
+					error("Requested node %s is also "
+					      "in the excluded list.",
+					      node_name);
+					error("Job not submitted.");
+					hostlist_destroy(exc_hl);
+					hostlist_destroy(inc_hl);
+					goto error;
+				}
 			}
 			free(node_name);
 		}
-		if(!hostlist_count(hl)) {
-			error("Hostlist is now nothing!  Can't run job.");
-			return NULL;
-		}
 		hostlist_destroy(exc_hl);
-		hostlist_ranged_string(hl, sizeof(buf), buf);
-		hostlist_destroy(hl);
-		xfree(opt.nodelist);
-		opt.nodelist = xstrdup(buf);
+
+		/* we need to set this here so if there are more nodes
+		 * available than we requested we can set it
+		 * straight. If there is no exclude list then we set
+		 * the vars then.
+		 */
+		if (!opt.nodes_set) {
+			/* we don't want to set the number of nodes =
+			 * to the number of requested processes unless we
+			 * know it is less than the number of nodes
+			 * in the allocation
+			 */
+			if(opt.nprocs_set && (opt.nprocs < ai->nnodes))
+				opt.min_nodes = opt.nprocs;
+			else
+				opt.min_nodes = ai->nnodes;
+			opt.nodes_set = true;
+		}
+		if(!opt.max_nodes)
+			opt.max_nodes = opt.min_nodes;
+		if((opt.max_nodes > 0) && (opt.max_nodes < ai->nnodes))
+			ai->nnodes = opt.max_nodes;
+
+		count = hostlist_count(hl);
+		if(!count) {
+			error("Hostlist is now nothing!  Can't run job.");
+			hostlist_destroy(hl);
+			goto error;
+		}
+		if(inc_hl) {
+			count = hostlist_count(inc_hl);
+			if(count < ai->nnodes) {
+				/* add more nodes to get correct number for
+				   allocation */
+				hostlist_t tmp_hl = hostlist_copy(hl);
+				int i=0;
+				int diff = ai->nnodes - count;
+				hostlist_ranged_string(inc_hl,
+						       sizeof(buf), buf);
+				hostlist_delete(tmp_hl, buf);
+				while((node_name = hostlist_shift(tmp_hl))
+				      && (i < diff)) {
+					hostlist_push(inc_hl, node_name);
+					i++;
+				}
+				hostlist_destroy(tmp_hl);
+			}
+			hostlist_ranged_string(inc_hl, sizeof(buf), buf);
+			hostlist_destroy(inc_hl);
+			xfree(opt.nodelist);
+			opt.nodelist = xstrdup(buf);
+		} else {
+			if(count > ai->nnodes) {
+				/* remove more nodes than needed for
+				   allocation */
+				int i=0;
+				for(i=count; i>ai->nnodes; i--) 
+					hostlist_delete_nth(hl, i);
+			}
+			hostlist_ranged_string(hl, sizeof(buf), buf);
+			xfree(opt.nodelist);
+			opt.nodelist = xstrdup(buf);
+		}
+
+		hostlist_destroy(hl);			
+	} else {
+		if (!opt.nodes_set) {
+			/* we don't want to set the number of nodes =
+			 * to the number of requested processes unless we
+			 * know it is less than the number of nodes
+			 * in the allocation
+			 */
+			if(opt.nprocs_set && (opt.nprocs < ai->nnodes))
+				opt.min_nodes = opt.nprocs;
+			else
+				opt.min_nodes = ai->nnodes;
+			opt.nodes_set = true;
+		}
+		if(!opt.max_nodes)
+			opt.max_nodes = opt.min_nodes;
+		if((opt.max_nodes > 0) && (opt.max_nodes < ai->nnodes))
+			ai->nnodes = opt.max_nodes;
+		/* Don't reset the ai->nodelist because that is the
+		 * nodelist we want to say the allocation is under
+		 * opt.nodelist is what is used for the allocation.
+		 */
 		/* xfree(ai->nodelist); */
 /* 		ai->nodelist = xstrdup(buf); */
 	}
 	
+	/* get the correct number of hosts to run tasks on */
 	if(opt.nodelist) { 
 		hl = hostlist_create(opt.nodelist);
+		hostlist_uniq(hl);
 		if(!hostlist_count(hl)) {
-			error("1 Hostlist is now nothing!  Can't run job.");
-			return NULL;
+			error("Hostlist is now nothing!  Can not run job.");
+			hostlist_destroy(hl);
+			goto error;
 		}
+		
 		hostlist_ranged_string(hl, sizeof(buf), buf);
 		count = hostlist_count(hl);
 		hostlist_destroy(hl);
+		/* Don't reset the ai->nodelist because that is the
+		 * nodelist we want to say the allocation is under
+		 * opt.nodelist is what is used for the allocation.
+		 */
 		/* xfree(ai->nodelist); */
 /* 		ai->nodelist = xstrdup(buf); */
 		xfree(opt.nodelist);
 		opt.nodelist = xstrdup(buf);
-	}
-
+	} 
+	
 	if(opt.distribution == SLURM_DIST_ARBITRARY) {
 		if(count != opt.nprocs) {
 			error("You asked for %d tasks but specified %d nodes",
@@ -250,10 +352,6 @@ job_step_create_allocation(uint32_t job_id)
 		}
 	}
 
-	hl = hostlist_create(ai->nodelist);
-	hostlist_uniq(hl);
-	ai->nnodes = hostlist_count(hl);
-	hostlist_destroy(hl);
 	if (ai->nnodes == 0) {
 		error("No nodes in allocation, can't run job");
 		goto error;
@@ -263,10 +361,11 @@ job_step_create_allocation(uint32_t job_id)
 		int i = 0;
 		
 		ai->num_cpu_groups = 0;
-		ai->cpus_per_node = xmalloc(sizeof(uint32_t) * ai->nnodes);
-		ai->cpu_count_reps =xmalloc(sizeof(uint32_t) * ai->nnodes);
+		ai->cpus_per_node = xmalloc(sizeof(uint32_t) * alloc_count);
+		ai->cpu_count_reps = xmalloc(sizeof(uint32_t) * alloc_count);
 		
-		while(tasks_per_node[i]) {
+		while(tasks_per_node[i]
+		      && (ai->num_cpu_groups < alloc_count)) {
 			if(tasks_per_node[i] >= '0' 
 			   && tasks_per_node[i] <= '9')
 				ai->cpus_per_node[ai->num_cpu_groups] =
@@ -309,22 +408,13 @@ job_step_create_allocation(uint32_t job_id)
 		}
 		xfree(tasks_per_node);
 	} else {
-		uint32_t cpn = (opt.nprocs + ai->nnodes - 1) / ai->nnodes;
+		uint32_t cpn = (opt.nprocs + alloc_count - 1) / alloc_count;
 		debug("SLURM_TASKS_PER_NODE not set! "
 		      "Guessing %d cpus per node", cpn);
 		ai->cpus_per_node  = &cpn;
-		ai->cpu_count_reps = &ai->nnodes;
+		ai->cpu_count_reps = &alloc_count;
 	}
 
-	/* get the correct number of hosts to run tasks on */
-	/* if(opt.nodelist) { */
-/* 		hl = hostlist_create(opt.nodelist); */
-/* 		hostlist_uniq(hl); */
-/* 		ai->nnodes = hostlist_count(hl); */
-/* 		hostlist_destroy(hl); */
-/* 	} else */
-	if((opt.max_nodes > 0) && (opt.max_nodes < ai->nnodes))
-		ai->nnodes = opt.max_nodes;
 /* 	info("looking for %d nodes out of %s with a must list of %s", */
 /* 	     ai->nnodes, ai->nodelist, opt.nodelist); */
 	/* 
@@ -581,7 +671,7 @@ void
 report_task_status(srun_job_t *job)
 {
 	int i;
-	char buf[1024];
+	char buf[MAXHOSTRANGELEN+2];
 	hostlist_t hl[NTASK_STATES];
 
 	for (i = 0; i < NTASK_STATES; i++)
@@ -596,7 +686,7 @@ report_task_status(srun_job_t *job)
 
 	for (i = 0; i< NTASK_STATES; i++) {
 		if (hostlist_count(hl[i]) > 0) {
-			hostlist_ranged_string(hl[i], 1022, buf);
+			hostlist_ranged_string(hl[i], MAXHOSTRANGELEN, buf);
 			info("%s: %s", buf, _task_state_name(i));
 		}
 		hostlist_destroy(hl[i]);

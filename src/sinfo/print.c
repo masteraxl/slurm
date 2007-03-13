@@ -5,7 +5,7 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov> and 
  *  Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *   
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -16,7 +16,7 @@
  *  any later version.
  *
  *  In addition, as a special exception, the copyright holders give permission 
- *  to link the code of portions of this program with the OpenSSL library under 
+ *  to link the code of portions of this program with the OpenSSL library under
  *  certain conditions as described in each individual source file, and 
  *  distribute linked combinations including the two. You must obey the GNU 
  *  General Public License in all respects for all of the code used other than 
@@ -231,7 +231,7 @@ format_add_function(List list, int width, bool right, char *suffix,
 
 static void _set_node_field_size(List sinfo_list)
 {
-	char tmp[1024];
+	char tmp[MAXHOSTRANGELEN];
 	ListIterator i = list_iterator_create(sinfo_list);
 	sinfo_data_t *current;
 	int max_width = MIN_NODE_FIELD_SIZE, this_width = 0;
@@ -495,7 +495,7 @@ int _print_node_list(sinfo_data_t * sinfo_data, int width,
 		width = params.node_field_size;
 
 	if (sinfo_data) {
-		char tmp[1024];
+		char tmp[MAXHOSTRANGELEN];
 		hostlist_ranged_string(sinfo_data->nodes, 
 					sizeof(tmp), tmp);
 		_print_str(tmp, width, right_justify, true);
@@ -715,7 +715,7 @@ int _print_state_compact(sinfo_data_t * sinfo_data, int width,
 {
 	if (sinfo_data && sinfo_data->nodes_total) {
 		char *upper_state = node_state_string_compact(
-				sinfo_data->node_state);
+			sinfo_data->node_state);
 		char *lower_state = _str_tolower(upper_state);
 		_print_str(lower_state, width, right_justify, true);
 		xfree(lower_state);

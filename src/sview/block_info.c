@@ -6,7 +6,7 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
  * 
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -567,9 +567,10 @@ extern void refresh_block(GtkAction *action, gpointer user_data)
 extern int get_new_info_node_select(node_select_info_msg_t **node_select_ptr,
 				    int force)
 {
+	int error_code = SLURM_SUCCESS;
+#ifdef HAVE_BG
 	static node_select_info_msg_t *bg_info_ptr = NULL;
 	static node_select_info_msg_t *new_bg_ptr = NULL;
-	int error_code = SLURM_SUCCESS;
 	time_t now = time(NULL);
 	static time_t last;
 		
@@ -594,6 +595,9 @@ extern int get_new_info_node_select(node_select_info_msg_t **node_select_ptr,
 
 	bg_info_ptr = new_bg_ptr;
 	*node_select_ptr = new_bg_ptr;
+#else
+	error_code = SLURM_NO_CHANGE_IN_DATA;
+#endif
 	return error_code;
 }
 

@@ -5,7 +5,7 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Mette <jette1@llnl.gov>.
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -281,8 +281,11 @@ extern void init_slurm_conf (slurm_ctl_conf_t *ctl_conf_ptr);
 /* 
  * free_slurm_conf - free all storage associated with a slurm_ctl_conf_t.   
  * IN/OUT ctl_conf_ptr - pointer to data structure to be freed
+ * IN purge_node_hash - purge system-wide node hash table if set,
+ *			set to zero if clearing private copy of config data
  */
-extern void free_slurm_conf (slurm_ctl_conf_t *ctl_conf_ptr);
+extern void free_slurm_conf (slurm_ctl_conf_t *ctl_conf_ptr,
+			     bool purge_node_hash);
 
 /*
  * gethostname_short - equivalent to gethostname(), but return only the first 

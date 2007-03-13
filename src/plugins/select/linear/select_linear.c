@@ -8,7 +8,7 @@
  *  Copyright (C) 2004-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -715,6 +715,10 @@ extern int select_p_update_block (update_part_msg_t *part_desc_ptr)
 	return SLURM_SUCCESS;
 }
 
+extern int select_p_update_sub_node (update_part_msg_t *part_desc_ptr)
+{
+	return SLURM_SUCCESS;
+}
 extern int select_p_get_extra_jobinfo (struct node_record *node_ptr, 
                                        struct job_record *job_ptr, 
                                        enum select_data_info info,

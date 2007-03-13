@@ -5,7 +5,7 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -110,7 +110,7 @@ slurm_sprint_node_table (node_info_t * node_ptr, int one_liner )
 {
 	uint16_t my_state = node_ptr->node_state;
 	char *comp_str = "", *drain_str = "";
-	char tmp_line[100];
+	char tmp_line[512];
 	char *out = NULL;
 
 	if (my_state & NODE_STATE_COMPLETING) {
@@ -138,11 +138,12 @@ slurm_sprint_node_table (node_info_t * node_ptr, int one_liner )
 	/****** Line 2 ******/
 	snprintf(tmp_line, sizeof(tmp_line),
 		"Sockets=%u Cores=%u Threads=%u "
-		"Weight=%u Features=%s Reason=%s\n" , 
+		"Weight=%u Features=%s Reason=%s" ,
 		node_ptr->sockets, node_ptr->cores, node_ptr->threads,
 		node_ptr->weight, node_ptr->features,
 		node_ptr->reason);
 	xstrcat(out, tmp_line);
+	xstrcat(out, "\n");
 
 	return out;
 }

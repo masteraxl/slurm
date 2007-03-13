@@ -5,7 +5,7 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -58,6 +58,7 @@ static void     _print_version( void );
 static int	_process_command (int argc, char *argv[]);
 static void	_update_it (int argc, char *argv[]);
 static int	_update_bluegene_block (int argc, char *argv[]);
+static int      _update_bluegene_subbp (int argc, char *argv[]);
 static void	_usage ();
 
 int 
@@ -500,7 +501,7 @@ _process_command (int argc, char *argv[])
 	else if (strncasecmp (argv[0], "quiet", 4) == 0) {
 		if (argc > 1) {
 			exit_code = 1;
-			fprintf (stderr, "too many arguments for keyword:%s\n", 
+			fprintf (stderr, "too many arguments for keyword:%s\n",
 				 argv[0]);
 		}
 		quiet_flag = 1;
@@ -781,6 +782,9 @@ _update_it (int argc, char *argv[])
 		} else if (strncasecmp (argv[i], "BlockName=", 10) == 0) {
 			error_code = _update_bluegene_block (argc, argv);
 			break;
+		} else if (strncasecmp (argv[i], "SubBPName=", 10) == 0) {
+			error_code = _update_bluegene_subbp (argc, argv);
+			break;
 		}
 		
 	}
@@ -790,7 +794,8 @@ _update_it (int argc, char *argv[])
 		fprintf(stderr, "No valid entity in update command\n");
 		fprintf(stderr, "Input line must include \"NodeName\", ");
 #ifdef HAVE_BG
-		fprintf(stderr, "\"BlockName\", ");
+		fprintf(stderr, "\"BlockName\", \"SubBPName\" "
+			"(i.e. bgl000[0-3]),");
 #endif
 		fprintf(stderr, "\"PartitionName\", or \"JobId\"\n");
 	}
@@ -816,7 +821,7 @@ _update_bluegene_block (int argc, char *argv[])
 	update_part_msg_t part_msg;
 
 	slurm_init_part_desc_msg ( &part_msg );
-	/* means this is for bluegene */
+	/* means this is for bluegene and altering a block */
 	part_msg.hidden = (uint16_t)INFINITE;
 
 	for (i=0; i<argc; i++) {
@@ -837,6 +842,63 @@ _update_bluegene_block (int argc, char *argv[])
 			}
 			update_cnt++;
 		}
+	}
+	if(!part_msg.name) {
+		error("You didn't supply a name.");
+		return 0;
+	}
+	if (slurm_update_partition(&part_msg)) {
+		exit_code = 1;
+		return slurm_get_errno ();
+	} else
+		return 0;
+#else
+	printf("This only works on a bluegene system.\n");
+	return 0;
+#endif
+}
+
+/* 
+ * _update_bluegene_subbp - update the bluegene nodecards per the 
+ *	supplied arguments 
+ * IN argc - count of arguments
+ * IN argv - list of arguments
+ * RET 0 if no slurm error, errno otherwise. parsing error prints 
+ *			error message and returns 0
+ */
+static int
+_update_bluegene_subbp (int argc, char *argv[]) 
+{
+#ifdef HAVE_BG
+	int i, update_cnt = 0;
+	update_part_msg_t part_msg;
+
+	slurm_init_part_desc_msg ( &part_msg );
+	/* means this is for bluegene and altering a sub node */
+	part_msg.root_only = (uint16_t)INFINITE;
+
+	for (i=0; i<argc; i++) {
+		if (strncasecmp(argv[i], "SubBPName=", 10) == 0)
+			part_msg.name = &argv[i][10];
+		else if (strncasecmp(argv[i], "State=", 6) == 0) {
+			if (strcasecmp(&argv[i][6], "ERROR") == 0)
+				part_msg.state_up = 0;
+			else if (strcasecmp(&argv[i][6], "FREE") == 0)
+				part_msg.state_up = 1;
+			else {
+				exit_code = 1;
+				fprintf (stderr, "Invalid input: %s\n", 
+					 argv[i]);
+				fprintf (stderr, "Acceptable State values "
+					"are FREE and ERROR\n");
+				return 0;
+			}
+			update_cnt++;
+		}
+	}
+	if(!part_msg.name) {
+		error("You didn't supply a name.");
+		return 0;
 	}
 	if (slurm_update_partition(&part_msg)) {
 		exit_code = 1;
@@ -880,6 +942,12 @@ scontrol [<OPTION>] [<COMMAND>]                                            \n\
      exit                     terminate scontrol                           \n\
      help                     print this description of use.               \n\
      hide                     do not display information about hidden partitions.\n\
+     listpids <job_id<.step>> List pids associated with the given jobid, or\n\
+                              all jobs if no id is given (This will only   \n\
+                              display the processes on the node which the  \n\
+                              scontrol is ran on, and only for those       \n\
+                              processes spawned by SLURM and their         \n\
+                              descendants)                                 \n\
      oneliner                 report output one record per line.           \n\
      pidinfo <pid>            return slurm job information for given pid.  \n\
      ping                     print status of slurmctld daemons.           \n\
@@ -893,13 +961,13 @@ scontrol [<OPTION>] [<COMMAND>]                                            \n\
      suspend <job_id>         susend specified job                         \n\
      resume <job_id>          resume previously suspended job              \n\
      update <SPECIFICATIONS>  update job, node, partition, or bluegene     \n\
-                              block configuration                          \n\
+                              block/subbp configuration                    \n\
      verbose                  enable detailed logging.                     \n\
      version                  display tool version number.                 \n\
      !!                       Repeat the last command entered.             \n\
                                                                            \n\
   <ENTITY> may be \"config\", \"daemons\", \"job\", \"node\", \"partition\"\n\
-           \"block\" or \"step\".                                          \n\
+           \"block\", \"subbp\" or \"step\".                               \n\
                                                                            \n\
   <ID> may be a configuration parameter name , job id, node name, partition\n\
        name or job step id.                                                \n\
@@ -910,8 +978,9 @@ scontrol [<OPTION>] [<COMMAND>]                                            \n\
                                                                            \n\
   <SPECIFICATIONS> are specified in the same format as the configuration   \n\
   file. You may wish to use the \"show\" keyword then use its output as    \n\
-  input for the update keyword, editing as needed.  Bluegene blocks are    \n\
-  only able to be set to an error or free state. (Bluegene systems only)   \n\
+  input for the update keyword, editing as needed.  Bluegene blocks/subbps \n\
+  are only able to be set to an error or free state.                       \n\
+  (Bluegene systems only)                                                  \n\
                                                                            \n\
   <CH_OP> identify checkpoint operations and may be \"able\", \"disable\", \n\
   \"enable\", \"create\", \"vacate\", \"restart\", or \"error\".           \n\

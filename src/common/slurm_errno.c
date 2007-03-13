@@ -4,7 +4,7 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Jim Garlick <garlick@llnl.gov>, et. al.
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -87,6 +87,10 @@ static slurm_errtab_t slurm_errtab[] = {
           "Protocol authentication error"                       },
         { SLURM_PROTOCOL_INSANE_MSG_LENGTH,
           "Insane message length"                               },
+	{ SLURM_MPI_PLUGIN_NAME_INVALID,
+	  "Invalid MPI plugin name"                             },
+	{ SLURM_MPI_PLUGIN_PRELAUNCH_SETUP_FAILED,
+	  "MPI plugin's pre-launch setup failed"                },
 
 	/* communication failures to/from slurmctld */
 	{ SLURMCTLD_COMMUNICATIONS_CONNECTION_ERROR,

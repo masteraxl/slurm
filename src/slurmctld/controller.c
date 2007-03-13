@@ -5,7 +5,7 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>, Kevin Tew <tew1@llnl.gov>
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -16,7 +16,7 @@
  *  any later version.
  *
  *  In addition, as a special exception, the copyright holders give permission 
- *  to link the code of portions of this program with the OpenSSL library under 
+ *  to link the code of portions of this program with the OpenSSL library under
  *  certain conditions as described in each individual source file, and 
  *  distribute linked combinations including the two. You must obey the GNU 
  *  General Public License in all respects for all of the code used other than 
@@ -212,7 +212,7 @@ int main(int argc, char *argv[])
 #endif   /* !NDEBUG         */
 
 	/* 
-	 * Create StateSaveLocation directory if necessary, and chdir() to it.
+	 * Create StateSaveLocation directory if necessary.
 	 */
 	if (set_slurmctld_state_loc() < 0)
 		fatal("Unable to initialize StateSaveLocation");
@@ -223,6 +223,24 @@ int main(int argc, char *argv[])
 			  slurmctld_conf.slurmctld_logfile);
 		if (error_code)
 			error("daemon error %d", error_code);
+		if (slurmctld_conf.slurmctld_logfile
+		&&  (slurmctld_conf.slurmctld_logfile[0] == '/')) {
+			char *slash_ptr, *work_dir;
+			work_dir = xstrdup(slurmctld_conf.slurmctld_logfile);
+			slash_ptr = strrchr(work_dir, '/');
+			if (slash_ptr == work_dir)
+				work_dir[1] = '\0';
+			else
+				slash_ptr[0] = '\0';
+			if (chdir(work_dir) < 0)
+				fatal("chdir(%s): %m", work_dir);
+			xfree(work_dir);
+		} else {
+			if (chdir(slurmctld_conf.state_save_location) < 0) {
+				fatal("chdir(%s): %m",
+					slurmctld_conf.state_save_location);
+			}
+		}
 	}
 	info("slurmctld version %s started", SLURM_VERSION);
 
@@ -248,8 +266,6 @@ int main(int argc, char *argv[])
 	/*
 	 * Initialize plugins.
 	 */
-	if ( slurm_sched_init() != SLURM_SUCCESS )
-		fatal( "failed to initialize scheduling plugin" );
 	if ( slurm_select_init() != SLURM_SUCCESS )
 		fatal( "failed to initialize node selection plugin" );
 	if ( checkpoint_init(slurmctld_conf.checkpoint_type) != 
@@ -267,6 +283,7 @@ int main(int argc, char *argv[])
 		if (slurmctld_conf.backup_controller &&
 		    (strcmp(node_name,
 			    slurmctld_conf.backup_controller) == 0)) {
+			slurm_sched_fini();	/* make sure shutdown */
 			run_backup();
 		} else if (slurmctld_conf.control_machine &&
 			 (strcmp(node_name, slurmctld_conf.control_machine) 
@@ -288,19 +305,8 @@ int main(int argc, char *argv[])
 			exit(0);
 		}
 		info("Running as primary controller");
-
-		/* Recover node scheduler state info */
-		if (recover) {
-			error_code = select_g_state_restore(
-					slurmctld_conf.state_save_location);
-		} else {
-			error_code = select_g_state_restore(NULL);
-		}
-		if (error_code != SLURM_SUCCESS ) {
-			error("failed to restore node selection state");
-			abort();
-		}
-
+		if (slurm_sched_init() != SLURM_SUCCESS)
+			fatal("failed to initialize scheduling plugin");
 
 		/*
 		 * create attached thread to process RPCs
@@ -741,6 +747,7 @@ static void *_slurmctld_background(void *no_data)
 	static time_t last_group_time;
 	static time_t last_ping_node_time;
 	static time_t last_ping_srun_time;
+	static time_t last_purge_job_time;
 	static time_t last_timelimit_time;
 	static time_t last_assert_primary_time;
 	time_t now;
@@ -767,6 +774,7 @@ static void *_slurmctld_background(void *no_data)
 	/* Let the dust settle before doing work */
 	now = time(NULL);
 	last_sched_time = last_checkpoint_time = last_group_time = now;
+	last_purge_job_time = now;
 	last_timelimit_time = last_assert_primary_time = now;
 	if (slurmctld_conf.slurmd_timeout) {
 		/* We ping nodes that haven't responded in SlurmdTimeout/2,
@@ -842,12 +850,16 @@ static void *_slurmctld_background(void *no_data)
 			unlock_slurmctld(part_write_lock);
 		}
 
-		if (difftime(now, last_sched_time) >= PERIODIC_SCHEDULE) {
-			last_sched_time = now;
+		if (difftime(now, last_purge_job_time) >= PURGE_JOB_INTERVAL) {
+			last_purge_job_time = now;
 			debug2("Performing purge of old job records");
 			lock_slurmctld(job_write_lock);
-			purge_old_job();	/* remove defunct job recs */
+			purge_old_job();
 			unlock_slurmctld(job_write_lock);
+		}
+
+		if (difftime(now, last_sched_time) >= PERIODIC_SCHEDULE) {
+			last_sched_time = now;
 			if (schedule())
 				last_checkpoint_time = 0;  /* force state save */
 		}
@@ -1037,13 +1049,15 @@ static void _usage(char *prog_name)
 	fprintf(stderr, "  -h      "
 			"\tPrint this help message.\n");
 	fprintf(stderr, "  -L logfile "
-			"\tLog messages to the specified file\n");
+			"\tLog messages to the specified file.\n");
 #if (DEFAULT_RECOVER == 0)
 	fprintf(stderr, "  -r      "
 			"\tRecover state from last checkpoint.\n");
 #endif
 	fprintf(stderr, "  -v      "
 			"\tVerbose mode. Multiple -v's increase verbosity.\n");
+	fprintf(stderr, "  -V      "
+			"\tPrint version information and exit.\n");
 }
 
 /*
@@ -1073,7 +1087,8 @@ static int _shutdown_backup_controller(int wait_time)
 	req.msg_type = REQUEST_CONTROL;
 	
 	START_TIMER;
-	if (slurm_send_recv_rc_msg_only_one(&req, &rc, CONTROL_TIMEOUT) < 0) {
+	if (slurm_send_recv_rc_msg_only_one(&req, &rc, 
+				(CONTROL_TIMEOUT * 1000)) < 0) {
 		END_TIMER;
 		error("_shutdown_backup_controller:send/recv: %m, %s", TIME_STR);
 		return SLURM_ERROR;
@@ -1203,15 +1218,6 @@ set_slurmctld_state_loc(void)
 	}
 	(void) unlink(tmp);
 	xfree(tmp);
-
-	/*
-	 * Only chdir() to spool directory if slurmctld will be 
-	 * running as a daemon
-	 */
-	if (daemonize && chdir(slurmctld_conf.state_save_location) < 0) {
-		error("chdir(%s): %m", slurmctld_conf.state_save_location);
-		return SLURM_ERROR;
-	}
 
 	return SLURM_SUCCESS;
 }

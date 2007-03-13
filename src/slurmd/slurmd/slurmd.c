@@ -5,7 +5,7 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -92,6 +92,7 @@
 /* global, copied to STDERR_FILENO in tasks before the exec */
 int devnull = -1;
 slurmd_conf_t * conf;
+extern char *slurm_stepd_path;
 
 /*
  * count of active threads
@@ -854,6 +855,7 @@ _slurmd_init()
 {
 	struct rlimit rlim;
 	slurm_ctl_conf_t *cf;
+	struct stat stat_buf;
 
 	/*
 	 * Process commandline arguments first, since one option may be
@@ -934,6 +936,16 @@ _slurmd_init()
 		return SLURM_FAILURE;
 	}
 	fd_set_close_on_exec(devnull);
+
+	/* make sure we have slurmstepd installed */
+	if (stat(slurm_stepd_path, &stat_buf)) {
+		fatal("Unable to find slurmstepd file at %s",
+			slurm_stepd_path);
+	}
+	if (!S_ISREG(stat_buf.st_mode)) {
+		fatal("slurmstepd not a file at %s", 
+			slurm_stepd_path);
+	}
 
 	return SLURM_SUCCESS;
 }
@@ -1080,12 +1092,14 @@ _usage()
 {
 	fprintf(stderr, "\
 Usage: %s [OPTIONS]\n\
-   -L logfile  Log messages to the file `logfile'\n\
-   -v          Verbose mode. Multiple -v's increase verbosity.\n\
+   -c          Force cleanup of slurmd shared memory.\n\
    -D          Run daemon in foreground.\n\
    -M          Use mlock() to lock slurmd pages into memory.\n\
-   -c          Force cleanup of slurmd shared memory.\n\
-   -h          Print this help message.\n", conf->prog);
+   -h          Print this help message.\n\
+   -f config   Read configuration from the specified file.\n\
+   -L logfile  Log messages to the file `logfile'.\n\
+   -v          Verbose mode. Multiple -v's increase verbosity.\n\
+   -V          Print version information and exit.\n", conf->prog);
 	return;
 }
 

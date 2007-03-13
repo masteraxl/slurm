@@ -8,7 +8,7 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>, et. al.
  *  Derived from pdsh written by Jim Garlick <garlick1@llnl.gov>
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -1329,37 +1329,28 @@ static void _mail_free(void *arg)
 static void _mail_proc(mail_info_t *mi)
 {
 	pid_t pid;
-	int pfd[2];
-
-	if (pipe(pfd) == -1) {
-		error("pipe(): %m");
-		goto fini;
-	}
 
 	pid = fork();
-	if (pid < 0) {
+	if (pid < 0) {		/* error */
 		error("fork(): %m");
-		(void) close(pfd[0]);
-		(void) close(pfd[1]);
-	} else if (pid == 0) { /* child */
+	} else if (pid == 0) {	/* child */
+		int fd;
 		(void) close(0);
-		dup(pfd[0]);
-		(void) close(pfd[0]);
-		(void) close(pfd[1]);
 		(void) close(1);
 		(void) close(2);
+		fd = open("/dev/null", O_RDWR);
+		dup(fd);
+		dup(fd);
 		execle(slurmctld_conf.mail_prog, "mail", 
-			mi->user_name, 
-			"-s", mi->message, NULL, NULL);
+			"-s", mi->message, mi->user_name,
+			NULL, NULL);
 		error("Failed to exec %s: %m", 
 			slurmctld_conf.mail_prog);
 		exit(1);
-	} else {	/* parent */
-		(void) close(pfd[0]);
-		(void) close(pfd[1]);
+	} else {		/* parent */
 		waitpid(pid, NULL, 0);
 	}
-fini:	_mail_free(mi);
+	_mail_free(mi);
 	return;
 }
 

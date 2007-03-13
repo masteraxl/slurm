@@ -5,7 +5,7 @@
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Christopher Morrone <morrone2@llnl.gov>
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -289,6 +289,7 @@ stepd_get_info(int fd)
 
 	return info;
 rwfail:
+	xfree(info);
 	return NULL;
 }
 
@@ -494,7 +495,8 @@ stepd_available(const char *directory, const char *nodename)
 	}
 
 	l = list_create((ListDelF) _free_step_loc_t);
-	_sockname_regex_init(&re, nodename);
+	if(_sockname_regex_init(&re, nodename) == -1)
+		goto done;
 
 	/*
 	 * Make sure that "directory" exists and is a directory.

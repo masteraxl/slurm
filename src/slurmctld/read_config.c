@@ -4,7 +4,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>.
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -611,8 +611,23 @@ static int _build_single_partitionline_info(slurm_conf_partition_t *part)
 	}
 	if (part->nodes) {
 		if (part_ptr->nodes) {
-			xstrcat(part_ptr->nodes, ",");
-			xstrcat(part_ptr->nodes, part->nodes);
+			int cnt_tot, cnt_uniq, buf_size;
+			hostlist_t hl = hostlist_create(part_ptr->nodes);
+			
+			hostlist_push(hl, part->nodes);
+			cnt_tot = hostlist_count(hl);
+			hostlist_uniq(hl);
+			cnt_uniq = hostlist_count(hl);
+			if (cnt_tot != cnt_uniq) {
+				fatal("Duplicate Nodes for Partition %s",
+					part->name);
+			}
+			buf_size = strlen(part_ptr->nodes) + 1 +
+				   strlen(part->nodes) + 1;
+			xfree(part_ptr->nodes);
+			part_ptr->nodes = xmalloc(buf_size);
+			hostlist_ranged_string(hl, buf_size, part_ptr->nodes);
+			hostlist_destroy(hl);
 		} else {
 			part_ptr->nodes = xstrdup(part->nodes);
 		}
@@ -670,6 +685,7 @@ int read_slurm_conf(int recover)
 	char *old_sched_type      = xstrdup(slurmctld_conf.schedtype);
 	char *old_select_type     = xstrdup(slurmctld_conf.select_type);
 	char *old_switch_type     = xstrdup(slurmctld_conf.switch_type);
+	char *state_save_dir      = xstrdup(slurmctld_conf.state_save_location);
 	slurm_ctl_conf_t *conf;
 	select_type_plugin_info_t old_select_type_p = 
 		(select_type_plugin_info_t) slurmctld_conf.select_type_param;
@@ -738,16 +754,19 @@ int read_slurm_conf(int recover)
 					    old_node_record_count);
 		}
 		reset_first_job_id();
+		(void) slurm_sched_reconfig();
+		xfree(state_save_dir);
 	}
 
 	if ((select_g_node_init(node_record_table_ptr, node_record_count)
 			!= SLURM_SUCCESS) 
 	    || (select_g_block_init(part_list) != SLURM_SUCCESS) 
+	    || (select_g_state_restore(state_save_dir) != SLURM_SUCCESS) 
 	    || (select_g_job_init(job_list) != SLURM_SUCCESS)) {
 		error("failed to initialize node selection plugin state");
 		abort();
 	}
-
+	xfree(state_save_dir);
 	reset_job_bitmaps();		/* must follow select_g_job_init() */
 
 	(void) _sync_nodes_to_jobs();

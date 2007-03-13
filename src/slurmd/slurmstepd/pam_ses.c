@@ -5,7 +5,7 @@
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Donna Mecozzi <dmecozzi@llnl.gov>.
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -113,10 +113,9 @@ pam_setup (char *user, char *host)
 			!= PAM_SUCCESS) {
                 error ("pam_setcred: %s", pam_strerror(pam_h, rc));
                 return SLURM_ERROR;
-        } else
-                 if ((rc = pam_open_session (pam_h, 0)) != PAM_SUCCESS) {
-                        error("pam_open_session: %s", pam_strerror(pam_h, rc));
-                        return SLURM_ERROR;
+        } else if ((rc = pam_open_session (pam_h, 0)) != PAM_SUCCESS) {
+                error("pam_open_session: %s", pam_strerror(pam_h, rc));
+                return SLURM_ERROR;
         }
 
 	return SLURM_SUCCESS;

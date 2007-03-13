@@ -6,7 +6,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -17,7 +17,7 @@
  *  any later version.
  *
  *  In addition, as a special exception, the copyright holders give permission 
- *  to link the code of portions of this program with the OpenSSL library under 
+ *  to link the code of portions of this program with the OpenSSL library under
  *  certain conditions as described in each individual source file, and 
  *  distribute linked combinations including the two. You must obey the GNU 
  *  General Public License in all respects for all of the code used other than 
@@ -164,9 +164,6 @@ strong_alias(hostset_nth,		slurm_hostset_nth);
 #ifndef MAXHOSTNAMELEN
 #define MAXHOSTNAMELEN    64
 #endif
-
-/* max size of internal hostrange buffer */
-#define MAXHOSTRANGELEN 1024
 
 /* ----[ Internal Data Structures ]---- */
 
@@ -1813,7 +1810,7 @@ char *hostlist_pop_range(hostlist_t hl)
 char *hostlist_shift_range(hostlist_t hl)
 {
 	int i;
-	char buf[1024];
+	char buf[MAXHOSTRANGELEN+1];
 	hostlist_t hltmp = hostlist_new();
 	if (!hltmp || !hl)
 		return NULL;
@@ -1845,7 +1842,7 @@ char *hostlist_shift_range(hostlist_t hl)
 
 	UNLOCK_HOSTLIST(hl);
 
-	hostlist_ranged_string(hltmp, 1024, buf);
+	hostlist_ranged_string(hltmp, MAXHOSTRANGELEN, buf);
 	hostlist_destroy(hltmp);
 
 	return strdup(buf);
@@ -2843,7 +2840,7 @@ int hostset_nranges(hostset_t set)
 int iterator_test(char *list)
 {
 	int j;
-	char buf[1024];
+	char buf[MAXHOSTRANGELEN+1];
 	hostlist_t hl = hostlist_create(list);
 	hostset_t set = hostset_create(list);
 
@@ -2852,7 +2849,7 @@ int iterator_test(char *list)
 	hostlist_iterator_t i2 = hostlist_iterator_create(hl);
 	char *host;
 
-	hostlist_ranged_string(hl, 1024, buf);
+	hostlist_ranged_string(hl, MAXHOSTRANGELEN, buf);
 	printf("iterator_test: hl = `%s' passed in `%s'\n", buf, list);
 	host = hostlist_next(i);
 	printf("first host in list hl = `%s'\n", host);
@@ -2944,11 +2941,11 @@ int main(int ac, char **av)
 	printf("hostset  = `%s'\n", buf);
 
 	hostlist_sort(hl1);
-	hostlist_ranged_string(hl1, 1024, buf);
+	hostlist_ranged_string(hl1, 10240, buf);
 	printf("sorted   = `%s'\n", buf);
 
 	hostlist_uniq(hl1);
-	hostlist_ranged_string(hl1, 1024, buf);
+	hostlist_ranged_string(hl1, 10240, buf);
 	printf("uniqed   = `%s'\n", buf);
 
 	hl2 = hostlist_copy(hl1);

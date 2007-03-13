@@ -72,6 +72,7 @@ typedef struct bg_update {
 	enum update_op op;	/* start | terminate | sync */
 	uid_t uid;		/* new user */
 	uint32_t job_id;	/* SLURM job id */	
+	uint16_t reboot;	/* reboot block before starting job */
 	pm_partition_id_t bg_block_id;
 	char *blrtsimage;       /* BlrtsImage for this block */
 	char *linuximage;       /* LinuxImage for this block */
@@ -284,8 +285,6 @@ static void _start_agent(bg_update_t *bg_update_ptr)
 		slurm_mutex_unlock(&block_state_mutex);
 
 	
-	num_block_to_free = 0;
-	num_block_freed = 0;
 	delete_list = list_create(NULL);
 	slurm_mutex_lock(&block_state_mutex);
 	itr = list_iterator_create(bg_list);
@@ -322,13 +321,20 @@ static void _start_agent(bg_update_t *bg_update_ptr)
 		      num_block_freed, 
 		      num_block_to_free);
 	}
+	/* Zero out the values here because we are done with them and
+	   they will be ready for the next job */
+	num_block_to_free = 0;
+	num_block_freed = 0;
 	
+	slurm_mutex_lock(&block_state_mutex);
 	if(bg_record->job_running <= NO_JOB_RUNNING) {
+		slurm_mutex_unlock(&block_state_mutex);
 		slurm_mutex_unlock(&job_start_mutex);
 		debug("job %d already finished before boot",
 		      bg_update_ptr->job_id);
 		return;
 	}
+
 	rc = 0;
 	if(bg_update_ptr->blrtsimage 
 	   && strcasecmp(bg_update_ptr->blrtsimage, bg_record->blrtsimage)) {
@@ -364,6 +370,7 @@ static void _start_agent(bg_update_t *bg_update_ptr)
 		bg_record->ramdiskimage = xstrdup(bg_update_ptr->ramdiskimage);
 		rc = 1;
 	}
+	slurm_mutex_unlock(&block_state_mutex);
 
 	if(rc) {
 		slurm_mutex_lock(&block_state_mutex);
@@ -403,8 +410,9 @@ static void _start_agent(bg_update_t *bg_update_ptr)
 		slurm_mutex_lock(&block_state_mutex);
 		bg_record->modifying = 0;		
 		slurm_mutex_unlock(&block_state_mutex);		
-	}
-
+	} else if(bg_update_ptr->reboot) 
+		bg_free_block(bg_record);
+	
 	if(bg_record->state == RM_PARTITION_FREE) {
 		if((rc = boot_block(bg_record)) != SLURM_SUCCESS) {
 			sleep(2);	
@@ -578,8 +586,8 @@ static void _term_agent(bg_update_t *bg_update_ptr)
 		}
 			
 		slurm_mutex_lock(&block_state_mutex);
-		
-		bg_record->job_running = NO_JOB_RUNNING;
+		if(bg_record->job_running > NO_JOB_RUNNING)
+			bg_record->job_running = NO_JOB_RUNNING;
 		
 		/* remove user from list */
 		
@@ -822,6 +830,9 @@ extern int start_job(struct job_record *job_ptr)
 	select_g_get_jobinfo(job_ptr->select_jobinfo,
 			     SELECT_DATA_BLRTS_IMAGE, 
 			     &(bg_update_ptr->blrtsimage));
+	select_g_get_jobinfo(job_ptr->select_jobinfo,
+			     SELECT_DATA_REBOOT, 
+			     &(bg_update_ptr->reboot));
 	if(!bg_update_ptr->blrtsimage) {
 		bg_update_ptr->blrtsimage = xstrdup(default_blrtsimage);
 		select_g_set_jobinfo(job_ptr->select_jobinfo,

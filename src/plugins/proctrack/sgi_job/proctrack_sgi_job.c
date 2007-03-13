@@ -4,7 +4,7 @@
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -234,7 +234,8 @@ int slurm_container_signal (uint32_t id, int sig)
 
 int slurm_container_destroy (uint32_t id)
 {
-	_job_waitjid ((jid_t) id, NULL, 0);
+	int status;
+	_job_waitjid ((jid_t) id, &status, 0);
 	/*  Assume any error means job doesn't exist. Therefore,
 	 *   return SUCCESS to slurmd so it doesn't retry continuously
 	 */

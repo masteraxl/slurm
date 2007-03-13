@@ -12,7 +12,7 @@
 # Copyright (C) 2006 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-217948.
+# UCRL-CODE-226842.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -67,7 +67,7 @@ set host_2      ""
 set host_3      ""
 set job_id      0
 set timeout $max_job_delay
-set salloc_pid [spawn $salloc -N$node_cnt -t1 $slaunch -l $bin_hostname]  
+set salloc_pid [spawn $salloc -N$node_cnt -t1 $slaunch -l $bin_printenv SLURMD_NODENAME]  
 expect {
 	-re "Granted job allocation ($number)" {
 		set job_id $expect_out(1,string)
@@ -238,7 +238,7 @@ set host_0      ""
 set host_1      ""
 set job_id      0
 set timeout $max_job_delay
-set salloc_pid [spawn $salloc -N$node_cnt --nodelist=$all_nodes -t1  $slaunch -n1 --task-layout-byname=$include_node -l $bin_hostname]  
+set salloc_pid [spawn $salloc -N$node_cnt --nodelist=$all_nodes -t1  $slaunch -n1 --task-layout-byname=$include_node -l $bin_printenv SLURMD_NODENAME]  
 expect {
 	-re "Granted job allocation ($number)" {
 		set job_id $expect_out(1,string)
@@ -297,7 +297,7 @@ set host_0      ""
 set host_1      ""
 set job_id      0
 set timeout $max_job_delay
-set salloc_pid [spawn $salloc -N$node_cnt --nodelist=$all_nodes -t1  $slaunch -n1 --task-layout-file=$hostfile -l $bin_hostname]
+set salloc_pid [spawn $salloc -N$node_cnt --nodelist=$all_nodes -t1  $slaunch -n1 --task-layout-file=$hostfile -l $bin_printenv SLURMD_NODENAME]
 expect {
 	-re "Granted job allocation ($number)" {
 		set job_id $expect_out(1,string)

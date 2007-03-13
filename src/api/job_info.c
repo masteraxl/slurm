@@ -5,7 +5,7 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -733,7 +733,7 @@ slurm_get_end_time(uint32_t jobid, time_t *end_time_ptr)
 		break;
 	default:
 		if (endtime_cache)
-		*end_time_ptr  = endtime_cache;
+			*end_time_ptr  = endtime_cache;
 		else
 			slurm_seterrno_ret(SLURM_UNEXPECTED_MSG_ERROR);
 		break;

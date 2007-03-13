@@ -5,7 +5,7 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <grondona@llnl.gov>.
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -159,7 +159,7 @@ launch(void *arg)
 		r.task_flags |= TASK_PARALLEL_DEBUG;
 	
 	/* Node specific message contents */
-	if (slurm_mpi_single_task_per_node ()) {
+	if (mpi_hook_client_single_task_per_node ()) {
 		for (i = 0; i < job->step_layout->node_cnt; i++)
 			job->step_layout->tasks[i] = 1;
 	} 
@@ -198,9 +198,12 @@ launch(void *arg)
 	msg.data            = &r;
 	
 	if (_verbose) {
-		char *name = nodelist_nth_host(job->step_layout->node_list, 0);
-		_print_launch_msg(&r, name);
-		free(name);
+		for(i=0; i<job->step_layout->node_cnt; i++) {
+			char *name = nodelist_nth_host(
+				job->step_layout->node_list, i);
+			_print_launch_msg(&r, name);
+			free(name);
+		}
 	}
 	if(!(ret_list = slurm_send_recv_msgs(
 		     job->step_layout->node_list,
@@ -226,7 +229,7 @@ launch(void *arg)
 			fail_launch_cnt++;
 		} else {
 #if 0 /* only for debugging, might want to make this a callback */
-			errno = ret_data->err;
+			slurm_seterrno(rc);
 			info("Launch success on node %s(%d)",
 			     ret_data->node_name, nodeid);
 #endif
@@ -328,9 +331,6 @@ rwfail:
 	error("_update_contacted_node: "
 	      "write from srun message-handler process failed");
 }
-
-
-
 
 static void 
 _print_launch_msg(launch_tasks_request_msg_t *msg, char * hostname)

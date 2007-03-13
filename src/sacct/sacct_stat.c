@@ -6,7 +6,7 @@
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>.
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -122,7 +122,7 @@ int _sacct_query(slurm_step_layout_t *step_layout, uint32_t job_id,
 			break;
 		default:
 			rc = slurm_get_return_code(ret_data_info->type, 
-					   ret_data_info->data);
+						   ret_data_info->data);
 			error("unknown return given %d rc = %s", 
 			      ret_data_info->type, slurm_strerror(rc));
 			break;

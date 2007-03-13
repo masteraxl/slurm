@@ -6,7 +6,7 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <grondona1@llnl.gov>,
  *    Christopher J. Morrone <morrone2@llnl.gov>, et. al.
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -97,6 +97,7 @@ typedef struct salloc_options {
 	char *exc_nodes;	/* --exclude=node1,node2,... -x	*/
 
 	uint16_t geometry[SYSTEM_DIMENSIONS]; /* --geometry, -g	*/
+	bool reboot;		/* --reboot			*/
 	bool no_rotate;		/* --no_rotate, -R		*/
 	int16_t conn_type;	/* --conn-type 			*/
 	time_t begin;		/* --begin			*/

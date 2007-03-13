@@ -2,10 +2,10 @@
  *  src/slurmd/slurmstepd/mgr.c - job manager functions for slurmstepd
  *  $Id$
  *****************************************************************************
- *  Copyright (C) 2002 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -141,6 +141,11 @@ step_complete_t step_complete = {
         NULL
 };
 
+typedef struct kill_thread {
+	pthread_t thread_id;
+	int       secs;
+} kill_thread_t;
+
 
 /* 
  * Prototypes
@@ -245,12 +250,12 @@ slurmd_job_t *
 mgr_launch_batch_job_setup(batch_job_launch_msg_t *msg, slurm_addr *cli)
 {
 	slurmd_job_t *job = NULL;
-	char       buf[1024];
+	char       buf[MAXHOSTRANGELEN];
 	hostlist_t hl = hostlist_create(msg->nodes);
 	if (!hl)
 		return NULL;
 		
-	hostlist_ranged_string(hl, 1024, buf);
+	hostlist_ranged_string(hl, MAXHOSTRANGELEN, buf);
 	
 	if (!(job = job_batch_job_create(msg))) {
 		error("job_batch_job_create() failed: %m");
@@ -726,18 +731,16 @@ job_manager(slurmd_job_t *job)
 	 * is moved behind wait_for_io(), we may block waiting for IO
 	 * on a hung process.
 	 *
-	 * Make sure all processes in session are dead for interactive
-	 * jobs.  On  systems with an IBM Federation switch, all processes
-	 * must be terminated before the switch window can be released by
-	 * interconnect_postfini().  For batch jobs, we let spawned processes
-	 * continue by convention (although this could go either way). The
-	 * Epilog program could be used to terminate any "orphan" processes.
+	 * Make sure all processes in session are dead. On systems 
+	 * with an IBM Federation switch, all processes must be 
+	 * terminated before the switch window can be released by
+	 * interconnect_postfini().
 	 */
+	if (job->cont_id != 0) {
+		slurm_container_signal(job->cont_id, SIGKILL);
+		slurm_container_wait(job->cont_id);
+	}
 	if (!job->batch) {
-		if (job->cont_id != 0) {
-			slurm_container_signal(job->cont_id, SIGKILL);
-			slurm_container_wait(job->cont_id);
-		}
 		if (interconnect_postfini(job->switch_job, job->jmgr_pid,
 				job->jobid, job->stepid) < 0)
 			error("interconnect_postfini: %m");
@@ -751,9 +754,11 @@ job_manager(slurmd_job_t *job)
 		_wait_for_io(job);
 	}
 
+	debug2("Before call to spank_fini()");
 	if (spank_fini (job)  < 0) {
 		error ("spank_fini failed\n");
 	}
+	debug2("After call to spank_fini()");
 
     fail1:
 	/* If interactive job startup was abnormal, 
@@ -795,10 +800,12 @@ _fork_all_tasks(slurmd_job_t *job)
 		return SLURM_ERROR;
 	}
 
+	debug2("Before call to spank_init()");
 	if (spank_init (job) < 0) {
 		error ("Plugin stack initialization failed.\n");
 		return SLURM_ERROR;
 	}
+	debug2("After call to spank_init()");
 
 	/*
 	 * Pre-allocate a pipe for each of the tasks
@@ -882,6 +889,8 @@ _fork_all_tasks(slurmd_job_t *job)
 				if (j > i)
 					close(readfds[j]);
 			}
+			/* jobacct_g_endpoll();	
+			 * closing jobacct files here causes deadlock */
 
 			if (conf->propagate_prio == 1)
 				_set_prio_process(job);
@@ -929,6 +938,8 @@ _fork_all_tasks(slurmd_job_t *job)
 	if (chdir (sprivs.saved_cwd) < 0) {
 		error ("Unable to return to working directory");
 	}
+
+	jobacct_g_set_proctrack_container_id(job->cont_id);
 
 	for (i = 0; i < job->ntasks; i++) {
 		/*
@@ -1161,6 +1172,26 @@ _wait_for_all_tasks(slurmd_job_t *job)
 	}
 }
 
+static void *_kill_thr(void *args)
+{
+	kill_thread_t *kt = ( kill_thread_t *) args;
+	sleep(kt->secs);
+	pthread_kill(kt->thread_id, SIGKILL);
+	return NULL;
+}
+
+static void _delay_kill_thread(pthread_t thread_id, int secs)
+{
+	pthread_t kill_id;
+	pthread_attr_t attr;
+	kill_thread_t kt = { thread_id, secs };
+
+	slurm_attr_init(&attr);
+	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+	pthread_create(&kill_id, &attr, &_kill_thr, (void *) &kt);
+	slurm_attr_destroy(&attr);
+}
+
 /*
  * Wait for IO
  */
@@ -1171,11 +1202,12 @@ _wait_for_io(slurmd_job_t *job)
 	io_close_all(job);
 
 	/*
-	 * Wait until IO thread exits
+	 * Wait until IO thread exits or kill it after 300 seconds
 	 */
-	if (job->ioid)
+	if (job->ioid) {
+		_delay_kill_thread(job->ioid, 300);
 		pthread_join(job->ioid, NULL);
-	else
+	} else
 		info("_wait_for_io: ioid==0");
 
 	return;

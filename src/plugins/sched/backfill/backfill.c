@@ -17,7 +17,7 @@
  *  Copyright (C) 2003-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -324,12 +324,14 @@ _attempt_backfill(struct part_record *part_ptr)
 		goto cleanup;
 
 	i = list_count(run_job_list) + cg_hung;
-	if ( (i == 0) || (i > MAX_JOB_CNT) )
-		goto cleanup;		/* no running jobs or already have many */
-	if (list_is_empty(pend_job_list))
-		goto cleanup;		/* no pending jobs */
-	if (min_pend_job_size > part_specs.idle_node_cnt)
-		goto cleanup;		/* not enough free nodes for any pending job */
+	/* Do not try to backfill if
+	 * we already have many running jobs,
+	 * there are no pending jobs, OR
+	 * there are insufficient idle nodes to start any pending jobs */
+	if ((i > MAX_JOB_CNT)
+	|| list_is_empty(pend_job_list)
+	|| (min_pend_job_size > part_specs.idle_node_cnt))
+		goto cleanup;
 
 	list_sort(pend_job_list, _sort_by_prio);
 	list_sort(run_job_list, _sort_by_end);

@@ -3,10 +3,10 @@
  *
  *  $Id$
  *****************************************************************************
- *  Copyright (C) 2002 The Regents of the University of California.
+ *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov>, Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -238,6 +238,11 @@ parse_command_line( int argc, char* argv[] )
 
 	if ( params.node ) {
 		char *name1 = NULL;
+		if (strcasecmp("localhost", params.node) == 0) {
+			xfree(params.node);
+			params.node = xmalloc(128);
+			gethostname_short(params.node, 128);
+		}
 		name1 = slurm_conf_get_nodename(params.node);
 		if (name1) {
 			xfree(params.node);
@@ -370,7 +375,12 @@ extern int parse_format( char* format )
 		_parse_token( token, field, &field_size, &right_justify, 
 			      &suffix);
 		if (params.step_flag) {
-			if      (field[0] == 'i')
+			if      (field[0] == 'A')
+				step_format_add_num_tasks( params.format_list, 
+							   field_size, 
+							   right_justify, 
+							   suffix );
+			else if (field[0] == 'i')
 				step_format_add_id( params.format_list, 
 				                    field_size, 
 						    right_justify, suffix );

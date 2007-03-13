@@ -4,7 +4,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Jay Windley <jwindley@lnxi.com>.
- *  UCRL-CODE-217948.
+ *  UCRL-CODE-226842.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -259,12 +259,13 @@ plugrack_destroy( plugrack_t rack )
 int
 plugrack_set_major_type( plugrack_t rack, const char *type )
 {
-        if ( ! rack ) return SLURM_ERROR;
-        if ( ! type ) return SLURM_ERROR;
+	if ( ! rack )
+		return SLURM_ERROR;
+	if ( ! type )
+		return SLURM_ERROR;
 
-        /* Free any pre-existing type. */
-        if ( rack->major_type ) xfree( rack->major_type );
-        rack->major_type = NULL;
+	/* Free any pre-existing type. */
+	xfree( rack->major_type );
 
         /* Install a new one. */
         if ( type != NULL ) {
@@ -285,7 +286,8 @@ plugrack_set_paranoia( plugrack_t rack,
                        const uid_t uid )
 
 {
-        if ( ! rack ) return SLURM_ERROR;
+	if ( ! rack )
+		return SLURM_ERROR;
 
         rack->paranoia = flags;
         if ( flags ) {
@@ -640,5 +642,6 @@ plugrack_print_all_plugin(plugrack_t rack)
 	while ((e = list_next(itr)) != NULL ) {
 		info("%s",e->full_type);
 	}
+	list_iterator_destroy(itr);
 	return SLURM_SUCCESS;
 }
