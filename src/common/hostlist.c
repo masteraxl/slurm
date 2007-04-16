@@ -171,10 +171,11 @@ strong_alias(hostset_nth,		slurm_hostset_nth);
 #ifdef HAVE_BG		
 /* logic for block node description */
 /* We allocate space for three digits, 
- * each with values 0 to 9 even if they are not all used */
-bool axis[10][10][10];
+ * each with values 0 to Z even if they are not all used */
+bool axis[36][36][36];
 int axis_min_x, axis_min_y, axis_min_z;
 int axis_max_x, axis_max_y, axis_max_z;
+char *alpha_num = "0123456789ABCDEFGHIJKLMNOPQRSTUZWXYZ";
 
 static int _get_boxes(char *buf, int max_len);
 static void _clear_grid(void);
@@ -1456,31 +1457,36 @@ static int _parse_single_range(const char *str, struct _range *range)
  */
 static int _parse_box_range(char *str, struct _range *ranges, int len, int *count)
 {
-	int a1, a2, a3, b1, b2, b3, i1, i2;
+	int a[3], b[3], i1, i2, i;
 	char new_str[8];
 
-	a1 = str[0] - '0';
-	a2 = str[1] - '0';
-	a3 = str[2] - '0';
-	b1 = str[4] - '0';
-	b2 = str[5] - '0';
-	b3 = str[6] - '0';
-	if ((a1 < 0) || (a1 > 9) ||
-	    (a2 < 0) || (a2 > 9) ||
-	    (a3 < 0) || (a3 > 9) ||
-	    (str[3] != 'x') ||
-	    (b1 < 0) || (b1 > 9) || (b1 < a1) ||
-	    (b2 < 0) || (b2 > 9) || (b2 < a2) ||
-	    (b3 < 0) || (b3 > 9) || (b3 < a3) ||
-	    (str[7] != '\0'))
+	if((str[3] != 'x') || (str[7] != '\0')) 
 		return 0;
 
-	for (i1=a1; i1 <= b1; i1++) {
-		for (i2=a2; i2 <=b2; i2++) {
+	for(i = 0; i<3; i++) {
+		a[i] = str[i] - '0';
+		/* Remove the extra chars inbetween the 9 and A */
+		if(a[i] > 9) 
+			a[i] -= 7;
+		if ((a[i] < 0) || (a[i] > 36)) 
+			return 0;
+		
+		b[i] = str[i+4] - '0';
+		/* Remove the extra chars inbetween the 9 and A */
+		if(b[i] > 9) 
+			b[i] -= 7;
+		if ((b[i] < 0) || (b[i] > 36)) 
+			return 0;
+	}
+
+	for (i1=a[0]; i1 <= b[0]; i1++) {
+		for (i2=a[1]; i2 <=b[1]; i2++) {
 			if (*count == len)
 				return -1;
-			snprintf(new_str, 8, "%d%d%d-%d%d%d", 
-				i1, i2, a3, i1, i2, b3);
+			snprintf(new_str, 8, "%c%c%c-%c%c%c", 
+				 alpha_num[i1], alpha_num[i2], alpha_num[a[2]],
+				 alpha_num[i1], alpha_num[i2], 
+				 alpha_num[b[2]]);
 			if (!_parse_single_range(new_str,&ranges[*count]))
 				return -1;
 			(*count)++;
@@ -2277,9 +2283,11 @@ _get_boxes(char *buf, int max_len)
 		}
 		if (((len+8) < max_len) && (start_box != -1)
 		    && ((is_box == 0) || (i == axis_max_x))) {
-			sprintf(buf+len,"%d%d%dx%d%d%d,",
-				start_box, axis_min_y, axis_min_z,
-				end_box, axis_max_y, axis_max_z);
+			sprintf(buf+len,"%c%c%cx%c%c%c,",
+				alpha_num[start_box], alpha_num[axis_min_y],
+				alpha_num[axis_min_z],
+				alpha_num[end_box], alpha_num[axis_max_y],
+				alpha_num[axis_max_z]);
 			len += 8;
 			start_box = -1;
 			end_box = -1;
@@ -2292,7 +2300,8 @@ _get_boxes(char *buf, int max_len)
 					if ((len+4) >= max_len)
 						break;
 					sprintf(buf+len,"%d%d%d,",
-						i, j, k);
+						alpha_num[i], alpha_num[j],
+						alpha_num[k]);
 					len += 4;
 				}
 			}
@@ -2400,9 +2409,10 @@ size_t hostlist_ranged_string(hostlist_t hl, size_t n, char *buf)
 		_set_grid(hl->hr[i]->lo, hl->hr[i]->hi);
     if ((axis_min_x == axis_max_x) && (axis_min_y == axis_max_y)
     &&  (axis_min_z == axis_max_z)) {
-        len += snprintf(buf, n, "%s%d%d%d",
-                hl->hr[0]->prefix,
-                axis_min_x, axis_min_y, axis_min_z);
+        len += snprintf(buf, n, "%s%c%c%c",
+			hl->hr[0]->prefix,
+			alpha_num[axis_min_x], alpha_num[axis_min_y],
+			alpha_num[axis_min_z]);
         if ((len < 0) || (len > n))
             len = n;    /* truncated */
     } else if (!_test_box()) {
@@ -2410,10 +2420,12 @@ size_t hostlist_ranged_string(hostlist_t hl, size_t n, char *buf)
 		len = strlen(hl->hr[0]->prefix) + 1;
 		len += _get_boxes(buf + len, (n-len));
 	} else {
-		len += snprintf(buf, n, "%s[%d%d%dx%d%d%d]", 
+		len += snprintf(buf, n, "%s[%c%c%cx%c%c%c]", 
 				hl->hr[0]->prefix,
-				axis_min_x, axis_min_y, axis_min_z,
-				axis_max_x, axis_max_y, axis_max_z);
+				alpha_num[axis_min_x], alpha_num[axis_min_y],
+				alpha_num[axis_min_z],
+				alpha_num[axis_max_x], alpha_num[axis_max_y],
+				alpha_num[axis_max_z]);
 		if ((len < 0) || (len > n))
 			len = n;	/* truncated */
 	}
