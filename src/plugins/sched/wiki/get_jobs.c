@@ -86,8 +86,7 @@ static char *	_task_list(struct job_record *job_ptr);
  *	QUEUETIME=<submit_time>;
  *	STARTTIME=<time>;
  *	PARTITIONMASK=<partition>;
- *	DMEM=<MB>;			MB of memory required per task
- *	[RMEM=<MB>;]			MB of memory required per node (DEFUNCT)
+ *	RMEM=<mem_size>;
  *	RDISK=<disk_space>;
  *	[COMPLETETIME=<end_time>;]
  *	[SUSPENDTIME=<time_suspended>;]
@@ -282,7 +281,7 @@ static char *	_dump_job(struct job_record *job_ptr, int state_info)
 	xstrcat(buf, tmp);
 
 	snprintf(tmp, sizeof(tmp),
-		"DMEM=%u;RDISK=%u;",
+		"RMEM=%u;RDISK=%u;",
 		_get_job_min_mem(job_ptr),
 		_get_job_min_disk(job_ptr));
 	xstrcat(buf, tmp);
