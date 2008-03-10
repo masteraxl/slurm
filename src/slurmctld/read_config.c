@@ -586,6 +586,7 @@ static int _build_single_partitionline_info(slurm_conf_partition_t *part)
 	part_ptr = list_find_first(part_list, &list_find_part, part->name);
 	if (part_ptr == NULL) {
 		part_ptr = create_part_record();
+		xfree(part_ptr->name);
 		part_ptr->name = xstrdup(part->name);
 	} else {
 		verbose("_parse_part_spec: duplicate entry for partition %s",
@@ -709,7 +710,9 @@ int read_slurm_conf(int recover)
 	old_node_record_count = node_record_count;
 	old_node_table_ptr    = node_record_table_ptr;
 	for (i=0; i<node_record_count; i++) {
+		xfree(old_node_table_ptr[i].arch);
 		xfree(old_node_table_ptr[i].features);
+		xfree(old_node_table_ptr[i].os);
 		old_node_table_ptr[i].features = xstrdup(
 			old_node_table_ptr[i].config_ptr->feature);
 	}
@@ -857,6 +860,16 @@ static void _restore_node_state(struct node_record *old_node_table_ptr,
 			node_ptr->features = old_node_table_ptr[i].features;
 			old_node_table_ptr[i].features = NULL;
 		}
+		if (old_node_table_ptr[i].arch) {
+			xfree(node_ptr->arch);
+			node_ptr->arch = old_node_table_ptr[i].arch;
+			old_node_table_ptr[i].arch = NULL;
+		}
+		if (old_node_table_ptr[i].os) {
+			xfree(node_ptr->os);
+			node_ptr->os = old_node_table_ptr[i].os;
+			old_node_table_ptr[i].os = NULL;
+		}
 	}
 }
 
@@ -867,10 +880,12 @@ static void _purge_old_node_state(struct node_record *old_node_table_ptr,
 	int i;
 
 	for (i = 0; i < old_node_record_count; i++) {
-		xfree(old_node_table_ptr[i].name);
+		xfree(old_node_table_ptr[i].arch);
 		xfree(old_node_table_ptr[i].comm_name);
-		xfree(old_node_table_ptr[i].part_pptr);
 		xfree(old_node_table_ptr[i].features);
+		xfree(old_node_table_ptr[i].name);
+		xfree(old_node_table_ptr[i].os);
+		xfree(old_node_table_ptr[i].part_pptr);
 		xfree(old_node_table_ptr[i].reason);
 	}
 	xfree(old_node_table_ptr);

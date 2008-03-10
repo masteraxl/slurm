@@ -5,7 +5,8 @@
  *
  *  $Id$
  *****************************************************************************
- *  Copyright (C) 2004-2008 The Regents of the University of California.
+ *  Copyright (C) 2004-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
  *  UCRL-CODE-226842.
@@ -525,6 +526,24 @@ extern int select_p_job_test(struct job_record *job_ptr, bitstr_t *bitmap,
 	if (save_mem)
 		job_ptr->details->job_min_memory = save_mem;
 	return rc;
+}
+
+/*
+ * select_p_job_list_test - Given a list of select_will_run_t's in
+ *	accending priority order we will see if we can start and
+ *	finish all the jobs without increasing the start times of the
+ *	jobs specified and fill in the est_start of requests with no
+ *	est_start.  If you are looking to see if one job will ever run
+ *	then use select_p_job_test instead.
+ * IN/OUT req_list - list of select_will_run_t's in asscending
+ *	             priority order on success of placement fill in
+ *	             est_start of request with time.
+ * RET zero on success, EINVAL otherwise
+ */
+extern int select_p_job_list_test(List req_list)
+{
+	/* not currently supported */
+	return EINVAL;
 }
 
 /*

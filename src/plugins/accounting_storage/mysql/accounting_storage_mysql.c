@@ -3,7 +3,8 @@
  *
  *  $Id: accounting_storage_mysql.c 13061 2008-01-22 21:23:56Z da $
  *****************************************************************************
- *  Copyright (C) 2004-2008 The Regents of the University of California.
+ *  Copyright (C) 2004-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
  *  
@@ -73,7 +74,7 @@ const char plugin_type[] = "accounting_storage/mysql";
 const uint32_t plugin_version = 100;
 
 #ifndef HAVE_MYSQL
-typedef MYSQL void;
+typedef void MYSQL;
 #else
 
 static mysql_db_info_t *mysql_db_info = NULL;
@@ -400,9 +401,9 @@ static int _mysql_acct_check_tables(MYSQL *acct_mysql_db)
 extern int init ( void )
 {
 	static int first = 1;
+	int rc = SLURM_SUCCESS;
 #ifdef HAVE_MYSQL
 	MYSQL *acct_mysql_db = NULL;
-	int rc = SLURM_SUCCESS;
 	char *location = NULL;
 #else
 	fatal("No MySQL database was found on the machine. "

@@ -649,10 +649,10 @@ int init_node_conf (void)
 	int i;
 
 	for (i=0; i<node_record_count; i++) {
-		xfree(node_record_table_ptr[i].name);
 		xfree(node_record_table_ptr[i].arch);
 		xfree(node_record_table_ptr[i].comm_name);
 		xfree(node_record_table_ptr[i].features);
+		xfree(node_record_table_ptr[i].name);
 		xfree(node_record_table_ptr[i].os);
 		xfree(node_record_table_ptr[i].part_pptr);
 		xfree(node_record_table_ptr[i].reason);
@@ -2309,6 +2309,7 @@ void make_node_idle(struct node_record *node_ptr,
 						"%ld seconds", job_ptr->job_id,
 						(long) delay);
 				job_ptr->job_state &= (~JOB_COMPLETING);
+				delete_step_records(job_ptr, 0);
 				slurm_sched_schedule();
 			}
 		} else {
@@ -2377,10 +2378,10 @@ void node_fini(void)
 	}
 
 	for (i=0; i< node_record_count; i++) {
-		xfree(node_record_table_ptr[i].name);
 		xfree(node_record_table_ptr[i].arch);
 		xfree(node_record_table_ptr[i].comm_name);
 		xfree(node_record_table_ptr[i].features);
+		xfree(node_record_table_ptr[i].name);
 		xfree(node_record_table_ptr[i].os);
 		xfree(node_record_table_ptr[i].part_pptr);
 		xfree(node_record_table_ptr[i].reason);

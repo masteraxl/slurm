@@ -3,7 +3,7 @@
  *
  *  $Id: bg_record_functions.c 12954 2008-01-04 20:37:49Z da $
  *****************************************************************************
- *  Copyright (C) 2008 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
  *  
@@ -153,7 +153,10 @@ extern void process_nodes(bg_record_t *bg_record)
 				list_create(destroy_ba_node);
 		}
 		bg_record->bp_count = 0;
-		
+		if(bg_record->conn_type == SELECT_SMALL)
+			error("We shouldn't be here there could be some "
+			      "badness if we use this logic %s",
+			      bg_record->nodes);
 		while (bg_record->nodes[j] != '\0') {
 			if ((bg_record->nodes[j] == '['
 			     || bg_record->nodes[j] == ',')

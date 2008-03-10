@@ -152,6 +152,8 @@ extern void deallocate_nodes(struct job_record *job_ptr, bool timeout,
 	xassert(job_ptr);
 	xassert(job_ptr->details);
 
+	if (slurm_sched_freealloc(job_ptr) != SLURM_SUCCESS)
+		error("slurm_sched_freealloc(%u): %m", job_ptr->job_id);
 	if (select_g_job_fini(job_ptr) != SLURM_SUCCESS)
 		error("select_g_job_fini(%u): %m", job_ptr->job_id);
 	
@@ -193,7 +195,7 @@ extern void deallocate_nodes(struct job_record *job_ptr, bool timeout,
 
 	if ((agent_args->node_count - down_node_cnt) == 0) {
 		job_ptr->job_state &= (~JOB_COMPLETING);
-		delete_step_records(job_ptr, 1);
+		delete_step_records(job_ptr, 0);
 		slurm_sched_schedule();
 	}
 	
@@ -339,9 +341,10 @@ _get_req_features(struct node_set *node_set_ptr, int node_set_size,
 	saved_min_nodes = min_nodes;
 	saved_req_nodes = req_nodes;
 	saved_job_min_nodes = job_ptr->details->min_nodes;
-	if (job_ptr->details->req_node_bitmap)
-		saved_req_node_bitmap = bit_copy(job_ptr->details->req_node_bitmap);
-	job_ptr->details->req_node_bitmap = NULL;
+	if (job_ptr->details->req_node_bitmap) {
+		saved_req_node_bitmap = job_ptr->details->req_node_bitmap;
+		job_ptr->details->req_node_bitmap = NULL;
+	}
 	saved_num_procs = job_ptr->num_procs;
 	job_ptr->num_procs = 1;
 	tmp_node_set_ptr = xmalloc(sizeof(struct node_set) * node_set_size);
@@ -424,6 +427,7 @@ _get_req_features(struct node_set *node_set_ptr, int node_set_size,
 	job_ptr->details->min_nodes = saved_job_min_nodes;
 	job_ptr->num_procs = saved_num_procs;
 	if (saved_req_node_bitmap) {
+		FREE_NULL_BITMAP(job_ptr->details->req_node_bitmap);
 		job_ptr->details->req_node_bitmap = 
 				bit_copy(saved_req_node_bitmap);
 	}
@@ -1722,6 +1726,7 @@ extern void re_kill_job(struct job_record *job_ptr)
 			if ((--job_ptr->node_cnt) == 0) {
 				last_node_update = time(NULL);
 				job_ptr->job_state &= (~JOB_COMPLETING);
+				delete_step_records(job_ptr, 0);
 				slurm_sched_schedule();
 			}
 			continue;

@@ -121,27 +121,27 @@ static void validate_and_set_defaults(slurm_ctl_conf_t *conf,
 				      s_p_hashtbl_t *hashtbl);
 
 s_p_options_t slurm_conf_options[] = {
-	{"AuthType", S_P_STRING},
 	{"AccountingStorageHost", S_P_STRING},
 	{"AccountingStorageLoc", S_P_STRING},
 	{"AccountingStoragePass", S_P_STRING},
 	{"AccountingStoragePort", S_P_UINT32},
 	{"AccountingStorageType", S_P_STRING},
 	{"AccountingStorageUser", S_P_STRING},
-	{"CheckpointType", S_P_STRING},
-	{"CacheGroups", S_P_UINT16},
+	{"AuthType", S_P_STRING},
 	{"BackupAddr", S_P_STRING},
 	{"BackupController", S_P_STRING},
+	{"CheckpointType", S_P_STRING},
+	{"CacheGroups", S_P_UINT16},
 	{"ClusterName", S_P_STRING},
 	{"ControlAddr", S_P_STRING},
 	{"ControlMachine", S_P_STRING},
 	{"CryptoType", S_P_STRING},
-	{"DefaultStorageType", S_P_STRING},
 	{"DefaultStorageHost", S_P_STRING},
 	{"DefaultStorageLoc", S_P_STRING},
-	{"DefaultStorageUser", S_P_STRING},
 	{"DefaultStoragePass", S_P_STRING},
-	{"DefaultStoragePort", S_P_UINT32},	
+	{"DefaultStoragePort", S_P_UINT32},
+	{"DefaultStorageType", S_P_STRING},
+	{"DefaultStorageUser", S_P_STRING},
 	{"DefMemPerTask", S_P_UINT32},
 	{"Epilog", S_P_STRING},
 	{"EpilogMsgTime", S_P_UINT32},
@@ -152,23 +152,17 @@ s_p_options_t slurm_conf_options[] = {
 	{"HealthCheckInterval", S_P_UINT16},
 	{"HealthCheckProgram", S_P_STRING},
 	{"InactiveLimit", S_P_UINT16},
-	{"JobAcctType", S_P_STRING},
 	{"JobAcctGatherType", S_P_STRING},
 	{"JobAcctFrequency", S_P_UINT16},
 	{"JobAcctGatherFrequency", S_P_UINT16},
 	{"JobAcctLogFile", S_P_STRING},
-	{"JobAcctStorageLoc", S_P_STRING},
-	{"JobAcctStorageType", S_P_STRING},
-	{"JobAcctStorageHost", S_P_STRING},
-	{"JobAcctStorageUser", S_P_STRING},
-	{"JobAcctStoragePass", S_P_STRING},
-	{"JobAcctStoragePort", S_P_UINT32},
-	{"JobCompLoc", S_P_STRING},
-	{"JobCompType", S_P_STRING},
+	{"JobAcctType", S_P_STRING},
 	{"JobCompHost", S_P_STRING},
-	{"JobCompUser", S_P_STRING},
+	{"JobCompLoc", S_P_STRING},
 	{"JobCompPass", S_P_STRING},
 	{"JobCompPort", S_P_UINT32},
+	{"JobCompType", S_P_STRING},
+	{"JobCompUser", S_P_STRING},
 	{"JobCredentialPrivateKey", S_P_STRING},
 	{"JobCredentialPublicCertificate", S_P_STRING},
 	{"JobFileAppend", S_P_UINT16},
@@ -176,12 +170,13 @@ s_p_options_t slurm_conf_options[] = {
 	{"GetEnvTimeout", S_P_UINT16},
 	{"KillTree", S_P_UINT16, defunct_option},
 	{"KillWait", S_P_UINT16},
+	{"Licenses", S_P_STRING},
 	{"MailProg", S_P_STRING},
 	{"MaxJobCount", S_P_UINT16},
 	{"MaxMemPerTask", S_P_UINT32},
 	{"MessageTimeout", S_P_UINT16},
 	{"MinJobAge", S_P_UINT16},
-	{"MpichGmDirectSupport", S_P_LONG},
+	{"MpichGmDirectSupport", S_P_LONG, defunct_option},
 	{"MpiDefault", S_P_STRING},
 	{"PluginDir", S_P_STRING},
 	{"PlugStackConfig", S_P_STRING},
@@ -194,7 +189,7 @@ s_p_options_t slurm_conf_options[] = {
 	{"ResumeProgram", S_P_STRING},
 	{"ResumeRate", S_P_UINT16},
 	{"ReturnToService", S_P_UINT16},
-	{"SchedulerAuth", S_P_STRING},
+	{"SchedulerAuth", S_P_STRING, defunct_option},
 	{"SchedulerPort", S_P_UINT16},
 	{"SchedulerRootFilter", S_P_UINT16},
 	{"SchedulerTimeSlice", S_P_UINT16},
@@ -256,10 +251,10 @@ static int parse_nodename(void **dest, slurm_parser_enum_t type,
 	s_p_hashtbl_t *tbl, *dflt;
 	slurm_conf_node_t *n;
 	static s_p_options_t _nodename_options[] = {
-		{"NodeHostname", S_P_STRING},
-		{"NodeAddr", S_P_STRING},
 		{"CoresPerSocket", S_P_UINT16},
 		{"Feature", S_P_STRING},
+		{"NodeAddr", S_P_STRING},
+		{"NodeHostname", S_P_STRING},
 		{"Port", S_P_UINT16},
 		{"Procs", S_P_UINT16},
 		{"RealMemory", S_P_UINT32},
@@ -1071,19 +1066,21 @@ free_slurm_conf (slurm_ctl_conf_t *ctl_conf_ptr, bool purge_node_hash)
 	xfree (ctl_conf_ptr->backup_addr);
 	xfree (ctl_conf_ptr->backup_controller);
 	xfree (ctl_conf_ptr->checkpoint_type);
+	xfree (ctl_conf_ptr->cluster_name);
 	xfree (ctl_conf_ptr->control_addr);
 	xfree (ctl_conf_ptr->control_machine);
 	xfree (ctl_conf_ptr->crypto_type);
 	xfree (ctl_conf_ptr->epilog);
 	xfree (ctl_conf_ptr->health_check_program);
 	xfree (ctl_conf_ptr->job_acct_gather_type);
+	xfree (ctl_conf_ptr->job_comp_host);
 	xfree (ctl_conf_ptr->job_comp_loc);
+	xfree (ctl_conf_ptr->job_comp_pass);
 	xfree (ctl_conf_ptr->job_comp_type);
 	xfree (ctl_conf_ptr->job_comp_user);
-	xfree (ctl_conf_ptr->job_comp_host);
-	xfree (ctl_conf_ptr->job_comp_pass);
 	xfree (ctl_conf_ptr->job_credential_private_key);
 	xfree (ctl_conf_ptr->job_credential_public_certificate);
+	xfree (ctl_conf_ptr->licenses);
 	xfree (ctl_conf_ptr->mail_prog);
 	xfree (ctl_conf_ptr->mpi_default);
 	xfree (ctl_conf_ptr->node_prefix);
@@ -1102,10 +1099,9 @@ free_slurm_conf (slurm_ctl_conf_t *ctl_conf_ptr, bool purge_node_hash)
 	xfree (ctl_conf_ptr->slurmctld_pidfile);
 	xfree (ctl_conf_ptr->slurmd_logfile);
 	xfree (ctl_conf_ptr->slurmd_pidfile);
-/*	xfree (ctl_conf_ptr->slurm_conf);	UNUSED HERE */
+	xfree (ctl_conf_ptr->slurmd_spooldir);
 	xfree (ctl_conf_ptr->srun_epilog);
 	xfree (ctl_conf_ptr->srun_prolog);
-	xfree (ctl_conf_ptr->slurmd_spooldir);
 	xfree (ctl_conf_ptr->state_save_location);
 	xfree (ctl_conf_ptr->suspend_exc_nodes);
 	xfree (ctl_conf_ptr->suspend_exc_parts);
@@ -1131,18 +1127,19 @@ void
 init_slurm_conf (slurm_ctl_conf_t *ctl_conf_ptr)
 {
 	ctl_conf_ptr->last_update		= time(NULL);
-	xfree (ctl_conf_ptr->authtype);
 	ctl_conf_ptr->cache_groups		= (uint16_t) NO_VAL;
-	xfree (ctl_conf_ptr->accounting_storage_type);
-	xfree (ctl_conf_ptr->accounting_storage_user);
 	xfree (ctl_conf_ptr->accounting_storage_host);
 	xfree (ctl_conf_ptr->accounting_storage_loc);
 	xfree (ctl_conf_ptr->accounting_storage_pass);
 	ctl_conf_ptr->accounting_storage_port             = 0;
-	xfree (ctl_conf_ptr->checkpoint_type);
-	xfree (ctl_conf_ptr->cluster_name);
+	xfree (ctl_conf_ptr->accounting_storage_type);
+	xfree (ctl_conf_ptr->accounting_storage_user);
+	xfree (ctl_conf_ptr->authtype);
 	xfree (ctl_conf_ptr->backup_addr);
 	xfree (ctl_conf_ptr->backup_controller);
+	ctl_conf_ptr->cache_groups		= 0;
+	xfree (ctl_conf_ptr->checkpoint_type);
+	xfree (ctl_conf_ptr->cluster_name);
 	xfree (ctl_conf_ptr->control_addr);
 	xfree (ctl_conf_ptr->control_machine);
 	xfree (ctl_conf_ptr->crypto_type);
@@ -1151,22 +1148,23 @@ init_slurm_conf (slurm_ctl_conf_t *ctl_conf_ptr)
 	ctl_conf_ptr->epilog_msg_time		= (uint32_t) NO_VAL;
 	ctl_conf_ptr->fast_schedule		= (uint16_t) NO_VAL;
 	ctl_conf_ptr->first_job_id		= (uint32_t) NO_VAL;
+	ctl_conf_ptr->get_env_timeout		= 0;
 	ctl_conf_ptr->health_check_interval	= 0;
 	xfree(ctl_conf_ptr->health_check_program);
 	ctl_conf_ptr->inactive_limit		= (uint16_t) NO_VAL;
 	xfree (ctl_conf_ptr->job_acct_gather_type);
 	ctl_conf_ptr->job_acct_gather_freq             = 0;
 	xfree (ctl_conf_ptr->job_comp_loc);
-	xfree (ctl_conf_ptr->job_comp_type);
-	xfree (ctl_conf_ptr->job_comp_user);
-	xfree (ctl_conf_ptr->job_comp_host);
 	xfree (ctl_conf_ptr->job_comp_pass);
 	ctl_conf_ptr->job_comp_port             = 0;
+	xfree (ctl_conf_ptr->job_comp_type);
+	xfree (ctl_conf_ptr->job_comp_user);
 	xfree (ctl_conf_ptr->job_credential_private_key);
 	xfree (ctl_conf_ptr->job_credential_public_certificate);
 	ctl_conf_ptr->job_file_append		= (uint16_t) NO_VAL;
 	ctl_conf_ptr->job_requeue		= (uint16_t) NO_VAL;
 	ctl_conf_ptr->kill_wait			= (uint16_t) NO_VAL;
+	xfree (ctl_conf_ptr->licenses);
 	xfree (ctl_conf_ptr->mail_prog);
 	ctl_conf_ptr->max_job_cnt		= (uint16_t) NO_VAL;
 	ctl_conf_ptr->max_mem_per_task          = 0;
@@ -1174,21 +1172,23 @@ init_slurm_conf (slurm_ctl_conf_t *ctl_conf_ptr)
 	xfree (ctl_conf_ptr->mpi_default);
 	ctl_conf_ptr->msg_timeout		= (uint16_t) NO_VAL;
 	ctl_conf_ptr->next_job_id		= (uint32_t) NO_VAL;
+	xfree (ctl_conf_ptr->node_prefix);
 	xfree (ctl_conf_ptr->plugindir);
 	xfree (ctl_conf_ptr->plugstack);
 	ctl_conf_ptr->private_data              = 0;
 	xfree (ctl_conf_ptr->proctrack_type);
 	xfree (ctl_conf_ptr->prolog);
 	ctl_conf_ptr->propagate_prio_process	= (uint16_t) NO_VAL;
-	xfree (ctl_conf_ptr->propagate_rlimits_except);
 	xfree (ctl_conf_ptr->propagate_rlimits);
+	xfree (ctl_conf_ptr->propagate_rlimits_except);
 	xfree (ctl_conf_ptr->resume_program);
 	ctl_conf_ptr->resume_rate		= (uint16_t) NO_VAL;
 	ctl_conf_ptr->ret2service		= (uint16_t) NO_VAL;
+	xfree( ctl_conf_ptr->sched_conf );
 	ctl_conf_ptr->sched_time_slice		= (uint16_t) NO_VAL;
+	xfree( ctl_conf_ptr->schedtype );
 	ctl_conf_ptr->schedport			= (uint16_t) NO_VAL;
 	ctl_conf_ptr->schedrootfltr		= (uint16_t) NO_VAL;
-	xfree( ctl_conf_ptr->schedtype );
 	xfree( ctl_conf_ptr->select_type );
 	ctl_conf_ptr->select_type_param         = (uint16_t) NO_VAL;
 	ctl_conf_ptr->slurm_user_id		= (uint16_t) NO_VAL; 
@@ -1204,6 +1204,8 @@ init_slurm_conf (slurm_ctl_conf_t *ctl_conf_ptr)
  	ctl_conf_ptr->slurmd_port		= (uint32_t) NO_VAL;
 	xfree (ctl_conf_ptr->slurmd_spooldir);
 	ctl_conf_ptr->slurmd_timeout		= (uint16_t) NO_VAL;
+	xfree (ctl_conf_ptr->srun_prolog);
+	xfree (ctl_conf_ptr->srun_epilog);
 	xfree (ctl_conf_ptr->state_save_location);
 	xfree (ctl_conf_ptr->suspend_exc_nodes);
 	xfree (ctl_conf_ptr->suspend_exc_parts);
@@ -1212,17 +1214,15 @@ init_slurm_conf (slurm_ctl_conf_t *ctl_conf_ptr)
 	ctl_conf_ptr->suspend_time		= (uint16_t) NO_VAL;
 	xfree (ctl_conf_ptr->switch_type);
 	xfree (ctl_conf_ptr->task_epilog);
-	xfree (ctl_conf_ptr->task_prolog);
 	xfree (ctl_conf_ptr->task_plugin);
+	ctl_conf_ptr->task_plugin_param		= 0;
+	xfree (ctl_conf_ptr->task_prolog);
 	xfree (ctl_conf_ptr->tmp_fs);
-	ctl_conf_ptr->wait_time			= (uint16_t) NO_VAL;
-	xfree (ctl_conf_ptr->srun_prolog);
-	xfree (ctl_conf_ptr->srun_epilog);
-	xfree (ctl_conf_ptr->node_prefix);
 	ctl_conf_ptr->tree_width       		= (uint16_t) NO_VAL;
-	ctl_conf_ptr->use_pam			= 0;
 	xfree (ctl_conf_ptr->unkillable_program);
 	ctl_conf_ptr->unkillable_timeout        = (uint16_t) NO_VAL;
+	ctl_conf_ptr->use_pam			= 0;
+	ctl_conf_ptr->wait_time			= (uint16_t) NO_VAL;
 
 	_free_name_hashtbl();
 	_init_name_hashtbl();
@@ -1637,6 +1637,8 @@ validate_and_set_defaults(slurm_ctl_conf_t *conf, s_p_hashtbl_t *hashtbl)
 
 	if (!s_p_get_uint16(&conf->kill_wait, "KillWait", hashtbl))
 		conf->kill_wait = DEFAULT_KILL_WAIT;
+
+	s_p_get_string(&conf->mail_prog, "Licenses", hashtbl);
 
 	if (!s_p_get_string(&conf->mail_prog, "MailProg", hashtbl))
 		conf->mail_prog = xstrdup(DEFAULT_MAIL_PROG);

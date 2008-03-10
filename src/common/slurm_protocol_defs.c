@@ -189,6 +189,7 @@ void slurm_free_job_desc_msg(job_desc_msg_t * msg)
 			xfree(msg->environment[i]);
 		xfree(msg->environment);
 		xfree(msg->features);
+		xfree(msg->licenses);
 		xfree(msg->mail_user);
 		xfree(msg->name);
 		xfree(msg->partition);
@@ -276,6 +277,7 @@ void slurm_free_job_info_members(job_info_t * job)
 		xfree(job->dependency);
 		xfree(job->work_dir);
 		xfree(job->command);
+		xfree(job->licenses);
 	}
 }
 
@@ -283,10 +285,10 @@ void slurm_free_node_registration_status_msg(
 	slurm_node_registration_status_msg_t * msg)
 {
 	if (msg) {
-		xfree(msg->node_name);
 		xfree(msg->arch);
-		xfree(msg->os);
 		xfree(msg->job_id);
+		xfree(msg->node_name);
+		xfree(msg->os);
 		xfree(msg->step_id);
 		if (msg->startup)
 			switch_g_free_node_info(&msg->switch_nodeinfo);
@@ -891,12 +893,12 @@ void slurm_free_submit_response_response_msg(submit_response_msg_t * msg)
 void slurm_free_ctl_conf(slurm_ctl_conf_info_msg_t * config_ptr)
 {
 	if (config_ptr) {
-		xfree(config_ptr->authtype);
+		xfree(config_ptr->accounting_storage_host);
+		xfree(config_ptr->accounting_storage_pass);
 		xfree(config_ptr->accounting_storage_type);
 		xfree(config_ptr->accounting_storage_loc);
 		xfree(config_ptr->accounting_storage_user);
-		xfree(config_ptr->accounting_storage_host);
-		xfree(config_ptr->accounting_storage_pass);
+		xfree(config_ptr->authtype);
 		xfree(config_ptr->backup_addr);
 		xfree(config_ptr->backup_controller);
 		xfree(config_ptr->checkpoint_type);
@@ -907,13 +909,14 @@ void slurm_free_ctl_conf(slurm_ctl_conf_info_msg_t * config_ptr)
 		xfree(config_ptr->epilog);
 		xfree(config_ptr->health_check_program);
 		xfree(config_ptr->job_acct_gather_type);
+		xfree(config_ptr->job_comp_host);
 		xfree(config_ptr->job_comp_loc);
+		xfree(config_ptr->job_comp_pass);
 		xfree(config_ptr->job_comp_type);
 		xfree(config_ptr->job_comp_user);
-		xfree(config_ptr->job_comp_host);
-		xfree(config_ptr->job_comp_pass);
 		xfree(config_ptr->job_credential_private_key);
 		xfree(config_ptr->job_credential_public_certificate);
+		xfree(config_ptr->licenses);
 		xfree(config_ptr->mail_prog);
 		xfree(config_ptr->mpi_default);
 		xfree(config_ptr->node_prefix);
@@ -930,7 +933,7 @@ void slurm_free_ctl_conf(slurm_ctl_conf_info_msg_t * config_ptr)
 		xfree(config_ptr->slurm_conf);
 		xfree(config_ptr->slurm_user_name);
 		xfree(config_ptr->slurmctld_pidfile);
-		xfree(config_ptr->slurmctld_logfile);
+		xfree(config_ptr->slurmctld_logfile);;
 		xfree(config_ptr->slurmd_logfile);
 		xfree(config_ptr->slurmd_pidfile);
 		xfree(config_ptr->slurmd_spooldir);
@@ -1117,12 +1120,9 @@ static void _slurm_free_partition_info_members(partition_info_t * part)
 
 extern void slurm_free_file_bcast_msg(file_bcast_msg_t *msg)
 {
-	int i;
-
 	if (msg) {
 		xfree(msg->fname);
-		for (i=0; i<FILE_BLOCKS; i++)
-			xfree(msg->block[i]);
+		xfree(msg->block);
 		xfree(msg);
 	}
 }

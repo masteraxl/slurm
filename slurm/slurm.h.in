@@ -553,6 +553,7 @@ typedef struct job_descriptor {	/* For submit, allocate, and update requests */
 	uint16_t mail_type;	/* see MAIL_JOB_ definitions above */
 	char *mail_user;	/* user to receive notification */
 	uint16_t requeue;	/* enable or disable job requeue option */
+	char *licenses;		/* licenses required by the job */
 /*
  * The following parameters are only meaningful on a Blue Gene
  * system at present. Some will be of value on other system. Don't remove these
@@ -578,27 +579,62 @@ typedef struct job_descriptor {	/* For submit, allocate, and update requests */
 } job_desc_msg_t;
 
 typedef struct job_info {
-	uint32_t job_id;	/* job ID */
-	char *name;		/* name of the job */
-	uint16_t batch_flag;	/* 1 if batch: queued job with script */
-	uint32_t alloc_sid;	/* local sid making resource alloc */
+	char *account;		/* charge to specified account */
 	char    *alloc_node;	/* local node making resource alloc */
-	uint32_t user_id;	/* user the job runs as */
-	uint32_t group_id;	/* group job sumitted as */
-	uint16_t job_state;	/* state of the job, see enum job_states */
-	uint32_t time_limit;	/* maximum run time in minutes or INFINITE */
-	time_t submit_time;	/* time of job submission */
-	time_t start_time;	/* time execution begins, actual or expected */
+	uint32_t alloc_sid;	/* local sid making resource alloc */
+	uint16_t batch_flag;	/* 1 if batch: queued job with script */
+	char *command;		/* command to be executed */
+	char *comment;		/* arbitrary comment (used by Moab scheduler) */
+	uint16_t contiguous;	/* 1 if job requires contiguous nodes */
+	uint16_t cpus_per_task;	/* number of processors required for each task */
+	char *dependency;	/* syncrhonize job execution with other jobs */
 	time_t end_time;	/* time of termination, actual or expected */
-	time_t suspend_time;	/* time job last suspended or resumed */
-	time_t pre_sus_time;	/* time job ran prior to last suspend */
-	uint32_t priority;	/* relative priority of the job, 
-				 * 0=held, 1=required nodes DOWN/DRAINED */
+	char *exc_nodes;	/* comma separated list of excluded nodes */
+	int *exc_node_inx;	/* excluded list index pairs into node_table:
+				 * start_range_1, end_range_1, 
+				 * start_range_2, .., -1  */
+	uint32_t exit_code;	/* exit code for job (status from wait call) */
+	char *features;		/* comma separated list of required features */
+	uint32_t group_id;	/* group job sumitted as */
+	uint32_t job_id;	/* job ID */
+	uint16_t job_min_cores;    /* minimum cores per processor, default=0 */
+	uint32_t job_min_memory;   /* minimum real memory per node, default=0 */
+	uint16_t job_min_procs;	   /* minimum processors per node, default=0 */
+	uint16_t job_min_sockets;  /* minimum sockets per node, default=0 */
+	uint16_t job_min_threads;  /* minimum threads per core, default=0 */
+	uint32_t job_min_tmp_disk; /* minimum tmp disk per node, default=0 */
+	uint16_t job_state;	/* state of the job, see enum job_states */
+	char *licenses;		/* licenses required by the job */
+	char *name;		/* name of the job */
+	char *network;		/* network specification */
 	char *nodes;		/* list of nodes allocated to job */
 	int *node_inx;		/* list index pairs into node_table for *nodes:
 				 * start_range_1, end_range_1, 
 				 * start_range_2, .., -1  */
+	uint16_t ntasks_per_core;/* number of tasks to invoke on each core */
+	uint16_t ntasks_per_node;/* number of tasks to invoke on each node */
+	uint16_t ntasks_per_socket;/* number of tasks to invoke on each socket */
 	char *partition;	/* name of assigned partition */
+	time_t pre_sus_time;	/* time job ran prior to last suspend */
+	uint32_t priority;	/* relative priority of the job, 
+				 * 0=held, 1=required nodes DOWN/DRAINED */
+	char *req_nodes;	/* comma separated list of required nodes */
+	int *req_node_inx;	/* required list index pairs into node_table: 
+				 * start_range_1, end_range_1, 
+				 * start_range_2, .., -1  */
+        uint16_t requeue;       /* enable or disable job requeue option */
+	select_jobinfo_t select_jobinfo; /* opaque data type,
+				 * process using select_g_get_jobinfo() */
+	uint16_t shared;	/* 1 if job can share nodes with other jobs */
+	time_t start_time;	/* time execution begins, actual or expected */
+	uint16_t state_reason;	/* reason job still pending or failed, see
+				 * slurm.h:enum job_state_reason */
+	time_t submit_time;	/* time of job submission */
+	time_t suspend_time;	/* time job last suspended or resumed */
+	uint32_t time_limit;	/* maximum run time in minutes or INFINITE */
+	uint32_t user_id;	/* user the job runs as */
+	char *work_dir;		/* pathname of working directory */
+
 	uint16_t num_cpu_groups;/* elements in below cpu arrays */
 	uint32_t *cpus_per_node;/* cpus per node */
 	uint32_t *cpu_count_reps;/* how many nodes have same cpu count */
@@ -611,39 +647,6 @@ typedef struct job_info {
 	uint16_t max_cores;	/* maximum number of cores per cpu */
 	uint16_t min_threads;	/* minimum number of threads per core */
 	uint16_t max_threads;	/* maximum number of threads per core */
-	uint16_t shared;	/* 1 if job can share nodes with other jobs */
-	uint16_t contiguous;	/* 1 if job requires contiguous nodes */
-	uint16_t cpus_per_task;	/* number of processors required for each task */
-	uint16_t ntasks_per_node;/* number of tasks to invoke on each node */
-	uint16_t ntasks_per_socket;/* number of tasks to invoke on each socket */
-	uint16_t ntasks_per_core;/* number of tasks to invoke on each core */
-	/* job constraints: */
-	uint16_t job_min_procs;	   /* minimum processors per node, default=0 */
-	uint16_t job_min_sockets;  /* minimum sockets per node, default=0 */
-	uint16_t job_min_cores;    /* minimum cores per processor, default=0 */
-	uint16_t job_min_threads;  /* minimum threads per core, default=0 */
-	uint32_t job_min_memory;   /* minimum real memory per node, default=0 */
-	uint32_t job_min_tmp_disk; /* minimum tmp disk per node, default=0 */
-	char *req_nodes;	/* comma separated list of required nodes */
-	int *req_node_inx;	/* required list index pairs into node_table: 
-				 * start_range_1, end_range_1, 
-				 * start_range_2, .., -1  */
-	char *exc_nodes;	/* comma separated list of excluded nodes */
-	int *exc_node_inx;	/* excluded list index pairs into node_table:
-				 * start_range_1, end_range_1, 
-				 * start_range_2, .., -1  */
-	char *features;		/* comma separated list of required features */
-	char *dependency;	/* syncrhonize job execution with other jobs */
-	uint32_t exit_code;	/* exit code for job (status from wait call) */
-	char *account;		/* charge to specified account */
-	uint16_t state_reason;	/* reason job still pending or failed, see
-				 * slurm.h:enum job_state_reason */
-	char *network;		/* network specification */
-	char *comment;		/* arbitrary comment (used by Moab scheduler) */
-	char *work_dir;		/* pathname of working directory */
-	char *command;		/* command to be executed */
-	select_jobinfo_t select_jobinfo; /* opaque data type,
-			* process using select_g_get_jobinfo() */
 } job_info_t;
 
 typedef struct job_info_msg {
@@ -924,6 +927,14 @@ typedef struct partition_info_msg {
 
 typedef struct slurm_ctl_conf {
 	time_t last_update;	/* last update time of the build parameters */
+	char *accounting_storage_host; /* accounting storage host */
+	char *accounting_storage_loc; /* accounting storage (db table)
+				       * location */
+	char *accounting_storage_pass; /* accounting storage
+					    password */
+	uint32_t accounting_storage_port;/* node accountinging storage port */
+	char *accounting_storage_type; /* accounting storage type */
+	char *accounting_storage_user; /* accounting storage user */
 	char *authtype;		/* authentication type */
 	char *backup_addr;	/* comm path of slurmctld secondary server */
 	char *backup_controller;/* name of slurmctld secondary server */
@@ -947,29 +958,22 @@ typedef struct slurm_ctl_conf {
 	char * health_check_program;	/* pathname of health check program */
 	uint16_t inactive_limit;/* seconds of inactivity before a
 				 * inactive resource allocation is released */
-	char *accounting_storage_loc; /* accounting storage (db table)
-				       * location */
-	char *accounting_storage_type; /* accounting storage type */
-	char *accounting_storage_user; /* accounting storage user */
-	char *accounting_storage_host; /* accounting storage host */
-	char *accounting_storage_pass; /* accounting storage
-					    password */
-	uint32_t accounting_storage_port;/* node accountinging storage port */
 	char *job_acct_gather_type; /* job accounting gather type */
 	uint16_t job_acct_gather_freq; /* poll frequency for job accounting 
 					* gather plugins */
+	char *job_comp_host;	/* job completion logging host */
 	char *job_comp_loc;	/* job completion logging location */
-	char *job_comp_type;	/* job completion storage type */
-	char *job_comp_user;	/* job completion storage user */
-	char *job_comp_host;	/* job completion storage host */
 	char *job_comp_pass;	/* job completion storage password */
 	uint32_t job_comp_port;	/* job completion storage port */
+	char *job_comp_type;	/* job completion storage type */
+	char *job_comp_user;	/* job completion storage user */
 	char *job_credential_private_key;	/* path to private key */
 	char *job_credential_public_certificate;/* path to public certificate*/
 	uint16_t job_file_append; /* if set, append to stdout/err file */
 	uint16_t job_requeue;	/* If set, jobs get requeued on node failre */
 	uint16_t kill_wait;	/* seconds between SIGXCPU to SIGKILL 
 				 * on job termination */
+	char *licenses;		/* licenses available on this cluster */
 	char *mail_prog;	/* pathname of mail program */
 	uint16_t max_job_cnt;	/* maximum number of active jobs */
 	uint32_t max_mem_per_task; /* maximum MB memory per spawned task */
@@ -977,7 +981,7 @@ typedef struct slurm_ctl_conf {
 	                         * purged from in memory records */
 	char *mpi_default;	/* Default version of MPI in use */
 	uint16_t msg_timeout;	/* message timeout */
-	char *node_prefix;      /* prefix of nodes in partition only set in 
+	char *node_prefix;      /* prefix of nodes in partition, only set in 
 				   bluegene clusters NULL otherwise */
 	char *plugindir;	/* pathname to plugins */
 	char *plugstack;        /* pathname to plugin stack config file */
@@ -988,10 +992,10 @@ typedef struct slurm_ctl_conf {
 				          * be propagated */
         char *propagate_rlimits;/* Propagate (all/specific) resource limits */
         char *propagate_rlimits_except;/* Propagate all rlimits except these */
-	uint16_t ret2service;	/* 1 return DOWN node to service at 
-				 * registration */
 	uint16_t resume_rate;	/* nodes to make full power, per minute */
 	char *resume_program;	/* program to make nodes full power */
+	uint16_t ret2service;	/* 1 return DOWN node to service at 
+				 * registration */
 	char *sched_conf;	/* contents of scheduler plugin config file */
 	uint16_t sched_time_slice;	/* gang scheduler slice time, secs */
 	char *schedtype;	/* type of scheduler to use */
@@ -1011,14 +1015,14 @@ typedef struct slurm_ctl_conf {
 				 * on non-responding primarly controller */
 	uint16_t slurmd_debug;	/* slurmd logging level */
 	char *slurmd_logfile;	/* where slurmd error log gets written */
+	char *slurmd_pidfile;   /* where to put slurmd pidfile           */
 	uint32_t slurmd_port;	/* default communications port to slurmd */
 	char *slurmd_spooldir;	/* where slurmd put temporary state info */
-	char *slurmd_pidfile;   /* where to put slurmd pidfile           */
 	uint16_t slurmd_timeout;/* how long slurmctld waits for slurmd before 
 				 * considering node DOWN */
 	char *slurm_conf;	/* pathname of slurm config file */
-	char *srun_prolog;      /* srun prolog program */
 	char *srun_epilog;      /* srun epilog program */
+	char *srun_prolog;      /* srun prolog program */
 	char *state_save_location;/* pathname of slurmctld state save
 				 * directory */
 	char *suspend_exc_nodes;/* nodes to not make power saving */

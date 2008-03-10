@@ -3,7 +3,8 @@
  *
  *  $Id: accounting_storage_pgsql.c 13061 2008-01-22 21:23:56Z da $
  *****************************************************************************
- *  Copyright (C) 2004-2008 The Regents of the University of California.
+ *  Copyright (C) 2004-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
  *  
@@ -71,7 +72,7 @@ const char plugin_name[] = "Accounting storage PGSQL plugin";
 const char plugin_type[] = "accounting_storage/pgsql";
 const uint32_t plugin_version = 100;
 #ifndef HAVE_PGSQL
-typedef PQconn void;
+typedef void PGconn;
 #else
 #define DEFAULT_ACCT_DB "slurm_acct_db"
 
@@ -598,9 +599,9 @@ static int _pgsql_acct_check_tables(PGconn *acct_pgsql_db,
 extern int init ( void )
 {
 	static int first = 1;
+	int rc = SLURM_SUCCESS;
 #ifdef HAVE_PGSQL
 	PGconn *acct_pgsql_db = NULL;
-	int rc = SLURM_SUCCESS;
 	char *location = NULL;
 #else
 	fatal("No Postgres database was found on the machine. "

@@ -1,6 +1,14 @@
 This file describes changes in recent versions of SLURM. It primarily
 documents those changes that are of interest to users and admins.
 
+* Changes in SLURM 1.3.0-pre11
+==============================
+ -- Restructure the sbcast RPC to take advantage of larger buffers available
+    in Slurm v1.3 RPCs.
+ -- Fix several memory leaks.
+ -- In scontrol, show job's Requeue value, permit change of Requeue and COmment
+    values.
+
 * Changes in SLURM 1.3.0-pre10
 ==============================
  -- Add support for node-specific "arch" (architecture) and "os" (operating 
@@ -32,7 +40,11 @@ documents those changes that are of interest to users and admins.
     accounting.
  -- Moved clusteracct_storage plugin to accounting_storage plugin,
     jobacct_storage is still it's own plugin for now.
- -- Added template for slurm php extention
+ -- Added template for slurm php extention.
+ -- Add infrastructure to support allocation of cluster-wide licenses to jobs.
+    Full support will be added some time after version 1.3.0 is released.
+ -- In sched/wiki2 with select/bluegene, add support for WILLRUN command
+    to accept multiple jobs with start time specifications.
 
 * Changes in SLURM 1.3.0-pre9
 =============================
@@ -177,12 +189,34 @@ documents those changes that are of interest to users and admins.
     Moved existing digital signature logic into new plugin: crypto/openssl.
     Added new support for crypto/munge (available with GPL license).
 
+* Changes in SLURM 1.2.25
+=========================
+ -- Bug fix for setting exit code in accounting for batch script.
+ -- Add salloc option, --no-shell (for LSF).
+ -- Added new options for sacct output
+ -- mvapich: Ensure MPIRUN_ID is unique for all job steps within a job.
+    (Fixes crashes when running multiple job steps within a job on one node)
+ -- Prevent "scontrol show job" from failing with buffer overflow when a job 
+    has a very long Comment field.
+ -- Make certain that a job step is purged when a job has been completed.
+    Previous versions could have the job step persist if an allocated node
+    went DOWN and the slurmctld restarted.
+ -- Fix bug in sbcast that can cause communication problems for large files.
+ -- Add sbcast option -t/--timeout and SBCAST_TIMEOUT environment variable 
+    to control message timeout.
+ -- Add threaded agent to manage a queue of Gold update requests for 
+    performance reasons.
+ -- Add salloc options --chdir and --get-user-env (for Moab).
+ -- Modify scontrol update to support job comment changes.
+
 * Changes in SLURM 1.2.24
 =========================
  -- In sched/wiki and sched/wiki2, support non-zero UPDATE_TIME specification
     for GETNODES and GETJOBS commands.
  -- Bug fix for sending accounting information multiple times for same 
     info.  patch from Hongjia Cao (NUDT).
+ -- BLUEGENE - try FILE pointer rotation logic to avoid core dump on 
+    bridge log rotate
  -- Spread out in time the EPILOG_COMPLETE messages from slurmd to slurmctld
     to avoid message congestions and retransmission.
 
