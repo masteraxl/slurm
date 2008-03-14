@@ -68,7 +68,7 @@
  * minimum versions for their plugins as the job accounting API 
  * matures.
  */
-const char plugin_name[] = "Accounting storage NOT INVOKED plugin";
+const char plugin_name[] = "Accounting storage FileTxt plugin";
 const char plugin_type[] = "accounting_storage/filetxt";
 const uint32_t plugin_version = 100;
 static FILE *		LOGFILE;
