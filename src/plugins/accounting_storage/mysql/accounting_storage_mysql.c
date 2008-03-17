@@ -1454,6 +1454,12 @@ extern int clusteracct_storage_p_node_up(MYSQL *acct_mysql_db,
 #endif
 }
 
+extern int clusteracct_storage_p_register_ctld(char *cluster,
+					       uint16_t port)
+{
+	return SLURM_SUCCESS;
+}
+
 extern int clusteracct_storage_p_cluster_procs(MYSQL *acct_mysql_db, 
 					       char *cluster,
 					       uint32_t procs,
