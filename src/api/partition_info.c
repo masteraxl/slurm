@@ -1,11 +1,11 @@
 /*****************************************************************************\
  *  partition_info.c - get/print the partition state information of slurm
- *  $Id$
  *****************************************************************************
- *  Copyright (C) 2002-2006 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *   
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -105,17 +105,26 @@ char *slurm_sprint_partition_info ( partition_info_t * part_ptr,
 				    int one_liner )
 {
 	int j;
-	char tmp1[7], tmp2[7];
-	char tmp_line[128];
+	char tmp1[16], tmp2[16];
+	char tmp_line[MAXHOSTRANGELEN];
 	char *out = NULL;
+	uint16_t force, val;
 
 	/****** Line 1 ******/
-	convert_num_unit((float)part_ptr->total_nodes, tmp1, UNIT_NONE);
-	convert_num_unit((float)part_ptr->total_cpus, tmp2, UNIT_NONE);
+#ifdef HAVE_BG
+	convert_num_unit((float)part_ptr->total_nodes, tmp1, sizeof(tmp1),
+			 UNIT_NONE);
+	convert_num_unit((float)part_ptr->total_cpus, tmp2, sizeof(tmp2),
+			 UNIT_NONE);
+#else
+	snprintf(tmp1, sizeof(tmp1), "%u", part_ptr->total_nodes);
+	snprintf(tmp2, sizeof(tmp2), "%u", part_ptr->total_cpus);
+#endif
 	snprintf(tmp_line, sizeof(tmp_line),
-		"PartitionName=%s TotalNodes=%s TotalCPUs=%s ", 
-		part_ptr->name, tmp1, tmp2);
+		 "PartitionName=%s TotalNodes=%s TotalCPUs=%s ", 
+		 part_ptr->name, tmp1, tmp2);
 	xstrcat(out, tmp_line);
+
 	if (part_ptr->root_only)
 		sprintf(tmp_line, "RootOnly=YES");
 	else
@@ -132,12 +141,20 @@ char *slurm_sprint_partition_info ( partition_info_t * part_ptr,
 	else
 		sprintf(tmp_line, "Default=NO ");
 	xstrcat(out, tmp_line);
-	if (part_ptr->shared == SHARED_NO)
-		sprintf(tmp_line, "Shared=NO ");
-	else if (part_ptr->shared == SHARED_YES)
-		sprintf(tmp_line, "Shared=YES ");
-	else
-		sprintf(tmp_line, "Shared=FORCE ");
+	force = part_ptr->max_share & SHARED_FORCE;
+	val = part_ptr->max_share & (~SHARED_FORCE);
+	if (val == 0)
+		xstrcat(out, "Shared=EXCLUSIVE ");
+	else if (force) {
+		sprintf(tmp_line, "Shared=FORCE:%u ", val);
+		xstrcat(out, tmp_line);
+	} else if (val == 1)
+		xstrcat(out, "Shared=NO ");
+	else {
+		sprintf(tmp_line, "Shared=YES:%u ", val);
+		xstrcat(out, tmp_line);
+	}
+	sprintf(tmp_line, "Priority=%u ", part_ptr->priority);
 	xstrcat(out, tmp_line);
 	if (part_ptr->state_up)
 		sprintf(tmp_line, "State=UP ");
@@ -146,8 +163,12 @@ char *slurm_sprint_partition_info ( partition_info_t * part_ptr,
 	xstrcat(out, tmp_line);
 	if (part_ptr->max_time == INFINITE)
 		sprintf(tmp_line, "MaxTime=UNLIMITED ");
-	else
-		sprintf(tmp_line, "MaxTime=%u ", part_ptr->max_time);
+	else {
+		char time_line[32];
+		secs2time_str(part_ptr->max_time * 60, time_line, 
+			sizeof(time_line));
+		sprintf(tmp_line, "MaxTime=%s ", time_line);
+	}
 	xstrcat(out, tmp_line);
 	if (part_ptr->hidden)
 		sprintf(tmp_line, "Hidden=YES");
@@ -160,15 +181,31 @@ char *slurm_sprint_partition_info ( partition_info_t * part_ptr,
 		xstrcat(out, "\n   ");
 	
 	/****** Line 3 ******/
-	convert_num_unit((float)part_ptr->min_nodes, tmp1, UNIT_NONE);
+#ifdef HAVE_BG
+	convert_num_unit((float)part_ptr->min_nodes, tmp1, sizeof(tmp1),
+			 UNIT_NONE);
+#else
+	snprintf(tmp1, sizeof(tmp1), "%u", part_ptr->min_nodes);
+#endif
 	sprintf(tmp_line, "MinNodes=%s ", tmp1);
 	xstrcat(out, tmp_line);
+
 	if (part_ptr->max_nodes == INFINITE)
 		sprintf(tmp_line, "MaxNodes=UNLIMITED ");
 	else {
-		convert_num_unit((float)part_ptr->max_nodes, tmp1, UNIT_NONE);
+#ifdef HAVE_BG
+		convert_num_unit((float)part_ptr->max_nodes, tmp1, sizeof(tmp1),
+				 UNIT_NONE);
+#else
+		snprintf(tmp1, sizeof(tmp1),"%u", part_ptr->max_nodes);
+#endif
 		sprintf(tmp_line, "MaxNodes=%s ", tmp1);
 	}
+	xstrcat(out, tmp_line);
+	if (part_ptr->disable_root_jobs)
+		sprintf(tmp_line, "DisableRootJobs=YES ");
+	else
+		sprintf(tmp_line, "DisableRootJobs=NO ");
 	xstrcat(out, tmp_line);
 	if ((part_ptr->allow_groups == NULL) || 
 	    (part_ptr->allow_groups[0] == '\0'))
@@ -185,21 +222,25 @@ char *slurm_sprint_partition_info ( partition_info_t * part_ptr,
 	
 	/****** Line 4 ******/
 #ifdef HAVE_BG
-	sprintf(tmp_line, "BasePartitions=%s BPIndices=", part_ptr->nodes);
+	snprintf(tmp_line, sizeof(tmp_line), "BasePartitions=%s BPIndices=", 
+		part_ptr->nodes);
 #else
-	sprintf(tmp_line, "Nodes=%s NodeIndices=", part_ptr->nodes);
+	snprintf(tmp_line, sizeof(tmp_line), "Nodes=%s NodeIndices=", 
+		part_ptr->nodes);
 #endif
 	xstrcat(out, tmp_line);
-	for (j = 0; part_ptr->node_inx; j++) {
+	for (j = 0; (part_ptr->node_inx && (part_ptr->node_inx[j] != -1)); 
+				j+=2) {
 		if (j > 0)
-			sprintf(tmp_line, ",%d", part_ptr->node_inx[j]);
-		else
-			sprintf(tmp_line, "%d", part_ptr->node_inx[j]);
+			xstrcat(out, ",");
+		sprintf(tmp_line, "%d-%d", part_ptr->node_inx[j],
+			part_ptr->node_inx[j+1]);
 		xstrcat(out, tmp_line);
-		if (part_ptr->node_inx[j] == -1)
-			break;
 	}
-	xstrcat(out, "\n\n");
+	if (one_liner)
+		xstrcat(out, "\n");
+	else
+		xstrcat(out, "\n\n");
 	
 	return out;
 }
@@ -223,6 +264,9 @@ extern int slurm_load_partitions (time_t update_time,
         slurm_msg_t req_msg;
         slurm_msg_t resp_msg;
         part_info_request_msg_t req;
+
+	slurm_msg_t_init(&req_msg);
+	slurm_msg_t_init(&resp_msg);
 
         req.last_update  = update_time;
 	req.show_flags   = show_flags;

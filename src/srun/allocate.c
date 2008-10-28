@@ -2,10 +2,10 @@
  * src/srun/allocate.c - srun functions for managing node allocations
  * $Id$
  *****************************************************************************
- *  Copyright (C) 2002 The Regents of the University of California.
+ *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -16,7 +16,7 @@
  *  any later version.
  *
  *  In addition, as a special exception, the copyright holders give permission 
- *  to link the code of portions of this program with the OpenSSL library under 
+ *  to link the code of portions of this program with the OpenSSL library under
  *  certain conditions as described in each individual source file, and 
  *  distribute linked combinations including the two. You must obey the GNU 
  *  General Public License in all respects for all of the code used other than 
@@ -41,8 +41,10 @@
 #endif
 
 #include <stdlib.h>
+#include <unistd.h>
 #include <sys/poll.h>
-
+#include <sys/types.h>
+#include <pwd.h>
 
 #include "src/common/log.h"
 #include "src/common/macros.h"
@@ -52,311 +54,104 @@
 #include "src/common/xsignal.h"
 #include "src/common/xstring.h"
 #include "src/common/forward.h"
+#include "src/common/env.h"
+#include "src/common/fd.h"
 
 #include "src/srun/allocate.h"
-#include "src/srun/msg.h"
 #include "src/srun/opt.h"
-#include "src/srun/attach.h"
+#include "src/srun/debugger.h"
 
 #define MAX_ALLOC_WAIT 60	/* seconds */
 #define MIN_ALLOC_WAIT  5	/* seconds */
 #define MAX_RETRIES    10
 
+pthread_mutex_t msg_lock = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t msg_cond = PTHREAD_COND_INITIALIZER;
+allocation_msg_thread_t *msg_thr = NULL;
+resource_allocation_response_msg_t *global_resp = NULL;
+struct pollfd global_fds[1];
+
+extern char **environ;
+
+static bool exit_flag = false;
+static uint32_t pending_job_id = 0;
+
 /*
  * Static Prototypes
  */
-static int   _accept_msg_connection(slurm_fd slurmctld_fd,
-		resource_allocation_response_msg_t **resp);
-static int   _handle_msg(slurm_msg_t *msg, \
-		resource_allocation_response_msg_t **resp);
-static int   _wait_for_alloc_rpc(int sleep_time,
-		resource_allocation_response_msg_t **resp);
-static void  _wait_for_resources(resource_allocation_response_msg_t **resp);
-static bool  _retry();
+static void _set_pending_job_id(uint32_t job_id);
+static void _exit_on_signal(int signo);
+static void _signal_while_allocating(int signo);
 static void  _intr_handler(int signo);
 
-static job_step_create_request_msg_t * _step_req_create(srun_job_t *j);
-
 static sig_atomic_t destroy_job = 0;
-static srun_job_t *allocate_job = NULL;
 
-int
-allocate_test(void)
+static void _set_pending_job_id(uint32_t job_id)
 {
-	int rc;
-	job_desc_msg_t *j = job_desc_msg_create_from_opts (NULL);
-	if(!j)
-		return SLURM_ERROR;
-	
-	rc = slurm_job_will_run(j);
-	job_desc_msg_destroy(j);
-	return rc;
+	debug2("Pending job allocation %u", job_id);
+	pending_job_id = job_id;
 }
 
-resource_allocation_response_msg_t *
-allocate_nodes(void)
+static void _signal_while_allocating(int signo)
 {
-	int rc = 0;
-	static int sigarray[] = { SIGQUIT, SIGINT, SIGTERM, 0 };
-	SigFunc *oquitf, *ointf, *otermf;
-	sigset_t oset;
-	resource_allocation_response_msg_t *resp = NULL;
-	job_desc_msg_t *j = job_desc_msg_create_from_opts (NULL);
-	if(!j)
-		return NULL;
-	
-	oquitf = xsignal(SIGQUIT, _intr_handler);
-	ointf  = xsignal(SIGINT,  _intr_handler);
-	otermf = xsignal(SIGTERM, _intr_handler);
-
-	xsignal_save_mask(&oset);
-	xsignal_unblock(sigarray);
-
-	/* Do not re-use existing job id when submitting new job
-	 * from within a running job */
-	if (getenv("SLURM_JOBID") != NULL) {
-		info("WARNING: Creating SLURM job allocation from within "
-			"another allocation");
-		info("WARNING: You are attempting to initiate a second job");
-		if (!opt.jobid_set)	/* Let slurmctld set jobid */
-			j->job_id = NO_VAL;
+	destroy_job = 1;
+	if (pending_job_id != 0) {
+		slurm_complete_job(pending_job_id, NO_VAL);
 	}
-	
-	while ((rc = slurm_allocate_resources(j, &resp) < 0) && _retry()) {
-		if (destroy_job)
-			goto done;
-	} 
-
-	if(!resp)
-		goto done;
-	
-	if ((rc == 0) && (resp->node_list == NULL)) {
-		if (resp->error_code)
-			verbose("Warning: %s", slurm_strerror(resp->error_code));
-		_wait_for_resources(&resp);
-	}
-	/* For diagnosing a node problem, administrators need to sometimes
-	 * run a job on N nodes one of which must be the node believed to 
-	 * have a problem (e.g. "srun -N4 -w bad_node diagnostic"). The 
-	 * below logic prevents this from working and necessiates the 
-	 * admin identify four specific nodes to use for the above test
-	 * instead of just the one bad node. Otherwise only the one 
-	 * bad node is used in the job's allocation. */
-	if(resp->node_list && j->req_nodes) {
-		xfree(resp->node_list);
-		resp->node_list = xstrdup(j->req_nodes);
-	}
-		
-    done:
-	xsignal_set_mask(&oset);
-	xsignal(SIGINT,  ointf);
-	xsignal(SIGTERM, otermf);
-	xsignal(SIGQUIT, oquitf);
-
-	job_desc_msg_destroy(j);
-
-	return resp;
 }
 
-/* 
- * Returns jobid if SLURM_JOBID was set in the user's environment
- *  or if --jobid option was given, else returns 0
+static void _exit_on_signal(int signo)
+{
+	exit_flag = true;
+}
+
+/* This typically signifies the job was cancelled by scancel */
+static void _job_complete_handler(srun_job_complete_msg_t *msg)
+{
+	if((int)msg->step_id >= 0)
+		info("Force Terminated job %u.%u", msg->job_id, msg->step_id);
+	else
+		info("Force Terminated job %u", msg->job_id);
+}
+
+/*
+ * Job has been notified of it's approaching time limit. 
+ * Job will be killed shortly after timeout.
+ * This RPC can arrive multiple times with the same or updated timeouts.
+ * FIXME: We may want to signal the job or perform other action for this.
+ * FIXME: How much lead time do we want for this message? Some jobs may 
+ *	require tens of minutes to gracefully terminate.
  */
-uint32_t
-jobid_from_env(void)
+static void _timeout_handler(srun_timeout_msg_t *msg)
 {
-	if (opt.jobid != NO_VAL)
-		return ((uint32_t) opt.jobid);
-	else 
-		return (0);
+	static time_t last_timeout = 0;
+
+	if (msg->timeout != last_timeout) {
+		last_timeout = msg->timeout;
+		verbose("job time limit to be reached at %s", 
+			ctime(&msg->timeout));
+	}
 }
 
-static void
-_wait_for_resources(resource_allocation_response_msg_t **resp)
+static void _user_msg_handler(srun_user_msg_t *msg)
 {
-	resource_allocation_response_msg_t *r = *resp;
-	int sleep_time = MIN_ALLOC_WAIT;
-	int job_id = r->job_id;
-
-	if (!opt.quiet)
-		info ("job %u queued and waiting for resources", r->job_id);
-
-	slurm_free_resource_allocation_response_msg(r);
-
-	/* Keep polling until the job is allocated resources */
-	while (_wait_for_alloc_rpc(sleep_time, resp) <= 0) {
-
-		if (slurm_allocation_lookup_lite(job_id, resp) >= 0)
-			break;
-
-		if (slurm_get_errno() == ESLURM_JOB_PENDING) 
-			debug3 ("Still waiting for allocation");
-		else 
-			fatal ("Unable to confirm allocation for job %u: %m", 
-			       job_id);
-
-		if (destroy_job) {
-			verbose("cancelling job %u", job_id);
-			slurm_complete_job(job_id, 0);
-			debugger_launch_failure(allocate_job);
-			exit(0);
-		}
-
-		if (sleep_time < MAX_ALLOC_WAIT)
-			sleep_time++;
-	}
-	if (!opt.quiet)
-		info ("job %u has been allocated resources", (*resp)->job_id);
+	info("%s", msg->msg);
 }
 
-/* Wait up to sleep_time for RPC from slurmctld indicating resource allocation
- * has occured.
- * IN sleep_time: delay in seconds
- * OUT resp: resource allocation response message
- * RET 1 if resp is filled in, 0 otherwise */
-static int
-_wait_for_alloc_rpc(int sleep_time, resource_allocation_response_msg_t **resp)
+static void _ping_handler(srun_ping_msg_t *msg) 
 {
-	struct pollfd fds[1];
-	slurm_fd slurmctld_fd;
-
-	if ((slurmctld_fd = slurmctld_msg_init()) < 0) {
-		sleep (sleep_time);
-		return (0);
-	}
-
-	fds[0].fd = slurmctld_fd;
-	fds[0].events = POLLIN;
-
-	while (poll (fds, 1, (sleep_time * 1000)) < 0) {
-		switch (errno) {
-			case EAGAIN:
-			case EINTR:
-				return (-1);
-			case ENOMEM:
-			case EINVAL:
-			case EFAULT:
-				fatal("poll: %m");
-			default:
-				error("poll: %m. Continuing...");
-		}
-	}
-
-	if (fds[0].revents & POLLIN)
-		return (_accept_msg_connection(slurmctld_fd, resp));
-
-	return (0);
+	/* the api will respond so there really isn't anything to do
+	   here */
 }
 
-/* Accept RPC from slurmctld and process it.
- * IN slurmctld_fd: file descriptor for slurmctld communications
- * OUT resp: resource allocation response message
- * RET 1 if resp is filled in, 0 otherwise */
-static int 
-_accept_msg_connection(slurm_fd slurmctld_fd, 
-		resource_allocation_response_msg_t **resp)
+static void _node_fail_handler(srun_node_fail_msg_t *msg)
 {
-	slurm_fd     fd;
-	slurm_msg_t *msg = NULL;
-	slurm_addr   cli_addr;
-	char         host[256];
-	uint16_t     port;
-	int          rc = 0;
-	List ret_list;
-
-	fd = slurm_accept_msg_conn(slurmctld_fd, &cli_addr);
-	if (fd < 0) {
-		error("Unable to accept connection: %m");
-		return rc;
-	}
-
-	slurm_get_addr(&cli_addr, &port, host, sizeof(host));
-	debug2("got message connection from %s:%d", host, port);
-
-	msg = xmalloc(sizeof(slurm_msg_t));
-	slurm_msg_t_init(msg);
-	msg->conn_fd = fd;
-		
-  again:
-	ret_list = slurm_receive_msg(fd, msg, 0);
-
-	if(!ret_list || errno != SLURM_SUCCESS) {
-		if (errno == EINTR) {
-			goto again;
-		}
-		if(ret_list)
-			list_destroy(ret_list);
-			
-		error("_accept_msg_connection[%s]: %m", host);
-		slurm_free_msg(msg);
-		return SLURM_ERROR;
-	}
-	if(list_count(ret_list)>0) {
-		error("_accept_msg_connection: "
-		      "got %d from receive, expecting 0",
-		      list_count(ret_list));
-	}
-	msg->ret_list = ret_list;
-	
-	
-	rc = _handle_msg(msg, resp); /* handle_msg frees msg */
-	slurm_free_msg(msg);
-		
-	slurm_close_accepted_conn(fd);
-	return rc;
+	error("Node failure on %s", msg->nodelist);
 }
 
-/* process RPC from slurmctld
- * IN msg: message recieved
- * OUT resp: resource allocation response message
- * RET 1 if resp is filled in, 0 otherwise */
-static int
-_handle_msg(slurm_msg_t *msg, resource_allocation_response_msg_t **resp)
-{
-	uid_t req_uid   = g_slurm_auth_get_uid(msg->auth_cred);
-	uid_t uid       = getuid();
-	uid_t slurm_uid = (uid_t) slurm_get_slurm_user_id();
-	int rc = 0;
-	srun_timeout_msg_t *to;
 
-	if ((req_uid != slurm_uid) && (req_uid != 0) && (req_uid != uid)) {
-		error ("Security violation, slurm message from uid %u",
-			(unsigned int) req_uid);
-		return 0;
-	}
 
-	switch (msg->msg_type) {
-		case SRUN_PING:
-			debug3("slurmctld ping received");
-			slurm_send_rc_msg(msg, SLURM_SUCCESS);
-			slurm_free_srun_ping_msg(msg->data);
-			break;
-		case SRUN_JOB_COMPLETE:
-			debug3("job complete received");
-			/* FIXME: do something here */
-			slurm_free_srun_job_complete_msg(msg->data);	
-			break;
-		case RESPONSE_RESOURCE_ALLOCATION:
-			debug2("resource allocation response received");
-			slurm_send_rc_msg(msg, SLURM_SUCCESS);
-			*resp = msg->data;
-			rc = 1;
-			break;
-		case SRUN_TIMEOUT:
-			debug2("timeout received");
-			to = msg->data;
-			timeout_handler(to->timeout);
-			slurm_free_srun_timeout_msg(msg->data);
-			break;
-		default:
-			error("received spurious message type: %d\n",
-				 msg->msg_type);
-	}
-	return rc;
-}
-
-static bool
-_retry()
+static bool _retry()
 {
 	static int  retries = 0;
 	static char *msg = "Slurm controller not responding, "
@@ -387,15 +182,154 @@ _intr_handler(int signo)
 	destroy_job = 1;
 }
 
+int
+allocate_test(void)
+{
+	int rc;
+	job_desc_msg_t *j = job_desc_msg_create_from_opts();
+	if(!j)
+		return SLURM_ERROR;
+	
+	rc = slurm_job_will_run(j);
+	job_desc_msg_destroy(j);
+	return rc;
+}
+
+resource_allocation_response_msg_t *
+allocate_nodes(void)
+{
+	resource_allocation_response_msg_t *resp = NULL;
+	job_desc_msg_t *j = job_desc_msg_create_from_opts();
+	slurm_allocation_callbacks_t callbacks;
+
+	if(!j)
+		return NULL;
+	
+	/* Do not re-use existing job id when submitting new job
+	 * from within a running job */
+	if ((j->job_id != NO_VAL) && !opt.jobid_set) {
+		info("WARNING: Creating SLURM job allocation from within "
+			"another allocation");
+		info("WARNING: You are attempting to initiate a second job");
+		if (!opt.jobid_set)	/* Let slurmctld set jobid */
+			j->job_id = NO_VAL;
+	}
+	callbacks.ping = _ping_handler;
+	callbacks.timeout = _timeout_handler;
+	callbacks.job_complete = _job_complete_handler;
+	callbacks.user_msg = _user_msg_handler;
+	callbacks.node_fail = _node_fail_handler;
+
+	/* create message thread to handle pings and such from slurmctld */
+	msg_thr = slurm_allocation_msg_thr_create(&j->other_port, &callbacks);
+
+	xsignal(SIGHUP, _signal_while_allocating);
+	xsignal(SIGINT, _signal_while_allocating);
+	xsignal(SIGQUIT, _signal_while_allocating);
+	xsignal(SIGPIPE, _signal_while_allocating);
+	xsignal(SIGTERM, _signal_while_allocating);
+	xsignal(SIGUSR1, _signal_while_allocating);
+	xsignal(SIGUSR2, _signal_while_allocating);
+
+	while (!resp) {
+		resp = slurm_allocate_resources_blocking(j, 0,
+							 _set_pending_job_id);
+		if (destroy_job) {
+			/* cancelled by signal */
+			break;
+		} else if(!resp && !_retry()) {
+			break;		
+		}
+	}
+	
+	xsignal(SIGHUP, _exit_on_signal);
+	xsignal(SIGINT, ignore_signal);
+	xsignal(SIGQUIT, ignore_signal);
+	xsignal(SIGPIPE, ignore_signal);
+	xsignal(SIGTERM, ignore_signal);
+	xsignal(SIGUSR1, ignore_signal);
+	xsignal(SIGUSR2, ignore_signal);
+
+	job_desc_msg_destroy(j);
+
+	return resp;
+}
+
+void
+ignore_signal(int signo)
+{
+	/* do nothing */
+}
+
+int 
+cleanup_allocation()
+{
+	slurm_allocation_msg_thr_destroy(msg_thr);
+	return SLURM_SUCCESS;
+}
+
+resource_allocation_response_msg_t *
+existing_allocation(void)
+{
+	uint32_t old_job_id;
+        resource_allocation_response_msg_t *resp = NULL;
+
+	if (opt.jobid != NO_VAL)
+		old_job_id = (uint32_t)opt.jobid;
+	else
+                return NULL;
+
+        if (slurm_allocation_lookup_lite(old_job_id, &resp) < 0) {
+                if (opt.parallel_debug || opt.jobid_set)
+                        return NULL;    /* create new allocation as needed */
+                if (errno == ESLURM_ALREADY_DONE)
+                        error ("SLURM job %u has expired.", old_job_id);
+                else
+                        error ("Unable to confirm allocation for job %u: %m",
+                              old_job_id);
+                info ("Check SLURM_JOBID environment variable "
+                      "for expired or invalid job.");
+                exit(1);
+        }
+
+        return resp;
+}
+
+/* Set up port to handle messages from slurmctld */
+slurm_fd
+slurmctld_msg_init(void)
+{
+	slurm_addr slurm_address;
+	uint16_t port;
+	static slurm_fd slurmctld_fd   = (slurm_fd) NULL;
+
+	if (slurmctld_fd)	/* May set early for queued job allocation */
+		return slurmctld_fd;
+
+	slurmctld_fd = -1;
+	slurmctld_comm_addr.port = 0;
+
+	if ((slurmctld_fd = slurm_init_msg_engine_port(0)) < 0)
+		fatal("slurm_init_msg_engine_port error %m");
+	if (slurm_get_stream_addr(slurmctld_fd, &slurm_address) < 0)
+		fatal("slurm_get_stream_addr error %m");
+	fd_set_nonblocking(slurmctld_fd);
+	/* hostname is not set,  so slurm_get_addr fails
+	   slurm_get_addr(&slurm_address, &port, hostname, sizeof(hostname)); */
+	port = ntohs(slurm_address.sin_port);
+	slurmctld_comm_addr.port     = port;
+	debug2("srun PMI messages to port=%u", slurmctld_comm_addr.port);
+
+	return slurmctld_fd;
+}
 
 /*
  * Create job description structure based off srun options
  * (see opt.h)
  */
 job_desc_msg_t *
-job_desc_msg_create_from_opts (char *script)
+job_desc_msg_create_from_opts ()
 {
-	extern char **environ;
 	job_desc_msg_t *j = xmalloc(sizeof(*j));
 	char buf[8192];
 	hostlist_t hl = NULL;
@@ -405,27 +339,12 @@ job_desc_msg_create_from_opts (char *script)
 	j->contiguous     = opt.contiguous;
 	j->features       = opt.constraints;
 	j->immediate      = opt.immediate;
-	j->name           = opt.job_name;
+	if (opt.job_name)
+		j->name   = opt.job_name;
+	else
+		j->name   = opt.cmd_name;
 	j->req_nodes      = xstrdup(opt.nodelist);
-	if (j->req_nodes == NULL) {
-		char *nodelist = NULL;
-		char *hostfile = getenv("SLURM_HOSTFILE");
-		
-		if (hostfile != NULL) {
-			nodelist = slurm_read_hostfile(hostfile, opt.nprocs);
-			if (nodelist == NULL) {
-				error("Failure getting NodeNames from "
-				      "hostfile");
-				/* FIXME - need to fail somehow */
-			} else {
-				debug("loading nodes from hostfile %s",
-				      hostfile);
-				j->req_nodes = xstrdup(nodelist);
-				free(nodelist);
-				opt.distribution = SLURM_DIST_ARBITRARY;
-			}
-		}
-	}
+	
 	/* simplify the job allocation nodelist, 
 	  not laying out tasks until step */
 	if(j->req_nodes) {
@@ -450,25 +369,41 @@ job_desc_msg_create_from_opts (char *script)
 	j->exc_nodes      = opt.exc_nodes;
 	j->partition      = opt.partition;
 	j->min_nodes      = opt.min_nodes;
-	j->min_sockets    = opt.min_sockets_per_node;
-	j->min_cores      = opt.min_cores_per_socket;
-	j->min_threads    = opt.min_threads_per_core;
+	if (opt.min_sockets_per_node != NO_VAL)
+		j->min_sockets    = opt.min_sockets_per_node;
+	if (opt.min_cores_per_socket != NO_VAL)
+		j->min_cores      = opt.min_cores_per_socket;
+	if (opt.min_threads_per_core != NO_VAL)
+		j->min_threads    = opt.min_threads_per_core;
 	j->user_id        = opt.uid;
 	j->dependency     = opt.dependency;
 	if (opt.nice)
 		j->nice   = NICE_OFFSET + opt.nice;
 	j->task_dist      = opt.distribution;
-	j->plane_size     = opt.plane_size;
+	if (opt.plane_size != NO_VAL)
+		j->plane_size     = opt.plane_size;
 	j->group_id       = opt.gid;
 	j->mail_type      = opt.mail_type;
+
+	if (opt.ntasks_per_node != NO_VAL)
+		j->ntasks_per_node   = opt.ntasks_per_node;
+	if (opt.ntasks_per_socket != NO_VAL)
+		j->ntasks_per_socket = opt.ntasks_per_socket;
+	if (opt.ntasks_per_core != NO_VAL)
+		j->ntasks_per_core   = opt.ntasks_per_core;
+
 	if (opt.mail_user)
 		j->mail_user = xstrdup(opt.mail_user);
 	if (opt.begin)
 		j->begin_time = opt.begin;
+	if (opt.licenses)
+		j->licenses = xstrdup(opt.licenses);
 	if (opt.network)
 		j->network = xstrdup(opt.network);
 	if (opt.account)
 		j->account = xstrdup(opt.account);
+	if (opt.comment)
+		j->comment = xstrdup(opt.comment);
 
 	if (opt.hold)
 		j->priority     = 0;
@@ -482,11 +417,22 @@ job_desc_msg_create_from_opts (char *script)
 	}
 #endif
 
-	if (opt.conn_type != -1)
+	if (opt.conn_type != (uint16_t) NO_VAL)
 		j->conn_type = opt.conn_type;
 			
+	if (opt.reboot)
+		j->reboot = 1;
 	if (opt.no_rotate)
 		j->rotate = 0;
+
+	if (opt.blrtsimage)
+		j->blrtsimage = xstrdup(opt.blrtsimage);
+	if (opt.linuximage)
+		j->linuximage = xstrdup(opt.linuximage);
+	if (opt.mloaderimage)
+		j->mloaderimage = xstrdup(opt.mloaderimage);
+	if (opt.ramdiskimage)
+		j->ramdiskimage = xstrdup(opt.ramdiskimage);
 
 	if (opt.max_nodes)
 		j->max_nodes    = opt.max_nodes;
@@ -497,17 +443,19 @@ job_desc_msg_create_from_opts (char *script)
 	if (opt.max_threads_per_core)
 		j->max_threads  = opt.max_threads_per_core;
 
-	if (opt.job_min_cpus > -1)
+	if (opt.job_min_cpus != NO_VAL)
 		j->job_min_procs    = opt.job_min_cpus;
-	if (opt.job_min_sockets > -1)
+	if (opt.job_min_sockets != NO_VAL)
 		j->job_min_sockets  = opt.job_min_sockets;
-	if (opt.job_min_cores > -1)
+	if (opt.job_min_cores != NO_VAL)
 		j->job_min_cores    = opt.job_min_cores;
-	if (opt.job_min_threads > -1)
+	if (opt.job_min_threads != NO_VAL)
 		j->job_min_threads  = opt.job_min_threads;
-	if (opt.job_min_memory > -1)
-		j->job_min_memory   = opt.job_min_memory;
-	if (opt.job_min_tmp_disk > -1)
+	if (opt.job_min_memory != NO_VAL)
+		j->job_min_memory = opt.job_min_memory;
+	else if (opt.mem_per_cpu != NO_VAL)
+		j->job_min_memory = opt.mem_per_cpu | MEM_PER_CPU;
+	if (opt.job_min_tmp_disk != NO_VAL)
 		j->job_min_tmp_disk = opt.job_min_tmp_disk;
 	if (opt.overcommit) {
 		j->num_procs    = opt.min_nodes;
@@ -522,7 +470,7 @@ job_desc_msg_create_from_opts (char *script)
 
 	if (opt.no_kill)
 		j->kill_on_node_fail   = 0;
-	if (opt.time_limit > -1)
+	if (opt.time_limit != NO_VAL)
 		j->time_limit          = opt.time_limit;
 	j->shared = opt.shared;
 
@@ -530,32 +478,6 @@ job_desc_msg_create_from_opts (char *script)
 	 * message as all other messages */
 	j->alloc_resp_port = slurmctld_comm_addr.port;
 	j->other_port = slurmctld_comm_addr.port;
-	if (slurmctld_comm_addr.hostname) {
-		j->alloc_resp_hostname = xstrdup(slurmctld_comm_addr.hostname);
-		j->other_hostname = xstrdup(slurmctld_comm_addr.hostname);
-	} else {
-		j->alloc_resp_hostname = NULL;
-		j->other_hostname = NULL;
-	}
-
-	if (script) {
-		/*
-		 * If script is set then we are building a request for
-		 *  a batch job
-		 */
-		xassert (opt.batch);
-
-		j->environment = environ;
-		j->env_size = envcount (environ);
-		j->script = script;
-		j->argv = remote_argv;
-		j->argc = remote_argc;
-		j->err  = opt.efname;
-		j->in   = opt.ifname;
-		j->out  = opt.ofname;
-		j->work_dir = opt.cwd;
-		j->no_requeue = opt.no_requeue;
-	}
 
 	return (j);
 }
@@ -565,121 +487,136 @@ job_desc_msg_destroy(job_desc_msg_t *j)
 {
 	if (j) {
 		xfree(j->account);
-		xfree(j->alloc_resp_hostname);
-		xfree(j->other_hostname);
+		xfree(j->comment);
 		xfree(j);
 	}
 }
 
-static job_step_create_request_msg_t *
-_step_req_create(srun_job_t *j)
+extern int
+create_job_step(srun_job_t *job, bool use_all_cpus)
 {
-	job_step_create_request_msg_t *r = xmalloc(sizeof(*r));
-	r->job_id     = j->jobid;
-	r->user_id    = opt.uid;
+	int i, rc;
+	SigFunc *oquitf = NULL, *ointf = NULL, *otermf = NULL;
 
-	r->node_count = j->nhosts;
-	/* info("send %d or %d? sending %d", opt.max_nodes, */
-/* 		     j->nhosts, r->node_count); */
-	if(r->node_count > j->nhosts) {
-		error("Asking for more nodes that allocated");
-		return NULL;
-	}
-	r->cpu_count  = opt.overcommit ? r->node_count
-		                       : (opt.nprocs*opt.cpus_per_task);
-	r->num_tasks  = opt.nprocs;
-	r->node_list  = xstrdup(opt.nodelist);
-	r->network    = xstrdup(opt.network);
-	r->name       = xstrdup(opt.job_name);
-	r->relative   = (uint16_t)opt.relative;
-	r->overcommit = opt.overcommit ? 1 : 0;
-	debug("requesting job %d, user %d, nodes %d (%s)", 
-	      r->job_id, r->user_id, r->node_count, r->node_list);
-	debug("cpus %d, tasks %d, name %s, relative %d", 
-	      r->cpu_count, r->num_tasks, r->name, r->relative);
+	slurm_step_ctx_params_t_init(&job->ctx_params);
+	job->ctx_params.job_id = job->jobid;
+	job->ctx_params.uid = opt.uid;
+
+	/* set the jobid for totalview */
+	totalview_jobid = NULL;
+	xstrfmtcat(totalview_jobid, "%u", job->ctx_params.job_id);
+
+	job->ctx_params.node_count = job->nhosts;
+	if (!opt.nprocs_set && (opt.ntasks_per_node != NO_VAL))
+		job->ntasks = opt.nprocs = job->nhosts * opt.ntasks_per_node;
+	job->ctx_params.task_count = opt.nprocs;
+
+	if (use_all_cpus)
+		job->ctx_params.cpu_count = job->cpu_count;
+	else if (opt.overcommit)
+		job->ctx_params.cpu_count = job->ctx_params.node_count;
+	else
+		job->ctx_params.cpu_count = opt.nprocs*opt.cpus_per_task;
 	
+	job->ctx_params.relative = (uint16_t)opt.relative;
+	job->ctx_params.ckpt_interval = (uint16_t)opt.ckpt_interval;
+	job->ctx_params.ckpt_path = opt.ckpt_path;
+	job->ctx_params.exclusive = (uint16_t)opt.exclusive;
+	job->ctx_params.immediate = (uint16_t)opt.immediate;
+	job->ctx_params.verbose_level = (uint16_t)_verbose;
 	switch (opt.distribution) {
 	case SLURM_DIST_BLOCK:
-		r->task_dist = SLURM_DIST_BLOCK;
-		break;
 	case SLURM_DIST_ARBITRARY:
-		r->task_dist = SLURM_DIST_ARBITRARY;
-		break;
 	case SLURM_DIST_CYCLIC:
-		r->task_dist = SLURM_DIST_CYCLIC;
-		break;
 	case SLURM_DIST_CYCLIC_CYCLIC:
-		r->task_dist = SLURM_DIST_CYCLIC_CYCLIC;
-		break;
 	case SLURM_DIST_CYCLIC_BLOCK:
-		r->task_dist = SLURM_DIST_CYCLIC_BLOCK;
-		break;
 	case SLURM_DIST_BLOCK_CYCLIC:
-		r->task_dist = SLURM_DIST_BLOCK_CYCLIC;
-		break;
 	case SLURM_DIST_BLOCK_BLOCK:
-		r->task_dist = SLURM_DIST_BLOCK_BLOCK;
+		job->ctx_params.task_dist = opt.distribution;
 		break;
 	case SLURM_DIST_PLANE:
-		r->task_dist = SLURM_DIST_PLANE;
-		r->plane_size = opt.plane_size;
+		job->ctx_params.task_dist = SLURM_DIST_PLANE;
+		job->ctx_params.plane_size = opt.plane_size;
 		break;
 	default:
-		r->task_dist = (opt.nprocs <= r->node_count) 
+		job->ctx_params.task_dist = (job->ctx_params.task_count <= 
+			job->ctx_params.node_count) 
 			? SLURM_DIST_CYCLIC : SLURM_DIST_BLOCK;
 		break;
 
 	}
-	/* make sure we set the env correctly */
-	opt.distribution = r->task_dist;
-	
-	if (slurmctld_comm_addr.port) {
-		r->host = xstrdup(slurmctld_comm_addr.hostname);
-		r->port = slurmctld_comm_addr.port;
-	}
+	job->ctx_params.overcommit = opt.overcommit ? 1 : 0;
 
-	return(r);
-}
-
-int
-create_job_step(srun_job_t *job)
-{
-	job_step_create_request_msg_t  *req  = NULL;
-	job_step_create_response_msg_t *resp = NULL;
+	job->ctx_params.node_list = opt.nodelist;
 	
-	if (!(req = _step_req_create(job))) {
-		error ("Unable to allocate step request message");
-		return -1;
-	}
-
-	if ((slurm_job_step_create(req, &resp) < 0) || (resp == NULL)) {
-		error ("Unable to create job step: %m");
-		return -1;
-	}
+	job->ctx_params.network = opt.network;
+	job->ctx_params.no_kill = opt.no_kill;
+	if (opt.job_name_set_cmd && opt.job_name)
+		job->ctx_params.name = opt.job_name;
+	else
+		job->ctx_params.name = opt.cmd_name;
 	
-	job->stepid  = resp->job_step_id;
-	job->step_layout = resp->step_layout;
-	job->cred    = resp->cred;
-	job->switch_job = resp->switch_job;
+	debug("requesting job %u, user %u, nodes %u including (%s)", 
+	      job->ctx_params.job_id, job->ctx_params.uid,
+	      job->ctx_params.node_count, job->ctx_params.node_list);
+	debug("cpus %u, tasks %u, name %s, relative %u", 
+	      job->ctx_params.cpu_count, job->ctx_params.task_count,
+	      job->ctx_params.name, job->ctx_params.relative);
+
+	for (i=0; (!destroy_job); i++) {
+		if(opt.no_alloc) {
+			job->step_ctx = slurm_step_ctx_create_no_alloc(
+				&job->ctx_params, job->stepid);
+		} else
+			job->step_ctx = slurm_step_ctx_create(
+				&job->ctx_params);
+		if (job->step_ctx != NULL) {
+			if (i > 0)
+				info("Job step created");
+			
+			break;
+		}
+		rc = slurm_get_errno();
+
+		if (opt.immediate ||
+		    ((rc != ESLURM_NODES_BUSY) && (rc != ESLURM_DISABLED))) {
+			error ("Unable to create job step: %m");
+			return -1;
+		}
 		
-	if(!job->step_layout) {
-		error("step_layout not returned");
-		return -1;
+		if (i == 0) {
+			info("Job step creation temporarily disabled, "
+			     "retrying");
+			ointf  = xsignal(SIGINT,  _intr_handler);
+			otermf  = xsignal(SIGTERM, _intr_handler);
+			oquitf  = xsignal(SIGQUIT, _intr_handler);
+		} else
+			info("Job step creation still disabled, retrying");
+		sleep(MIN((i*10), 60));
 	}
+	if (i > 0) {
+		xsignal(SIGINT,  ointf);
+		xsignal(SIGQUIT, oquitf);
+		xsignal(SIGTERM, otermf);
+		if (destroy_job) {
+			info("Cancelled pending job step");
+			return -1;
+		}
+	}
+
+	slurm_step_ctx_get(job->step_ctx, SLURM_STEP_CTX_STEPID, &job->stepid);
+	/*  Number of hosts in job may not have been initialized yet if 
+	 *    --jobid was used or only SLURM_JOBID was set in user env.
+	 *    Reset the value here just in case.
+	 */
+	slurm_step_ctx_get(job->step_ctx, SLURM_STEP_CTX_NUM_HOSTS,
+			   &job->nhosts);
 	
 	/*
 	 * Recreate filenames which may depend upon step id
 	 */
 	job_update_io_fnames(job);
 
-	slurm_free_job_step_create_request_msg(req);
-	
 	return 0;
 }
 
-void 
-set_allocate_job(srun_job_t *job) 
-{
-	allocate_job = job;
-	return;
-}

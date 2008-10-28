@@ -5,7 +5,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -178,7 +178,7 @@ _load_integer (int *destination, char *keyword, char *in_line)
 	if (str_ptr1 != NULL) {
 		str_len1 = strlen (keyword);
 		strcpy (scratch, str_ptr1 + str_len1);
-		if ((scratch[0] == (char) NULL) || 
+		if ((scratch[0] == '\0') || 
 		    (isspace ((int) scratch[0]))) {
 			/* keyword with no value set */
 			*destination = 1;
@@ -235,7 +235,7 @@ _load_long (long *destination, char *keyword, char *in_line)
 	if (str_ptr1 != NULL) {
 		str_len1 = strlen (keyword);
 		strcpy (scratch, str_ptr1 + str_len1);
-		if ((scratch[0] == (char) NULL) || 
+		if ((scratch[0] == '\0') || 
 		    (isspace ((int) scratch[0]))) {	
 			/* keyword with no value set */
 			*destination = 1;

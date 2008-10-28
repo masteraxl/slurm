@@ -1,6 +1,7 @@
 #
 
 AUTOMAKE_OPTIONS = foreign
+CLEANFILES = core.*
 
 INCLUDES = -I$(top_srcdir) 
 
@@ -10,18 +11,11 @@ srun_SOURCES = \
 	srun.c srun.h \
 	opt.c opt.h \
 	srun_job.c srun_job.h \
-	msg.c msg.h \
-	signals.c signals.h \
-	launch.c    \
-	launch.h    \
-	attach.h    \
-	attach.c    \
-	reattach.c  \
-	reattach.h  \
+	srun_pty.c srun_pty.h \
+	debugger.h    \
+	debugger.c    \
 	fname.c     \
 	fname.h     \
-	sigstr.c    \
-	sigstr.h    \
 	allocate.c  \
 	allocate.h  \
 	core-format.c \
@@ -29,12 +23,13 @@ srun_SOURCES = \
 	multi_prog.c multi_prog.h \
 	srun.wrapper.c
 
-convenience_libs = $(top_builddir)/src/api/libslurmhelper.la
+convenience_libs = \
+	$(top_builddir)/src/api/libslurm.o -ldl
 
 srun_LDADD = \
 	$(convenience_libs) 
 
-srun_LDFLAGS = -export-dynamic $(CMD_LDFLAGS) $(FEDERATION_LDFLAGS)
+srun_LDFLAGS = -export-dynamic $(CMD_LDFLAGS)
 
 force:
 $(convenience_libs) : force
@@ -51,6 +46,7 @@ install-exec-local:
 	  srcdir=`cd $(top_srcdir) && pwd`; \
 	  /usr/lib/rpm/debugedit -b $$srcdir -d $(pkglibdir) \
 	                         $(DESTDIR)$(bindir)/srun; fi; \
-	$(INSTALL) $(INSTALL_DIRS) -m 644 $(top_srcdir)/src/srun/srun.wrapper.c \
-	                       $(DESTDIR)$(pkglibdir)/src/srun/srun.wrapper.c
+	mkdir -p -m 755 $(DESTDIR)$(pkglibdir)/src/srun
+	$(INSTALL) -m 644 $(top_srcdir)/src/srun/srun.wrapper.c \
+		$(DESTDIR)$(pkglibdir)/src/srun/srun.wrapper.c
 

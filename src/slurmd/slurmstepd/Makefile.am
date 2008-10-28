@@ -5,14 +5,12 @@ AUTOMAKE_OPTIONS = foreign
 
 sbin_PROGRAMS = slurmstepd
 
-INCLUDES = -I$(top_srcdir) $(SSL_CPPFLAGS)
+INCLUDES = -I$(top_srcdir)
 
 slurmstepd_LDADD = 				   \
-        $(top_builddir)/src/common/libcommon.la    \
 	$(top_builddir)/src/common/libdaemonize.la \
-	$(top_builddir)/src/common/libeio.la       \
-	$(top_builddir)/src/common/libspank.la     \
-	$(SSL_LIBS) $(PAM_LIBS) 
+	$(top_builddir)/src/api/libslurm.o -ldl\
+	$(PLPA_LIBS) $(PAM_LIBS) $(UTIL_LIBS) 
 
 slurmstepd_SOURCES = 	        	\
 	slurmstepd.c slurmstepd.h	\
@@ -25,14 +23,14 @@ slurmstepd_SOURCES = 	        	\
 	pdebug.c pdebug.h		\
 	pam_ses.c pam_ses.h		\
 	req.c req.h			\
-	task_exec.c task_exec.h		\
+	multi_prog.c multi_prog.h	\
+	step_terminate_monitor.c step_terminate_monitor.h \
 	$(top_builddir)/src/slurmd/common/proctrack.c \
 	$(top_builddir)/src/slurmd/common/proctrack.h \
 	$(top_builddir)/src/slurmd/common/setproctitle.c \
 	$(top_builddir)/src/slurmd/common/setproctitle.h \
 	$(top_builddir)/src/slurmd/common/slurmstepd_init.c \
 	$(top_builddir)/src/slurmd/common/slurmstepd_init.h \
-	$(top_builddir)/src/slurmd/common/stepd_api.h \
 	$(top_builddir)/src/slurmd/common/run_script.c \
 	$(top_builddir)/src/slurmd/common/run_script.h \
 	$(top_builddir)/src/slurmd/common/task_plugin.c \
@@ -42,9 +40,9 @@ slurmstepd_SOURCES = 	        	\
 if HAVE_AIX
 # We need to set maxdata back to 0 because this effects the "max memory size"
 # ulimit, and the ulimit is inherited by child processes.
-slurmstepd_LDFLAGS = -export-dynamic $(CMD_LDFLAGS) $(FEDERATION_LDFLAGS) -Wl,-bmaxdata:0x0
+slurmstepd_LDFLAGS = -export-dynamic $(CMD_LDFLAGS) -Wl,-bmaxdata:0x0
 else
-slurmstepd_LDFLAGS = -export-dynamic $(CMD_LDFLAGS) $(FEDERATION_LDFLAGS)
+slurmstepd_LDFLAGS = -export-dynamic $(CMD_LDFLAGS)
 endif
 
 force:

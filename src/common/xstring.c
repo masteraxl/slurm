@@ -7,7 +7,7 @@
  *  Written by Jim Garlick <garlick@llnl.gov>
  *             Mark Grondona <grondona@llnl.gov>, et al.
  *	
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -44,6 +44,7 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <errno.h>
 #if 	HAVE_UNISTD_H
 #  include <unistd.h>
@@ -77,9 +78,11 @@ strong_alias(_xstrftimecat,	slurm_xstrftimecat);
 strong_alias(_xstrfmtcat,	slurm_xstrfmtcat);
 strong_alias(_xmemcat,		slurm_xmemcat);
 strong_alias(xstrdup,		slurm_xstrdup);
+strong_alias(xstrdup_printf,	slurm_xstrdup_printf);
 strong_alias(xstrndup,		slurm_xstrndup);
 strong_alias(xbasename,		slurm_xbasename);
 strong_alias(_xstrsubstitute,   slurm_xstrsubstitute);
+strong_alias(xstrstrip,         slurm_xstrstrip);
 strong_alias(xshort_hostname,   slurm_xshort_hostname);
 strong_alias(xstring_is_whitespace, slurm_xstring_is_whitespace);
 
@@ -195,17 +198,38 @@ void _xstrftimecat(char **buf, const char *fmt)
  */
 int _xstrfmtcat(char **str, const char *fmt, ...)
 {
+	/* This code is the same as xstrdup_printf, but couldn't
+	 * figure out how to pass the ... so just copied the code
+	 */
+	/* Start out with a size of 100 bytes. */
+	int n, size = 100;
+	char *p = NULL;
 	va_list ap;
-	int     rc; 
-	char    buf[4096];
+	
+	if((p = xmalloc(size)) == NULL)
+		return 0;
+	while(1) {
+		/* Try to print in the allocated space. */
+		va_start(ap, fmt);
+		n = vsnprintf(p, size, fmt, ap);
+		va_end (ap);
+		/* If that worked, return the string. */
+		if (n > -1 && n < size)
+			break;
+		/* Else try again with more space. */
+		if (n > -1)               /* glibc 2.1 */
+			size = n + 1;           /* precisely what is needed */
+		else                      /* glibc 2.0 */
+			size *= 2;              /* twice the old size */
+		if ((p = xrealloc(p, size)) == NULL)
+			return 0;
+	}
 
-	va_start(ap, fmt);
-	rc = vsnprintf(buf, 4096, fmt, ap);
-	va_end(ap);
+	xstrcat(*str, p);
 
-	xstrcat(*str, buf);
+	xfree(p);
 
-	return rc;
+	return n;
 }
 
 /*
@@ -270,6 +294,38 @@ char * xstrdup(const char *str)
 }
 
 /*
+ * Give me a copy of the string as if it were printf.
+ *   fmt (IN)		format of string and args if any
+ *   RETURN		copy of formated string
+ */
+char *xstrdup_printf(const char *fmt, ...)
+{
+	/* Start out with a size of 100 bytes. */
+	int n, size = 100;
+	char *p = NULL;
+	va_list ap;
+	
+	if((p = xmalloc(size)) == NULL)
+		return NULL;
+	while(1) {
+		/* Try to print in the allocated space. */
+		va_start(ap, fmt);
+		n = vsnprintf(p, size, fmt, ap);
+		va_end (ap);
+		/* If that worked, return the string. */
+		if (n > -1 && n < size)
+			return p;
+		/* Else try again with more space. */
+		if (n > -1)               /* glibc 2.1 */
+			size = n + 1;           /* precisely what is needed */
+		else                      /* glibc 2.0 */
+			size *= 2;              /* twice the old size */
+		if ((p = xrealloc(p, size)) == NULL)
+			return NULL;
+	}
+}
+
+/*
  * Duplicate at most "n" characters of a string.
  *   str (IN)		string to duplicate
  *   n (IN)
@@ -293,6 +349,23 @@ char * xstrndup(const char *str, size_t n)
 	rsiz = strlcpy(result, str, siz);
 
 	return result;
+}
+
+/*
+** strtol which only reads 'n' number of chars in the str to get the number
+*/
+long int xstrntol(const char *str, char **endptr, size_t n, int base)
+{
+	long int number = 0;
+	char *new_str = xstrndup(str, n);
+
+	if(!new_str) 
+		goto end_it;
+	
+	number = strtol(new_str, endptr, base);
+	xfree(new_str);
+end_it:
+	return number;
 }
 
 /* 
@@ -328,6 +401,47 @@ void _xstrsubstitute(char **str, const char *pattern, const char *replacement)
 	strcpy((*str)+pat_offset+rep_len, end_copy);
 	xfree(end_copy);
 }
+
+/* 
+ * Remove first instance of quotes that surround a string in "str",
+ *   and return the result without the quotes
+ *   str (IN)	        target string (pointer to in case of expansion)
+ *   increased (IN/OUT)	current position in "str"
+ *   RET char *         str returned without quotes in it. needs to be xfreed
+ */
+char *xstrstrip(char *str)
+{
+	int i=0, start=0, found = 0;
+	char *meat = NULL;
+	char quote_c = '\0';
+	int quote = 0;
+
+	if(!str)
+		return NULL;
+
+	/* first strip off the ("|')'s */
+	if (str[i] == '\"' || str[i] == '\'') {
+		quote_c = str[i];
+		quote = 1;
+		i++;
+	}
+	start = i;
+
+	while(str[i]) {
+		if(quote && str[i] == quote_c) {
+			found = 1;
+			break;		
+		}
+		i++;
+	}
+	if(found) {
+		meat = xmalloc((i-start)+1);
+		memcpy(meat, str+start, (i-start));
+	} else
+		meat = xstrdup(str);
+	return meat;
+}
+
 
 /* xshort_hostname
  *   Returns an xmalloc'd string containing the hostname

@@ -5,7 +5,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -52,6 +52,15 @@
 #  include <stdlib.h>
 #endif
 
+#ifdef HAVE_PTY_H
+#  include <pty.h>
+#endif
+
+#ifdef HAVE_UTMP_H
+#  include <utmp.h>
+#endif
+
+#include <sys/poll.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -66,12 +75,15 @@
 #include "src/common/macros.h"
 #include "src/common/fd.h"
 #include "src/common/list.h"
+#include "src/common/read_config.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xsignal.h"
+#include "src/common/xstring.h"
 
 #include "src/slurmd/slurmd/slurmd.h"
 #include "src/slurmd/slurmstepd/io.h"
 #include "src/slurmd/slurmstepd/fname.h"
+#include "src/slurmd/slurmstepd/slurmstepd.h"
 
 /**********************************************************************
  * IO client socket declarations
@@ -159,6 +171,19 @@ struct task_read_info {
 };
 
 /**********************************************************************
+ * Pseudo terminal declarations
+ **********************************************************************/
+struct window_info {
+	slurmd_task_info_t *task;
+	slurmd_job_t *job;
+	slurm_fd pty_fd;
+};
+#ifdef HAVE_PTY_H
+static void  _spawn_window_manager(slurmd_task_info_t *task, slurmd_job_t *job);
+static void *_window_manager(void *arg);
+#endif
+
+/**********************************************************************
  * General declarations
  **********************************************************************/
 static void *_io_thr(void *);
@@ -187,6 +212,12 @@ _client_readable(eio_obj_t *obj)
 
 	if (client->in_eof) {
 		debug5("  false");
+		/* We no longer want the _client_read() function to handle
+		   errors on write now that the read side of the connection
+		   is closed.  Setting handle_read to NULL will result in
+		   the _client_write function handling errors, and closing
+		   down the write end of the connection. */
+		obj->ops->handle_read = NULL;
 		return false;
 	}
 
@@ -194,6 +225,7 @@ _client_readable(eio_obj_t *obj)
 		debug5("  false, shutdown");
 		shutdown(obj->fd, SHUT_RD);
 		client->in_eof = true;
+		return false;
 	}
 
 	if (client->in_msg != NULL
@@ -292,7 +324,8 @@ _client_read(eio_obj_t *obj, List objs)
 	if (client->header.length == 0) { /* zero length is an eof message */
 		debug5("  got stdin eof message!");
 	} else {
-		buf = client->in_msg->data + (client->in_msg->length - client->in_remaining);
+		buf = client->in_msg->data + 
+			(client->in_msg->length - client->in_remaining);
 	again:
 		if ((n = read(obj->fd, buf, client->in_remaining)) < 0) {
 			if (errno == EINTR)
@@ -383,7 +416,8 @@ _client_write(eio_obj_t *obj, List objs)
 			debug5("_client_write: nothing in the queue");
 			return SLURM_SUCCESS;
 		}
-		debug5("  dequeue successful, client->out_msg->length = %d", client->out_msg->length);
+		debug5("  dequeue successful, client->out_msg->length = %d", 
+			client->out_msg->length);
 		client->out_remaining = client->out_msg->length;
 	}
 
@@ -392,22 +426,20 @@ _client_write(eio_obj_t *obj, List objs)
 	/*
 	 * Write message to socket.
 	 */
-	buf = client->out_msg->data + (client->out_msg->length - client->out_remaining);
+	buf = client->out_msg->data + 
+		(client->out_msg->length - client->out_remaining);
 again:
 	if ((n = write(obj->fd, buf, client->out_remaining)) < 0) {
-		if (errno == EINTR)
+		if (errno == EINTR) {
 			goto again;
-		if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
+		} else if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
 			debug5("_client_write returned EAGAIN");
 			return SLURM_SUCCESS;
-		}
-		if (errno == EPIPE) {
+		} else {
 			client->out_eof = true;
 			_free_all_outgoing_msgs(client->msg_queue, client->job);
 			return SLURM_SUCCESS;
 		}
-		error("Get error on write() in _client_write: %m");
-		return SLURM_SUCCESS;
 	}
 	debug5("Wrote %d bytes to socket", n);
 	client->out_remaining -= n;
@@ -603,7 +635,7 @@ _task_read(eio_obj_t *obj, List objs)
 
 	xassert(out->magic == TASK_OUT_MAGIC);
 
-	debug4("Entering _task_read");
+	debug4("Entering _task_read for obj %x", obj);
 	len = cbuf_free(out->buf);
 	if (len > 0 && !out->eof) {
 again:
@@ -634,12 +666,125 @@ again:
 	/*
 	 * Send the eof message
 	 */
-	if (cbuf_used(out->buf) == 0 && out->eof) {
+	if (cbuf_used(out->buf) == 0 && out->eof && !out->eof_msg_sent) {
 		_send_eof_msg(out);
 	}
 	
 	return SLURM_SUCCESS;
 }
+
+/**********************************************************************
+ * Pseudo terminal functions
+ **********************************************************************/
+#ifdef HAVE_PTY_H
+static void *_window_manager(void *arg)
+{
+	struct window_info *win_info = (struct window_info *) arg;
+	pty_winsz_t winsz;
+	ssize_t len;
+	struct winsize ws;
+	struct pollfd ufds;
+	char buf[4];
+
+	info("in _window_manager");
+	ufds.fd = win_info->pty_fd;
+	ufds.events = POLLIN;
+
+	while (1) {
+		if (poll(&ufds, 1, -1) <= 0) {
+			if (errno == EINTR)
+				continue;
+			error("poll(pty): %m");
+			break;
+		}
+		if (!(ufds.revents & POLLIN)) {
+			/* ((ufds.revents & POLLHUP) ||
+			 *  (ufds.revents & POLLERR)) */
+			break;
+		}
+		len = slurm_read_stream(win_info->pty_fd, buf, 4);
+		if ((len == -1) && ((errno == EINTR) || (errno == EAGAIN)))
+			continue;
+		if (len < 4) {
+			error("read window size error: %m");
+			return NULL;
+		}
+		memcpy(&winsz.cols, buf, 2);
+		memcpy(&winsz.rows, buf+2, 2);
+		ws.ws_col = ntohs(winsz.cols);
+		ws.ws_row = ntohs(winsz.rows);
+		debug("new pty size %u:%u", ws.ws_row, ws.ws_col);
+		if (ioctl(win_info->task->to_stdin, TIOCSWINSZ, &ws))
+			error("ioctl(TIOCSWINSZ): %s");
+		if (kill(win_info->task->pid, SIGWINCH)) {
+			if (errno == ESRCH)
+				break;
+			error("kill(%d, SIGWINCH): %m", 
+				(int)win_info->task->pid);
+		}
+	}
+	return NULL;
+}
+
+static void
+_spawn_window_manager(slurmd_task_info_t *task, slurmd_job_t *job)
+{
+	char *host, *port, *rows, *cols;
+	slurm_fd pty_fd;
+	slurm_addr pty_addr;
+	uint16_t port_u;
+	struct window_info *win_info;
+	pthread_attr_t attr;
+	pthread_t win_id;
+
+#if 0
+	/* NOTE: SLURM_LAUNCH_NODE_IPADDR is not available at this point */
+	if (!(ip_addr = getenvp(job->env, "SLURM_LAUNCH_NODE_IPADDR"))) {
+		error("SLURM_LAUNCH_NODE_IPADDR env var not set");
+		return;
+	}
+#endif
+	if (!(host = getenvp(job->env, "SLURM_SRUN_COMM_HOST"))) {
+		error("SLURM_SRUN_COMM_HOST env var not set");
+		return;
+	}
+	if (!(port = getenvp(job->env, "SLURM_PTY_PORT"))) {
+		error("SLURM_PTY_PORT env var not set");
+		return;
+	}
+	if (!(cols = getenvp(job->env, "SLURM_PTY_WIN_COL")))
+		error("SLURM_PTY_WIN_COL env var not set");
+	if (!(rows = getenvp(job->env, "SLURM_PTY_WIN_ROW")))
+		error("SLURM_PTY_WIN_ROW env var not set");
+
+	if (rows && cols) {
+		struct winsize ws;
+		ws.ws_col = atoi(cols);
+		ws.ws_row = atoi(rows);
+		debug("init pty size %u:%u", ws.ws_row, ws.ws_col);
+		if (ioctl(task->to_stdin, TIOCSWINSZ, &ws))
+			error("ioctl(TIOCSWINSZ): %s");
+	}
+
+	port_u = atoi(port);
+	slurm_set_addr(&pty_addr, port_u, host);
+	pty_fd = slurm_open_msg_conn(&pty_addr);
+	if (pty_fd < 0) {
+		error("slurm_open_msg_conn(pty_conn) %s,%u: %m",
+			host, port_u);
+		return;
+	}
+
+	win_info = xmalloc(sizeof(struct window_info));
+	win_info->task   = task;
+	win_info->job    = job;
+	win_info->pty_fd = pty_fd;
+	slurm_attr_init(&attr);
+	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+	if (pthread_create(&win_id, &attr, &_window_manager, (void *) win_info))
+		error("pthread_create(pty_conn): %m");
+}
+#endif
 
 /**********************************************************************
  * General fuctions
@@ -653,10 +798,60 @@ again:
 static int
 _init_task_stdio_fds(slurmd_task_info_t *task, slurmd_job_t *job)
 {
+	slurm_ctl_conf_t *conf;
+	int file_flags;
+
+	/* set files for opening stdout/err */
+	if (job->open_mode == OPEN_MODE_APPEND)
+		file_flags = O_CREAT|O_WRONLY|O_APPEND;
+	else if (job->open_mode == OPEN_MODE_TRUNCATE)
+		file_flags = O_CREAT|O_WRONLY|O_APPEND|O_TRUNC;
+	else {
+		conf = slurm_conf_lock();
+		if (conf->job_file_append)
+			file_flags = O_CREAT|O_WRONLY|O_APPEND;
+		else
+			file_flags = O_CREAT|O_WRONLY|O_APPEND|O_TRUNC;
+		slurm_conf_unlock();
+	}
+
 	/*
 	 *  Initialize stdin
 	 */
+#ifdef HAVE_PTY_H
+	if (job->pty) {
+		/* All of the stdin fails unless EVERY
+		 * task gets an eio object for stdin.
+		 * Its not clear why that is. */
+		if (task->gtid == 0) {
+			int amaster, aslave;
+			debug("  stdin uses a pty object");
+			if (openpty(&amaster, &aslave, NULL, NULL, NULL) < 0) {
+				error("stdin openpty: %m");
+				return SLURM_ERROR;
+			}
+			task->stdin_fd = aslave;
+			fd_set_close_on_exec(task->stdin_fd);
+			task->to_stdin = amaster;
+			fd_set_close_on_exec(task->to_stdin);
+			fd_set_nonblocking(task->to_stdin);
+			_spawn_window_manager(task, job);
+			task->in = _create_task_in_eio(task->to_stdin, job);
+			eio_new_initial_obj(job->eio, (void *)task->in);
+		} else {
+			xfree(task->ifname);
+			task->ifname = xstrdup("/dev/null");
+			task->stdin_fd = open("/dev/null", O_RDWR);
+			fd_set_close_on_exec(task->stdin_fd);
+			task->to_stdin = dup(task->stdin_fd);
+			fd_set_nonblocking(task->to_stdin);
+			task->in = _create_task_in_eio(task->to_stdin, job);
+			eio_new_initial_obj(job->eio, (void *)task->in);
+		}
+	} else if (task->ifname != NULL) {
+#else
 	if (task->ifname != NULL) {
+#endif
 		/* open file on task's stdin */
 		debug5("  stdin file name = %s", task->ifname);
 		if ((task->stdin_fd = open(task->ifname, O_RDONLY)) == -1) {
@@ -685,14 +880,39 @@ _init_task_stdio_fds(slurmd_task_info_t *task, slurmd_job_t *job)
 	/*
 	 *  Initialize stdout
 	 */
+#ifdef HAVE_PTY_H
+	if (job->pty) {
+		if (task->gtid == 0) {
+			task->stdout_fd = dup(task->stdin_fd);
+			fd_set_close_on_exec(task->stdout_fd);
+			task->from_stdout = dup(task->to_stdin);
+			fd_set_close_on_exec(task->from_stdout);
+			fd_set_nonblocking(task->from_stdout);
+			task->out = _create_task_out_eio(task->from_stdout,
+						 SLURM_IO_STDOUT, job, task);
+			list_append(job->stdout_eio_objs, (void *)task->out);
+			eio_new_initial_obj(job->eio, (void *)task->out);
+		} else {
+			xfree(task->ofname);
+			task->ofname = xstrdup("/dev/null");
+			task->stdout_fd = open("/dev/null", O_RDWR);
+			fd_set_close_on_exec(task->stdout_fd);
+			task->from_stdout = -1;  /* not used */
+		}
+	} else if (task->ofname != NULL) {
+#else
 	if (task->ofname != NULL) {
+#endif
 		/* open file on task's stdout */
 		debug5("  stdout file name = %s", task->ofname);
-		task->stdout_fd = open(task->ofname,
-				    O_CREAT|O_WRONLY|O_TRUNC|O_APPEND, 0666);
+		task->stdout_fd = open(task->ofname, file_flags, 0666);
 		if (task->stdout_fd == -1) {
 			error("Could not open stdout file: %m");
-			return SLURM_ERROR;
+			xfree(task->ofname);
+			task->ofname = fname_create(job, "slurm-%J.out", 0);
+			task->stdout_fd = open(task->ofname, file_flags, 0666);
+			if (task->stdout_fd == -1)
+				return SLURM_ERROR;
 		}
 		fd_set_close_on_exec(task->stdout_fd);
 		task->from_stdout = -1; /* not used */
@@ -718,14 +938,39 @@ _init_task_stdio_fds(slurmd_task_info_t *task, slurmd_job_t *job)
 	/*
 	 *  Initialize stderr
 	 */
+#ifdef HAVE_PTY_H
+	if (job->pty) {
+		if (task->gtid == 0) {
+			task->stderr_fd = dup(task->stdin_fd);
+			fd_set_close_on_exec(task->stderr_fd);
+			task->from_stderr = dup(task->to_stdin);
+			fd_set_close_on_exec(task->from_stderr);
+			fd_set_nonblocking(task->from_stderr);
+			task->err = _create_task_out_eio(task->from_stderr,
+						 SLURM_IO_STDERR, job, task);
+			list_append(job->stderr_eio_objs, (void *)task->err);
+			eio_new_initial_obj(job->eio, (void *)task->err);
+		} else {
+			xfree(task->efname);
+			task->efname = xstrdup("/dev/null");
+			task->stderr_fd = open("/dev/null", O_RDWR);
+			fd_set_close_on_exec(task->stderr_fd);
+			task->from_stderr = -1;  /* not used */
+		}
+	} else if (task->efname != NULL) {
+#else
 	if (task->efname != NULL) {
+#endif
 		/* open file on task's stdout */
 		debug5("  stderr file name = %s", task->efname);
-		task->stderr_fd = open(task->efname,
-				    O_CREAT|O_WRONLY|O_TRUNC|O_APPEND, 0666);
+		task->stderr_fd = open(task->efname, file_flags, 0666);
 		if (task->stderr_fd == -1) {
 			error("Could not open stderr file: %m");
-			return SLURM_ERROR;
+			xfree(task->efname);
+			task->efname = fname_create(job, "slurm-%J.err", 0);
+			task->stderr_fd = open(task->efname, file_flags, 0666);
+			if (task->stderr_fd == -1)
+				return SLURM_ERROR;
 		}
 		fd_set_close_on_exec(task->stderr_fd);
 		task->from_stderr = -1; /* not used */
@@ -767,17 +1012,25 @@ int
 io_thread_start(slurmd_job_t *job) 
 {
 	pthread_attr_t attr;
+	int rc = 0, retries = 0;
 
 	slurm_attr_init(&attr);
 
-	if (pthread_create(&job->ioid, &attr, &_io_thr, (void *)job) != 0)
-		fatal("pthread_create: %m");
+	while (pthread_create(&job->ioid, &attr, &_io_thr, (void *)job)) {
+		error("io_thread_start: pthread_create error %m");
+		if (++retries > MAX_RETRIES) {
+			error("io_thread_start: Can't create pthread");
+			rc = -1;
+			break;
+		}
+		usleep(10);	/* sleep and again */
+	}
 	
 	slurm_attr_destroy(&attr);
 	
 	/*fatal_add_cleanup(&_fatal_cleanup, (void *) job);*/
 
-	return 0;
+	return rc;
 }
 
 
@@ -1143,12 +1396,18 @@ _send_eof_msg(struct task_read_info *out)
 	Buf packbuf;
 
 	debug4("Entering _send_eof_msg");
+	out->eof_msg_sent = true;
 	
 	if (_outgoing_buf_free(out->job)) {
 		msg = list_dequeue(out->job->free_outgoing);
 	} else {
-		debug5("  free_outgoing msg list empty, can't send eof_msg");
-		return;
+		/* eof message must be allowed to allocate new memory
+		   because _task_readable() will return "true" until
+		   the eof message is enqueued.  For instance, if
+		   a poll returns POLLHUP on the incoming task pipe,
+		   put there are no outgoing message buffers available,
+		   the slurmstepd will start spinning. */
+		msg = alloc_io_buf();
 	}
 
 	header.type = out->type;
@@ -1172,7 +1431,6 @@ _send_eof_msg(struct task_read_info *out)
 	}
 	list_iterator_destroy(clients);
 
-	out->eof_msg_sent = true;
 	debug4("Leaving  _send_eof_msg");
 }
 
@@ -1311,3 +1569,58 @@ _outgoing_buf_free(slurmd_job_t *job)
 
 	return false;
 }
+
+/**********************************************************************
+ * Functions specific to "user managed" IO
+ **********************************************************************/
+static int
+_user_managed_io_connect(srun_info_t *srun, uint32_t gtid)
+{
+	int fd;
+	task_user_managed_io_msg_t user_io_msg;
+	slurm_msg_t msg;
+
+	slurm_msg_t_init(&msg);
+	msg.msg_type = TASK_USER_MANAGED_IO_STREAM;
+	msg.data = &user_io_msg;
+	user_io_msg.task_id = gtid;
+
+	fd = slurm_open_msg_conn(&srun->resp_addr);
+	if (fd == -1)
+		return -1;
+
+	if (slurm_send_node_msg(fd, &msg) == -1) {
+		close(fd);
+		return -1;
+	}
+	return fd;
+}
+
+/*
+ * This function sets the close-on-exec flag on the socket descriptor.
+ * io_dup_stdio will will remove the close-on-exec flag for just one task's
+ * file descriptors.
+ */
+int
+user_managed_io_client_connect(int ntasks, srun_info_t *srun,
+			       slurmd_task_info_t **tasks)
+{
+	int fd;
+	int i;
+
+	for (i = 0; i < ntasks; i++) {
+		fd = _user_managed_io_connect(srun, tasks[i]->gtid);
+		if (fd == -1)
+			return SLURM_ERROR;
+		fd_set_close_on_exec(fd);
+		tasks[i]->stdin_fd = fd;
+		tasks[i]->to_stdin = -1;
+		tasks[i]->stdout_fd = fd;
+		tasks[i]->from_stdout = -1;
+		tasks[i]->stderr_fd = fd;
+		tasks[i]->from_stderr = -1;
+	}
+
+	return SLURM_SUCCESS;
+}
+

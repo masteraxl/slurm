@@ -11,7 +11,7 @@
 # Copyright (C) 2002-2006 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Danny Auble <da@llnl.gov>
-# UCRL-CODE-217948.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -39,11 +39,15 @@ set non_bg       0
 
 print_header $test_id
 
+if {[file exists $smap] == 0} {
+	send_user "\nWARNING: smap not installed\n"
+	exit 0
+}
+
 #
 # Check the smap format of header for displaying bg partitions
 # in curses format.
 #
- 
 spawn $smap -Db -c
 expect {
 	-re "BG SYSTEM" {
@@ -86,7 +90,16 @@ expect {
 		incr matches
 		exp_continue
 	}
-	
+	-re "error" {
+		send_user "\nFAILURE: smap error\n"
+		set exit_code 1
+		exp_continue
+	}
+	-re "fatal" {
+		send_user "\nFAILURE: smap error\n"
+		set exit_code 1
+		exp_continue
+	}
 	timeout {
 		send_user "\nFAILURE: smap not responding\n"
 		set exit_code 1

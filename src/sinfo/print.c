@@ -1,11 +1,11 @@
 /*****************************************************************************\
  *  print.c - sinfo print job functions
  *****************************************************************************
- *  Copyright (C) 2002 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov> and 
  *  Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *   
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -16,7 +16,7 @@
  *  any later version.
  *
  *  In addition, as a special exception, the copyright holders give permission 
- *  to link the code of portions of this program with the OpenSSL library under 
+ *  to link the code of portions of this program with the OpenSSL library under
  *  certain conditions as described in each individual source file, and 
  *  distribute linked combinations including the two. You must obey the GNU 
  *  General Public License in all respects for all of the code used other than 
@@ -52,8 +52,10 @@
 
 #define MIN_NODE_FIELD_SIZE 9
 
-static int   _build_min_max_string(char *buffer, int buf_size, int min, 
-                                   int max, bool range);
+static int   _build_min_max_16_string(char *buffer, int buf_size, 
+				uint16_t min, uint16_t max, bool range);
+static int   _build_min_max_32_string(char *buffer, int buf_size, 
+				uint32_t min, uint32_t max, bool range);
 static int   _print_secs(long time, int width, bool right, bool cut_output);
 static int   _print_str(char *str, int width, bool right, bool cut_output);
 static void  _set_node_field_size(List sinfo_list);
@@ -168,12 +170,35 @@ static int _print_secs(long time, int width, bool right, bool cut_output)
 }
 
 static int 
-_build_min_max_string(char *buffer, int buf_size, int min, int max, bool range)
+_build_min_max_16_string(char *buffer, int buf_size, uint16_t min, uint16_t max, 
+			 bool range)
 {
-	char tmp_min[7];
-	char tmp_max[7];
-	convert_num_unit((float)min, tmp_min, UNIT_NONE);
-	convert_num_unit((float)max, tmp_max, UNIT_NONE);
+	char tmp_min[8];
+	char tmp_max[8];
+	convert_num_unit((float)min, tmp_min, sizeof(tmp_min), UNIT_NONE);
+	convert_num_unit((float)max, tmp_max, sizeof(tmp_max), UNIT_NONE);
+	
+	if (max == min)
+		return snprintf(buffer, buf_size, "%s", tmp_max);
+	else if (range) {
+		if (max == (uint16_t) INFINITE)
+			return snprintf(buffer, buf_size, "%s-infinite", 
+					tmp_min);
+		else
+			return snprintf(buffer, buf_size, "%s-%s", 
+					tmp_min, tmp_max);
+	} else
+		return snprintf(buffer, buf_size, "%s+", tmp_min);
+}
+
+static int 
+_build_min_max_32_string(char *buffer, int buf_size, uint32_t min, uint32_t max, 
+			 bool range)
+{
+	char tmp_min[8];
+	char tmp_max[8];
+	convert_num_unit((float)min, tmp_min, sizeof(tmp_min), UNIT_NONE);
+	convert_num_unit((float)max, tmp_max, sizeof(tmp_max), UNIT_NONE);
 	
 	if (max == min)
 		return snprintf(buffer, buf_size, "%s", tmp_max);
@@ -208,7 +233,7 @@ format_add_function(List list, int width, bool right, char *suffix,
 
 static void _set_node_field_size(List sinfo_list)
 {
-	char tmp[1024];
+	char tmp[MAXHOSTRANGELEN];
 	ListIterator i = list_iterator_create(sinfo_list);
 	sinfo_data_t *current;
 	int max_width = MIN_NODE_FIELD_SIZE, this_width = 0;
@@ -265,7 +290,7 @@ int _print_cpus(sinfo_data_t * sinfo_data, int width,
 {
 	char id[FORMAT_STRING_SIZE];
 	if (sinfo_data) {
-		_build_min_max_string(id, FORMAT_STRING_SIZE, 
+		_build_min_max_32_string(id, FORMAT_STRING_SIZE, 
 		                      sinfo_data->min_cpus, 
 		                      sinfo_data->max_cpus, false);
 		_print_str(id, width, right_justify, true);
@@ -277,12 +302,134 @@ int _print_cpus(sinfo_data_t * sinfo_data, int width,
 	return SLURM_SUCCESS;
 }
 
+/* Cpus, allocated/idle/other/total */
+int _print_cpus_aiot(sinfo_data_t * sinfo_data, int width,
+		     bool right_justify, char *suffix)
+{
+	char id[FORMAT_STRING_SIZE];
+	char tmpa[8];
+	char tmpi[8];
+	char tmpo[8];
+	char tmpt[8];
+	if (sinfo_data) {
+#ifdef HAVE_BG
+		convert_num_unit((float)sinfo_data->cpus_alloc, 
+				 tmpa, sizeof(tmpa), UNIT_NONE);
+		convert_num_unit((float)sinfo_data->cpus_idle, 
+				 tmpi, sizeof(tmpi), UNIT_NONE);
+		convert_num_unit((float)sinfo_data->cpus_other, 
+				 tmpo, sizeof(tmpo), UNIT_NONE);
+		convert_num_unit((float)sinfo_data->cpus_total, 
+				 tmpt, sizeof(tmpt), UNIT_NONE);
+#else
+		sprintf(tmpa, "%u", sinfo_data->cpus_alloc);
+		sprintf(tmpi, "%u", sinfo_data->cpus_idle);
+		sprintf(tmpo, "%u", sinfo_data->cpus_other);
+		sprintf(tmpt, "%u", sinfo_data->cpus_total);
+#endif
+		snprintf(id, FORMAT_STRING_SIZE, "%s/%s/%s/%s",
+			 tmpa, tmpi, tmpo, tmpt);
+		_print_str(id, width, right_justify, true);
+	} else
+		_print_str("CPUS(A/I/O/T)", width, right_justify, true);
+	if (suffix)
+		printf("%s", suffix);
+	return SLURM_SUCCESS;
+}
+
+int _print_sct(sinfo_data_t * sinfo_data, int width,
+			bool right_justify, char *suffix)
+{
+	char sockets[FORMAT_STRING_SIZE];
+	char cores[FORMAT_STRING_SIZE];
+	char threads[FORMAT_STRING_SIZE];
+	char sct[(FORMAT_STRING_SIZE+1)*3];
+	if (sinfo_data) {
+		_build_min_max_16_string(sockets, FORMAT_STRING_SIZE, 
+		                      sinfo_data->min_sockets, 
+		                      sinfo_data->max_sockets, false);
+		_build_min_max_16_string(cores, FORMAT_STRING_SIZE, 
+		                      sinfo_data->min_cores, 
+		                      sinfo_data->max_cores, false);
+		_build_min_max_16_string(threads, FORMAT_STRING_SIZE, 
+		                      sinfo_data->min_threads, 
+		                      sinfo_data->max_threads, false);
+		sct[0] = '\0';
+		strcat(sct, sockets);
+		strcat(sct, ":");
+		strcat(sct, cores);
+		strcat(sct, ":");
+		strcat(sct, threads);
+		_print_str(sct, width, right_justify, true);
+	} else {
+		_print_str("S:C:T", width, right_justify, true);
+	}
+
+	if (suffix)
+		printf("%s", suffix);
+	return SLURM_SUCCESS;
+}
+
+int _print_sockets(sinfo_data_t * sinfo_data, int width,
+			bool right_justify, char *suffix)
+{
+	char id[FORMAT_STRING_SIZE];
+	if (sinfo_data) {
+		_build_min_max_16_string(id, FORMAT_STRING_SIZE, 
+		                      sinfo_data->min_sockets, 
+		                      sinfo_data->max_sockets, false);
+		_print_str(id, width, right_justify, true);
+	} else {
+		_print_str("SOCKETS", width, right_justify, true);
+	}
+
+	if (suffix)
+		printf("%s", suffix);
+	return SLURM_SUCCESS;
+}
+
+int _print_cores(sinfo_data_t * sinfo_data, int width,
+			bool right_justify, char *suffix)
+{
+	char id[FORMAT_STRING_SIZE];
+	if (sinfo_data) {
+		_build_min_max_16_string(id, FORMAT_STRING_SIZE, 
+		                      sinfo_data->min_cores, 
+		                      sinfo_data->max_cores, false);
+		_print_str(id, width, right_justify, true);
+	} else {
+		_print_str("CORES", width, right_justify, true);
+	}
+
+	if (suffix)
+		printf("%s", suffix);
+	return SLURM_SUCCESS;
+}
+
+int _print_threads(sinfo_data_t * sinfo_data, int width,
+			bool right_justify, char *suffix)
+{
+	char id[FORMAT_STRING_SIZE];
+	if (sinfo_data) {
+		_build_min_max_16_string(id, FORMAT_STRING_SIZE, 
+		                      sinfo_data->min_threads, 
+		                      sinfo_data->max_threads, false);
+		_print_str(id, width, right_justify, true);
+	} else {
+		_print_str("THREADS", width, right_justify, true);
+	}
+
+	if (suffix)
+		printf("%s", suffix);
+	return SLURM_SUCCESS;
+}
+
 int _print_disk(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix)
 {
 	char id[FORMAT_STRING_SIZE];
 	if (sinfo_data) {
-		_build_min_max_string(id, FORMAT_STRING_SIZE, 
+		_build_min_max_32_string(id, FORMAT_STRING_SIZE, 
 		                      sinfo_data->min_disk, 
 		                      sinfo_data->max_disk, false);
 		_print_str(id, width, right_justify, true);
@@ -331,7 +478,7 @@ int _print_memory(sinfo_data_t * sinfo_data, int width,
 {
 	char id[FORMAT_STRING_SIZE];
 	if (sinfo_data) {
-		_build_min_max_string(id, FORMAT_STRING_SIZE, 
+		_build_min_max_32_string(id, FORMAT_STRING_SIZE, 
 		                      sinfo_data->min_mem, 
 		                      sinfo_data->max_mem, false);
 		_print_str(id, width, right_justify, true);
@@ -350,7 +497,7 @@ int _print_node_list(sinfo_data_t * sinfo_data, int width,
 		width = params.node_field_size;
 
 	if (sinfo_data) {
-		char tmp[1024];
+		char tmp[MAXHOSTRANGELEN];
 		hostlist_ranged_string(sinfo_data->nodes, 
 					sizeof(tmp), tmp);
 		_print_str(tmp, width, right_justify, true);
@@ -371,10 +518,14 @@ int _print_nodes_t(sinfo_data_t * sinfo_data, int width,
 		   bool right_justify, char *suffix)
 {
 	char id[FORMAT_STRING_SIZE];
-	char tmp[7];
+	char tmp[8];
 	if (sinfo_data) {
-		convert_num_unit((float)sinfo_data->nodes_tot, tmp, UNIT_NONE);
-	
+#ifdef HAVE_BG		
+		convert_num_unit((float)sinfo_data->nodes_total, tmp, 
+				 sizeof(tmp), UNIT_NONE);
+#else
+		snprintf(tmp, sizeof(tmp), "%d", sinfo_data->nodes_total);
+#endif
 		snprintf(id, FORMAT_STRING_SIZE, "%s", tmp);
 		_print_str(id, width, right_justify, true);
 	} else
@@ -389,14 +540,18 @@ int _print_nodes_ai(sinfo_data_t * sinfo_data, int width,
 		    bool right_justify, char *suffix)
 {
 	char id[FORMAT_STRING_SIZE];
-	char tmpa[7];
-	char tmpi[7];
+	char tmpa[8];
+	char tmpi[8];
 	if (sinfo_data) {
+#ifdef HAVE_BG		
 		convert_num_unit((float)sinfo_data->nodes_alloc, 
-				 tmpa, UNIT_NONE);
+				 tmpa, sizeof(tmpa), UNIT_NONE);
 		convert_num_unit((float)sinfo_data->nodes_idle, 
-				 tmpi, UNIT_NONE);
-	
+				 tmpi, sizeof(tmpi), UNIT_NONE);
+#else
+		snprintf(tmpa, sizeof(tmpa), "%d", sinfo_data->nodes_alloc);
+		snprintf(tmpi, sizeof(tmpi), "%d", sinfo_data->nodes_idle);
+#endif
 		snprintf(id, FORMAT_STRING_SIZE, "%s/%s", 
 		         tmpa, tmpi);
 		_print_str(id, width, right_justify, true);
@@ -412,19 +567,27 @@ int _print_nodes_aiot(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix)
 {
 	char id[FORMAT_STRING_SIZE];
-	char tmpa[7];
-	char tmpi[7];
-	char tmpo[7];
-	char tmpt[7];
+	char tmpa[8];
+	char tmpi[8];
+	char tmpo[8];
+	char tmpt[8];
 	if (sinfo_data) {
+#ifdef HAVE_BG		
 		convert_num_unit((float)sinfo_data->nodes_alloc, 
-				 tmpa, UNIT_NONE);
+				 tmpa, sizeof(tmpa), UNIT_NONE);
 		convert_num_unit((float)sinfo_data->nodes_idle, 
-				 tmpi, UNIT_NONE);
+				 tmpi, sizeof(tmpi), UNIT_NONE);
 		convert_num_unit((float)sinfo_data->nodes_other, 
-				 tmpo, UNIT_NONE);
-		convert_num_unit((float)sinfo_data->nodes_tot,
-				 tmpt, UNIT_NONE);
+				 tmpo, sizeof(tmpo), UNIT_NONE);
+		convert_num_unit((float)sinfo_data->nodes_total,
+				 tmpt, sizeof(tmpt), UNIT_NONE);
+#else
+		snprintf(tmpa, sizeof(tmpa), "%u", sinfo_data->nodes_alloc);
+		snprintf(tmpi, sizeof(tmpi), "%u", sinfo_data->nodes_idle);
+		snprintf(tmpo, sizeof(tmpo), "%u", sinfo_data->nodes_other);
+		snprintf(tmpt, sizeof(tmpt), "%u", sinfo_data->nodes_total);
+#endif
+
 		snprintf(id, FORMAT_STRING_SIZE, "%s/%s/%s/%s", 
 		         tmpa, tmpi, tmpo, tmpt);
 		_print_str(id, width, right_justify, true);
@@ -470,6 +633,24 @@ int _print_prefix(sinfo_data_t * job, int width, bool right_justify,
 	return SLURM_SUCCESS;
 }
 
+int _print_priority(sinfo_data_t * sinfo_data, int width,
+			bool right_justify, char *suffix)
+{
+	char id[FORMAT_STRING_SIZE];
+
+	if (sinfo_data) {
+		_build_min_max_16_string(id, FORMAT_STRING_SIZE, 
+		                      sinfo_data->part_info->priority, 
+		                      sinfo_data->part_info->priority, true);
+		_print_str(id, width, right_justify, true);
+	} else
+		_print_str("PRIORITY", width, right_justify, true);
+
+	if (suffix)
+		printf("%s", suffix);
+	return SLURM_SUCCESS;
+}
+
 int _print_reason(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix)
 {
@@ -507,15 +688,20 @@ int _print_root(sinfo_data_t * sinfo_data, int width,
 int _print_share(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix)
 {
+	char id[FORMAT_STRING_SIZE];
+
 	if (sinfo_data) {
-		if (sinfo_data->part_info == NULL)
-			_print_str("n/a", width, right_justify, true);
-		else if (sinfo_data->part_info->shared > 1)
-			_print_str("force", width, right_justify, true);
-		else if (sinfo_data->part_info->shared)
-			_print_str("yes", width, right_justify, true);
+		bool force = sinfo_data->part_info->max_share & SHARED_FORCE;
+		uint16_t val = sinfo_data->part_info->max_share & (~SHARED_FORCE);
+		if (val == 0)
+			snprintf(id, sizeof(id), "EXCLUSIVE");
+		else if (force)
+			snprintf(id, sizeof(id), "FORCE:%u", val);
+		else if (val == 1)
+			snprintf(id, sizeof(id), "NO");
 		else
-			_print_str("no", width, right_justify, true);
+			snprintf(id, sizeof(id), "YES:%u", val);
+		_print_str(id, width, right_justify, true);
 	} else
 		_print_str("SHARE", width, right_justify, true);
 
@@ -535,7 +721,7 @@ int _print_size(sinfo_data_t * sinfo_data, int width,
 			if ((sinfo_data->part_info->min_nodes < 1) &&
 			    (sinfo_data->part_info->max_nodes > 0))
 				sinfo_data->part_info->min_nodes = 1;
-			_build_min_max_string(id, FORMAT_STRING_SIZE, 
+			_build_min_max_32_string(id, FORMAT_STRING_SIZE, 
 					      sinfo_data->part_info->min_nodes,
 					      sinfo_data->part_info->max_nodes,
 					      true);
@@ -552,9 +738,9 @@ int _print_size(sinfo_data_t * sinfo_data, int width,
 int _print_state_compact(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix)
 {
-	if (sinfo_data && sinfo_data->nodes_tot) {
+	if (sinfo_data && sinfo_data->nodes_total) {
 		char *upper_state = node_state_string_compact(
-				sinfo_data->node_state);
+			sinfo_data->node_state);
 		char *lower_state = _str_tolower(upper_state);
 		_print_str(lower_state, width, right_justify, true);
 		xfree(lower_state);
@@ -571,7 +757,7 @@ int _print_state_compact(sinfo_data_t * sinfo_data, int width,
 int _print_state_long(sinfo_data_t * sinfo_data, int width,
 			bool right_justify, char *suffix)
 {
-	if (sinfo_data && sinfo_data->nodes_tot) {
+	if (sinfo_data && sinfo_data->nodes_total) {
 		char *upper_state = node_state_string(sinfo_data->node_state);
 		char *lower_state = _str_tolower(upper_state);
 		_print_str(lower_state, width, right_justify, true);
@@ -611,7 +797,7 @@ int _print_weight(sinfo_data_t * sinfo_data, int width,
 {
 	char id[FORMAT_STRING_SIZE];
 	if (sinfo_data) {
-		_build_min_max_string(id, FORMAT_STRING_SIZE, 
+		_build_min_max_32_string(id, FORMAT_STRING_SIZE, 
 		                      sinfo_data->min_weight, 
 		                      sinfo_data->max_weight, false);
 		_print_str(id, width, right_justify, true);

@@ -2,11 +2,11 @@
  *  src/slurmd/slurmstepd/slurmstepd.c - SLURM job-step manager.
  *  $Id$
  *****************************************************************************
- *  Copyright (C) 2002 The Regents of the University of California.
+ *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov> 
  *  and Christopher Morrone <morrone2@llnl.gov>.
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -17,7 +17,7 @@
  *  any later version.
  *
  *  In addition, as a special exception, the copyright holders give permission 
- *  to link the code of portions of this program with the OpenSSL library under 
+ *  to link the code of portions of this program with the OpenSSL library under
  *  certain conditions as described in each individual source file, and 
  *  distribute linked combinations including the two. You must obey the GNU 
  *  General Public License in all respects for all of the code used other than 
@@ -47,12 +47,13 @@
 
 #include "src/common/xmalloc.h"
 #include "src/common/xsignal.h"
-#include "src/common/slurm_jobacct.h"
+#include "src/common/slurm_jobacct_gather.h"
+#include "src/common/slurm_rlimits_info.h"
 #include "src/common/switch.h"
+#include "src/common/stepd_api.h"
 
 #include "src/slurmd/slurmd/slurmd.h"
 #include "src/slurmd/common/slurmstepd_init.h"
-#include "src/slurmd/common/stepd_api.h"
 #include "src/slurmd/common/setproctitle.h"
 #include "src/slurmd/common/proctrack.h"
 #include "src/slurmd/slurmstepd/slurmstepd.h"
@@ -64,6 +65,7 @@ static int _init_from_slurmd(int sock, char **argv, slurm_addr **_cli,
 			     slurm_addr **_self, slurm_msg_t **_msg,
 			     int *_ngids, gid_t **_gids);
 
+static void _dump_user_env(void);
 static void _send_ok_to_slurmd(int sock);
 static void _send_fail_to_slurmd(int sock);
 static slurmd_job_t *_step_setup(slurm_addr *cli, slurm_addr *self,
@@ -74,6 +76,10 @@ int slurmstepd_blocked_signals[] = {
 	SIGPIPE, 0
 };
 
+/* global variable */
+slurmd_conf_t * conf;
+extern char  ** environ;
+
 int 
 main (int argc, char *argv[])
 {
@@ -83,18 +89,19 @@ main (int argc, char *argv[])
 	slurmd_job_t *job;
 	int ngids;
 	gid_t *gids;
-	int rc;
+	int rc = 0;
+
+	if ((argc == 2) && (strcmp(argv[1], "getenv") == 0)) {
+		print_rlimits();
+		_dump_user_env();
+		exit(0);
+	}
 
 	xsignal_block(slurmstepd_blocked_signals);
 	conf = xmalloc(sizeof(*conf));
 	conf->argv = &argv;
 	conf->argc = &argc;
-	conf->task_prolog = slurm_get_task_prolog();
-	conf->task_epilog = slurm_get_task_epilog();
 	init_setproctitle(argc, argv);
-	if (slurm_proctrack_init() != SLURM_SUCCESS)
-		return SLURM_FAILURE;
-
 	_init_from_slurmd(STDIN_FILENO, argv, &cli, &self, &msg,
 			  &ngids, &gids);
 
@@ -112,7 +119,8 @@ main (int argc, char *argv[])
 	/* sets job->msg_handle and job->msgid */
 	if (msg_thr_create(job) == SLURM_ERROR) {
 		_send_fail_to_slurmd(STDOUT_FILENO);
-		return -1;
+		rc = SLURM_FAILURE;
+		goto ending;
 	}
 
 	_send_ok_to_slurmd(STDOUT_FILENO);
@@ -128,6 +136,7 @@ main (int argc, char *argv[])
 	eio_signal_shutdown(job->msg_handle);
 	pthread_join(job->msgid, NULL);
 
+ending:
 	_step_cleanup(job, msg, rc);
 
 	xfree(cli);
@@ -138,7 +147,7 @@ main (int argc, char *argv[])
 	xfree(conf->logfile);
 	xfree(conf);
 	info("done with job");
-	return 0;
+	return rc;
 }
 
 static void
@@ -182,6 +191,8 @@ _init_from_slurmd(int sock, char **argv,
 	slurm_msg_t *msg = NULL;
 	int ngids = 0;
 	gid_t *gids = NULL;
+	uint16_t port;
+	char buf[16];
 
 	/* receive job type from slurmd */
 	safe_read(sock, &step_type, sizeof(int));
@@ -196,7 +207,7 @@ _init_from_slurmd(int sock, char **argv,
 	safe_read(sock, &step_complete.max_depth, sizeof(int));
 	safe_read(sock, &step_complete.parent_addr, sizeof(slurm_addr));
 	step_complete.bits = bit_alloc(step_complete.children);
-	step_complete.jobacct = jobacct_g_alloc(NULL);
+	step_complete.jobacct = jobacct_gather_g_create(NULL);
 	pthread_mutex_unlock(&step_complete.lock);
 
 	/* receive conf from slurmd */
@@ -213,7 +224,6 @@ _init_from_slurmd(int sock, char **argv,
 	conf->log_opts.stderr_level = conf->debug_level;
 	conf->log_opts.logfile_level = conf->debug_level;
 	conf->log_opts.syslog_level = conf->debug_level;
-	/* forward the log options to slurmstepd */
 	//log_alter(conf->log_opts, 0, NULL);
 	/*
 	 * If daemonizing, turn off stderr logging -- also, if
@@ -229,19 +239,15 @@ _init_from_slurmd(int sock, char **argv,
 	} else
 		conf->log_opts.syslog_level  = LOG_LEVEL_QUIET;
 
-	log_init(argv[0],conf->log_opts, LOG_DAEMON, conf->logfile);
+	log_init(argv[0], conf->log_opts, LOG_DAEMON, conf->logfile);
 	/* acct info */
-	jobacct_g_startpoll(conf->job_acct_freq);
+	jobacct_gather_g_startpoll(conf->job_acct_gather_freq);
 	
 	switch_g_slurmd_step_init();
 
-	{
-		uint16_t port;
-		char buf[16];
-		slurm_get_ip_str(&step_complete.parent_addr, &port, buf, 16);
-		debug3("slurmstepd rank %d, parent address = %s, port = %u",
-		       step_complete.rank, buf, port);
-	}
+	slurm_get_ip_str(&step_complete.parent_addr, &port, buf, 16);
+	debug3("slurmstepd rank %d, parent address = %s, port = %u",
+	       step_complete.rank, buf, port);
 
 	/* receive cli from slurmd */
 	safe_read(sock, &len, sizeof(int));
@@ -277,6 +283,8 @@ _init_from_slurmd(int sock, char **argv,
 	buffer = create_buf(incoming_buffer,len);
 
 	msg = xmalloc(sizeof(slurm_msg_t));
+	slurm_msg_t_init(msg);
+
 	switch(step_type) {
 	case LAUNCH_BATCH_JOB:
 		msg->msg_type = REQUEST_BATCH_JOB_LAUNCH;
@@ -284,11 +292,8 @@ _init_from_slurmd(int sock, char **argv,
 	case LAUNCH_TASKS:
 		msg->msg_type = REQUEST_LAUNCH_TASKS;
 		break;
-	case SPAWN_TASKS:
-		msg->msg_type = REQUEST_SPAWN_TASK;
-		break;
 	default:
-		fatal("Unrecognized launch/spawn RPC");
+		fatal("Unrecognized launch RPC");
 		break;
 	}
 	if(unpack_msg(msg, buffer) == SLURM_ERROR) 
@@ -336,16 +341,15 @@ _step_setup(slurm_addr *cli, slurm_addr *self, slurm_msg_t *msg)
 		debug2("setup for a launch_task");
 		job = mgr_launch_tasks_setup(msg->data, cli, self);
 		break;
-	case REQUEST_SPAWN_TASK:
-		debug2("setup for a spawn_task");
-		job = mgr_spawn_task_setup(msg->data, cli, self);
-		break;
 	default:
-		fatal("handle_launch_message: Unrecognized launch/spawn RPC");
+		fatal("handle_launch_message: Unrecognized launch RPC");
 		break;
 	}
+	if(!job) {
+		fatal("_step_setup: no job returned");
+	}
 	job->jmgr_pid = getpid();
-	job->jobacct = jobacct_g_alloc(NULL);
+	job->jobacct = jobacct_gather_g_create(NULL);
 	
 	return job;
 }
@@ -353,10 +357,8 @@ _step_setup(slurm_addr *cli, slurm_addr *self, slurm_msg_t *msg)
 static void
 _step_cleanup(slurmd_job_t *job, slurm_msg_t *msg, int rc)
 {
-	jobacct_g_free(job->jobacct);
-	if (job->batch)
-		mgr_launch_batch_job_cleanup(job, rc);
-	else
+	jobacct_gather_g_destroy(job->jobacct);
+	if (!job->batch)
 		job_destroy(job);
 	/* 
 	 * The message cannot be freed until the jobstep is complete
@@ -370,14 +372,19 @@ _step_cleanup(slurmd_job_t *job, slurm_msg_t *msg, int rc)
 	case REQUEST_LAUNCH_TASKS:
 		slurm_free_launch_tasks_request_msg(msg->data);
 		break;
-	case REQUEST_SPAWN_TASK:
-		slurm_free_spawn_task_request_msg(msg->data);
-		break;
 	default:
-		fatal("handle_launch_message: Unrecognized launch/spawn RPC");
+		fatal("handle_launch_message: Unrecognized launch RPC");
 		break;
 	}
-	jobacct_g_free(step_complete.jobacct);
+	jobacct_gather_g_destroy(step_complete.jobacct);
 	
 	xfree(msg);
+}
+
+static void _dump_user_env(void)
+{
+	int i;
+
+	for (i=0; environ[i]; i++)
+		printf("%s\n",environ[i]);
 }

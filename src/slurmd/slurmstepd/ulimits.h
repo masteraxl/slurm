@@ -5,7 +5,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -46,5 +46,11 @@
  * variables contained in job->env
  */
 int set_user_limits(slurmd_job_t *job);
+
+/*
+ * Set user ulimit based upon SLURM_ULIMIT envirionment variable
+ * contained in job->env
+ */
+int set_umask(slurmd_job_t *job);
 
 #endif /* !_SLURMD_ULIMITS_H */

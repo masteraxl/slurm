@@ -4,7 +4,7 @@
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -40,7 +40,7 @@
 /* RET 0 on success, -1 on failure */
 extern int	job_release_task(char *cmd_ptr, int *err_code, char **err_msg)
 {
-	*err_code = 810;
+	*err_code = -810;
 	*err_msg = "JOBRELEASETASK command not supported";
 	error("wiki: JOBRELEASETASK command not supported");
 	return -1;

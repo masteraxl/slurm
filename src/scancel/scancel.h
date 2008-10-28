@@ -4,7 +4,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette<jette1@llnl.gov>, et. al.
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -44,6 +44,7 @@
 
 typedef struct scancel_options {
 	bool batch;		/* --batch, -b			*/
+	bool ctld;		/* --ctld			*/
 	bool interactive;	/* --interactive, -i		*/
 	char *job_name;		/* --name=n, -nn		*/
 	char *partition;	/* --partition=n, -pn		*/

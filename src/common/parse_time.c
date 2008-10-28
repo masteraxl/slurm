@@ -1,11 +1,10 @@
 /*****************************************************************************\
  *  src/common/parse_time.c - time parsing utility functions
- *  $Id$
  *****************************************************************************
  *  Copyright (C) 2005-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>.
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -39,8 +38,12 @@
 #include <stdio.h>
 #include <time.h>
 #include <strings.h>
-#define __USE_ISOC99 /* isblank() */
+#ifndef   __USE_ISOC99
+#  define __USE_ISOC99 /* isblank() */
+#endif
 #include <ctype.h>
+
+#include <slurm/slurm.h>
 
 #define _RUN_STAND_ALONE 0
 
@@ -57,6 +60,7 @@ static int _get_delta(char *time_str, int *pos, long *delta)
 {
 	int offset;
 	long cnt = 0;
+	int digit = 0;
 
 	offset = (*pos) + 1;
 	for ( ; ((time_str[offset]!='\0')&&(time_str[offset]!='\n')); offset++) {
@@ -84,10 +88,15 @@ static int _get_delta(char *time_str, int *pos, long *delta)
 		}
 		if ((time_str[offset] >= '0') && (time_str[offset] <= '9')) {
 			cnt = (cnt * 10) + (time_str[offset] - '0');
+			digit++;
 			continue;
 		}
 		goto prob;
 	}
+
+	if (!digit)	/* No numbers after the '=' */
+		return -1;
+
 	*pos = offset - 1;
 	*delta = cnt;
 	return 0;
@@ -115,6 +124,10 @@ _get_time(char *time_str, int *pos, int *hour, int *minute, int * second)
 	if ((time_str[offset] < '0') || (time_str[offset] > '9'))
 		goto prob;
 	hr = (hr * 10) + time_str[offset++] - '0';
+	if (hr > 23) {
+		offset -= 2;
+		goto prob;
+	}
 	if (time_str[offset] != ':')
 		goto prob;
 	offset++;
@@ -126,6 +139,10 @@ _get_time(char *time_str, int *pos, int *hour, int *minute, int * second)
 	if ((time_str[offset] < '0') || (time_str[offset] > '9'))
 		goto prob;
 	min = (min * 10)  + time_str[offset++] - '0';
+	if (min > 59) {
+		offset -= 2;
+		goto prob;
+	}
 
 	/* get optional second */
 	if (time_str[offset] == ':') {
@@ -136,6 +153,10 @@ _get_time(char *time_str, int *pos, int *hour, int *minute, int * second)
 		if ((time_str[offset] < '0') || (time_str[offset] > '9'))
 			goto prob;
 		sec = (sec * 10)  + time_str[offset++] - '0';
+		if (sec > 59) {
+			offset -= 2;
+			goto prob;
+		}
 	} else
 		sec = 0;
 
@@ -144,8 +165,20 @@ _get_time(char *time_str, int *pos, int *hour, int *minute, int * second)
 	}
 	if (strncasecmp(time_str+offset, "pm", 2)== 0) {
 		hr += 12;
+		if (hr > 23) {
+			if (hr == 24)
+				hr = 12;
+			else
+				goto prob;
+		}
 		offset += 2;
 	} else if (strncasecmp(time_str+offset, "am", 2) == 0) {
+		if (hr > 11) {
+			if (hr == 12)
+				hr = 0;
+			else
+				goto prob;
+		}
 		offset += 2;
 	}
 
@@ -221,12 +254,15 @@ static int _get_date(char *time_str, int *pos, int *month, int *mday, int *year)
  *   midnight, noon, teatime (4PM)
  *   HH:MM[:SS] [AM|PM]
  *   MMDD[YY] or MM/DD[/YY] or MM.DD[.YY]
+ *   MM/DD[/YY]-HH:MM[:SS]
  *   now + count [minutes | hours | days | weeks]
  * 
  * Invalid input results in message to stderr and return value of zero
  * NOTE: not thread safe
+ * NOTE: by default this will look into the future for the next time.
+ * if you want to look in the past set the past flag.
  */
-extern time_t parse_time(char *time_str)
+extern time_t parse_time(char *time_str, int past)
 {
 	int    hour = -1, minute = -1, second = 0;
 	int    month = -1, mday = -1, year = -1;
@@ -305,6 +341,7 @@ extern time_t parse_time(char *time_str)
 			second   = later_tm->tm_sec;
 			continue;
 		}
+
 		if ((time_str[pos] < '0') || (time_str[pos] > '9'))	/* invalid */
 			goto prob;
 		/* We have some numeric value to process */
@@ -325,9 +362,11 @@ extern time_t parse_time(char *time_str)
 		hour = 0;
 		minute = 0;
 	}
-	else if ((hour != -1) && (month == -1)) {	/* time, no date implies soonest day */
-		if ((hour >  time_now_tm->tm_hour)
-		||  ((hour == time_now_tm->tm_hour) && (minute > time_now_tm->tm_min))) {
+	else if ((hour != -1) && (month == -1)) {	
+		/* time, no date implies soonest day */
+		if (past || (hour >  time_now_tm->tm_hour)
+		    ||  ((hour == time_now_tm->tm_hour) 
+			 && (minute > time_now_tm->tm_min))) {
 			/* today */
 			month = time_now_tm->tm_mon;
 			mday  = time_now_tm->tm_mday;
@@ -338,16 +377,19 @@ extern time_t parse_time(char *time_str)
 			month = later_tm->tm_mon;
 			mday  = later_tm->tm_mday;
 			year  = later_tm->tm_year;
-
 		}
 	}
 	if (year == -1) {
-		if ((month  >  time_now_tm->tm_mon)
-		||  ((month == time_now_tm->tm_mon) && (mday >  time_now_tm->tm_mday))
-		||  ((month == time_now_tm->tm_mon) && (mday == time_now_tm->tm_mday)
-		  && (hour >  time_now_tm->tm_hour)) 
-		||  ((month == time_now_tm->tm_mon) && (mday == time_now_tm->tm_mday)
-		  && (hour == time_now_tm->tm_hour) && (minute > time_now_tm->tm_min))) {
+		if (past || (month  >  time_now_tm->tm_mon)
+		    ||  ((month == time_now_tm->tm_mon) 
+			 && (mday >  time_now_tm->tm_mday))
+		    ||  ((month == time_now_tm->tm_mon) 
+			 && (mday == time_now_tm->tm_mday)
+			 && (hour >  time_now_tm->tm_hour)) 
+		    ||  ((month == time_now_tm->tm_mon) 
+			 && (mday == time_now_tm->tm_mday)
+			 && (hour == time_now_tm->tm_hour) 
+			 && (minute > time_now_tm->tm_min))) {
 			/* this year */
 			year = time_now_tm->tm_year;
 		} else {
@@ -426,3 +468,118 @@ slurm_make_time_str (time_t *time, char *string, int size)
 	}
 }
 
+/* Convert a string to an equivalent time value
+ * input formats:
+ *   min
+ *   min:sec
+ *   hr:min:sec
+ *   days-hr:min:sec
+ *   days-hr
+ * output:
+ *   minutes  (or -2 on error, INFINITE is -1 as defined in slurm.h)
+ *   if unlimited is the value of string)
+ */
+extern int time_str2mins(char *string)
+{
+	int days = -1, hr = -1, min = -1, sec = -1;
+	int i, tmp = 0, res = 0;
+
+	if ((string == NULL) || (string[0] == '\0'))
+		return -1;	/* invalid input */
+	if ((!strcasecmp(string, "-1")) ||
+	    (!strcasecmp(string, "INFINITE")) ||
+	    (!strcasecmp(string, "UNLIMITED"))) {
+		return INFINITE;
+	}
+
+	for (i=0; ; i++) {
+		if ((string[i] >= '0') && (string[i] <= '9')) {
+			tmp = (tmp * 10) + (string[i] - '0');
+		} else if (string[i] == '-') {
+			if (days != -1)
+				return -2;	/* invalid input */
+			days = tmp;
+			tmp = 0;
+		} else if ((string[i] == ':') || (string[i] == '\0')) {
+			if (min == -1) {
+				min = tmp;
+			} else if (sec == -1) {
+				sec = tmp;
+			} else if (hr == -1) {
+				hr = min;
+				min = sec;
+				sec = tmp;
+			} else
+				return -2;	/* invalid input */
+			tmp = 0;
+		} else
+			return -2;		/* invalid input */
+
+		if (string[i] == '\0')
+			break;
+	}
+
+	if ((days != -1) && (hr == -1) && (min != 0)) {
+		/* format was "days-hr" or "days-hr:min" */
+		hr = min;
+		min = sec;
+		sec = 0;
+	}
+
+	if (days == -1)
+		days = 0;
+	if (hr == -1)
+		hr = 0;
+	if (min == -1)
+		min = 0;
+	if (sec == -1)
+		sec = 0;
+	res = (((days * 24) + hr) * 60) + min;
+	if (sec > 0)
+		res++;	/* round up */
+	return res;
+}
+
+extern void secs2time_str(time_t time, char *string, int size)
+{
+	if (time == INFINITE) {
+		snprintf(string, size, "UNLIMITED");
+	} else {
+		long days, hours, minutes, seconds;
+		seconds = time % 60;
+		minutes = (time / 60) % 60;
+		hours = (time / 3600) % 24;
+		days = time / 86400;
+
+		if (days)
+			snprintf(string, size,
+				"%ld-%2.2ld:%2.2ld:%2.2ld",
+				days, hours, minutes, seconds);
+		else
+			snprintf(string, size,
+				"%2.2ld:%2.2ld:%2.2ld", 
+				hours, minutes, seconds);
+	}
+}
+
+extern void mins2time_str(uint32_t time, char *string, int size)
+{
+	if (time == INFINITE) {
+		snprintf(string, size, "UNLIMITED");
+	} else {
+		long days, hours, minutes, seconds;
+		seconds = 0;
+		minutes = time % 60;
+		hours = time / 60 % 24;
+		days = time / 1440;
+
+		if (days)
+			snprintf(string, size,
+				"%ld-%2.2ld:%2.2ld:%2.2ld",
+				days, hours, minutes, seconds);
+		else
+			snprintf(string, size,
+				"%2.2ld:%2.2ld:%2.2ld", 
+				hours, minutes, seconds);
+	}
+}

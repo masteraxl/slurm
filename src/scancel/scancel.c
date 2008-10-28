@@ -1,10 +1,10 @@
 /*****************************************************************************\
  *  scancel - cancel specified job(s) and/or job step(s)
  *****************************************************************************
- *  Copyright (C) 2002 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -64,9 +64,9 @@
 #define MAX_CANCEL_RETRY 10
 
 static void _cancel_jobs (void);
-static void _cancel_job_id (uint32_t job_id, uint16_t signal);
+static void _cancel_job_id (uint32_t job_id, uint16_t sig);
 static void _cancel_step_id (uint32_t job_id, uint32_t step_id, 
-			     uint16_t signal);
+			     uint16_t sig);
 static int  _confirmation (int i, uint32_t step_id);
 static void _filter_job_records (void);
 static void _load_job_records (void);
@@ -226,23 +226,32 @@ _cancel_jobs (void)
 }
 
 static void
-_cancel_job_id (uint32_t job_id, uint16_t signal)
+_cancel_job_id (uint32_t job_id, uint16_t sig)
 {
 	int error_code = SLURM_SUCCESS, i;
+	bool sig_set = true;
+
+	if (sig == (uint16_t)-1) {
+		sig = SIGKILL;
+		sig_set = false;
+	}
 
 	for (i=0; i<MAX_CANCEL_RETRY; i++) {
-		if ((signal == (uint16_t)-1) || (signal == SIGKILL)) {
+		if (!sig_set)
 			verbose("Terminating job %u", job_id);
-			error_code = slurm_kill_job (job_id, SIGKILL,
+		else
+			verbose("Signal %u to job %u", sig, job_id);
+
+		if ((!sig_set) || opt.ctld) {
+			error_code = slurm_kill_job (job_id, sig,
 						     (uint16_t)opt.batch);
 		} else {
-			verbose("Signal %u to job %u", signal, job_id);
 			if (opt.batch)
 				error_code = slurm_signal_job_step(job_id,
 							   SLURM_BATCH_SCRIPT,
-							   signal);
+							   sig);
 			else
-				error_code = slurm_signal_job (job_id, signal);
+				error_code = slurm_signal_job (job_id, sig);
 		}
 		if (error_code == 0
 		    || (errno != ESLURM_TRANSITION_STATE_NO_UPDATE
@@ -253,7 +262,7 @@ _cancel_job_id (uint32_t job_id, uint16_t signal)
 	}
 	if (error_code) {
 		error_code = slurm_get_errno();
-		if ((opt.verbose >= 0) || 
+		if ((opt.verbose > 0) || 
 		    ((error_code != ESLURM_ALREADY_DONE) &&
 		     (error_code != ESLURM_INVALID_JOB_ID)))
 			error("Kill job error on job id %u: %s", 
@@ -262,21 +271,28 @@ _cancel_job_id (uint32_t job_id, uint16_t signal)
 }
 
 static void
-_cancel_step_id (uint32_t job_id, uint32_t step_id, uint16_t signal)
+_cancel_step_id (uint32_t job_id, uint32_t step_id, uint16_t sig)
 {
 	int error_code = SLURM_SUCCESS, i;
 
+	if (sig == (uint16_t)-1)
+		sig = SIGKILL;
+
 	for (i=0; i<MAX_CANCEL_RETRY; i++) {
-		if (signal == (uint16_t)-1) {
-			verbose("Terminating step %u.%u",
-				job_id, step_id);
-			error_code = slurm_terminate_job_step(job_id, step_id);
-		} else {
-			verbose("Signal %u to step %u.%u",
-				signal, job_id, step_id);
-			error_code = slurm_signal_job_step(job_id, step_id,
-							   signal);
+		if (sig == SIGKILL)
+			verbose("Terminating step %u.%u", job_id, step_id);
+		else {
+			verbose("Signal %u to step %u.%u", 
+				sig, job_id, step_id);
 		}
+
+		if (opt.ctld)
+			error_code = slurm_kill_job_step(job_id, step_id, sig);
+		else if (sig == SIGKILL)
+			error_code = slurm_terminate_job_step(job_id, step_id);
+		else
+			error_code = slurm_signal_job_step(job_id, step_id,
+							   sig);
 		if (error_code == 0
 		    || (errno != ESLURM_TRANSITION_STATE_NO_UPDATE
 			&& errno != ESLURM_JOB_PENDING))
@@ -286,7 +302,7 @@ _cancel_step_id (uint32_t job_id, uint32_t step_id, uint16_t signal)
 	}
 	if (error_code) {
 		error_code = slurm_get_errno();
-		if ((opt.verbose >= 0) || (error_code != ESLURM_ALREADY_DONE ))
+		if ((opt.verbose > 0) || (error_code != ESLURM_ALREADY_DONE ))
 			error("Kill job error on job step id %u.%u: %s", 
 		 		job_id, step_id, 
 				slurm_strerror(slurm_get_errno()));

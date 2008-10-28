@@ -5,7 +5,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -76,6 +76,6 @@ main (int argc, char **argv)
 	while (!sigusr1_cnt || !sigusr2_cnt) {
 		sleep(1);
 	}
-
+	printf("FINI: sig1:%d sig2:%d\n", sigusr1_cnt, sigusr2_cnt);
 	exit(0);
 }

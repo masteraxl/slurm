@@ -1,10 +1,11 @@
 /*****************************************************************************\
  *  switch_none.c - Library for managing a switch with no special handling.
  *****************************************************************************
- *  Copyright (C) 2002-2006 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -118,7 +119,7 @@ int switch_p_alloc_jobinfo ( switch_jobinfo_t *switch_job )
 }
 
 int switch_p_build_jobinfo ( switch_jobinfo_t switch_job, char *nodelist, 
-		uint32_t *tasks_per_node, int cyclic_alloc, char *network)
+		uint16_t *tasks_per_node, int cyclic_alloc, char *network)
 {
 	return SLURM_SUCCESS;
 }
@@ -221,11 +222,6 @@ extern int switch_p_get_jobinfo(switch_jobinfo_t switch_job,
 /*
  * switch functions for other purposes
  */
-bool switch_p_no_frag ( void )
-{
-	return false;
-}
-
 extern int switch_p_get_errno(void)
 {
 	return SLURM_SUCCESS;

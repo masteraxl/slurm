@@ -9,10 +9,11 @@
 # Note:    This script generates and then deletes files in the working directory 
 #          named test9.3.output
 ############################################################################
-# Copyright (C) 2002-2006 The Regents of the University of California.
+# Copyright (C) 2002-2007 The Regents of the University of California.
+# Copyright (C) 2008 Lawrence Livermore National Security.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-217948.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -34,10 +35,17 @@
 source ./globals
 
 set test_id      "9.3"
-set cycle_count  100
 set exit_code    0
 set file_in      "test$test_id.input"
 set file_out     "test$test_id.output"
+set job_name     "test$test_id"
+
+if {[test_wiki_sched] == 1} {
+	set cycle_count 5
+} else {
+	set cycle_count 100
+}
+
 if { [test_bluegene] } {
 	set node_cnt 1-2048
 } else {
@@ -56,10 +64,10 @@ print_header $test_id
 # per node, wait for completion
 # Returns 0 on successful completion, returns 1 otherwise
 proc run_cat_job { input_file output_file } {
-	global bin_cat bin_rm number srun node_cnt other_opts task_cnt timeout
+	global bin_cat bin_rm job_name number srun node_cnt other_opts task_cnt timeout
 	exec $bin_rm -f $output_file
 
-	spawn $srun -e - -i none -o $output_file -N$node_cnt -n$task_cnt $other_opts -t1 $bin_cat $input_file
+	set srun_pid [spawn $srun --job-name=$job_name -e - -i none -o $output_file -N$node_cnt -n$task_cnt $other_opts -t1 $bin_cat $input_file]
 	expect {
 		-re "Unable to contact" {
 			send_user "\nFAILURE: slurm appears to be down\n"
@@ -67,7 +75,7 @@ proc run_cat_job { input_file output_file } {
 		}
 		timeout {
 			send_user "\nFAILURE: srun not responding\n"
-			kill_srun
+			slow_kill $srun_pid
 			return 1
 		}
 		eof {
@@ -103,18 +111,24 @@ for {set inx 0} {$inx < $cycle_count} {incr inx} {
 		set stdout_lines [get_line_cnt $file_out]
 	}
 	if {$stdout_lines != $stdout_target} {
-		send_user "\nFAILURE:stdout is incomplete\n"
+		if {$stdout_lines == 0} {
+			send_user "\nFAILURE: stdout is empty, is current working directory writable from compute nodes?\n"
+		} else {
+			send_user "\nFAILURE:stdout is incomplete\n"
+		}
+		set cycle_count [expr $inx + 1]
 		set exit_code 1
+		break
 	} else {
 		incr success_cnt
 	}
 }
-exec $bin_rm -f $file_in $file_out
 
 if {$exit_code == 0} {
+	exec $bin_rm -f $file_in $file_out
 	send_user "\nSUCCESS\n"
 } else {
-	send_user "\nFAILURE: Only $success_cnt of $cycle_count hostname"
-	send_user " output tests passed\n"
+	send_user "\nFAILURE: Only $success_cnt of $cycle_count I/O"
+	send_user " tests passed\n"
 }
 exit $exit_code

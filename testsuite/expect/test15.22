@@ -12,7 +12,7 @@
 # Copyright (C) 2002-2006 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-217948.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -47,7 +47,7 @@ print_header $test_id
 #
 spawn $sinfo --summarize  
 expect {
-	-re "($end_of_line)($alpha_numeric)(\[ \*\]) *up" {
+	-re "($end_of_line)($alpha_numeric_under)(\[ \*\]) *up" {
 		if (![string compare $expect_out(3,string) "*"]) {
 			set def_part_name   $expect_out(2,string)
 		} else {
@@ -81,13 +81,11 @@ expect {
 	}
 	timeout {
 		send_user "\nFAILURE: salloc not responding\n"
-		if {$job_id == 0} {
-			slow_kill $salloc_pid
-		} else {
+		if {$job_id != 0} {
 			cancel_job $job_id
 		}
+		slow_kill [expr 0 - $salloc_pid]
 		set exit_code 1
-		exp_continue
 	}
 	eof {
 		wait
@@ -101,7 +99,7 @@ if {$job_id == 0} {
 	set read_part ""
 	spawn $scontrol show job $job_id
 	expect {
-		-re "Partition=($alpha_numeric)" {
+		-re "Partition=($alpha_numeric_under)" {
 			set read_part $expect_out(1,string)
 			exp_continue
 		}
@@ -141,13 +139,11 @@ expect {
 	}
 	timeout {
 		send_user "\nFAILURE: srun not responding\n"
-		if {$job_id == 0} {
-			slow_kill $salloc_pid
-		} else {
+		if {$job_id != 0} {
 			cancel_job $job_id
 		}
+		slow_kill [expr 0 - $salloc_pid]
 		set exit_code 1
-		exp_continue
 	}
 	eof {
 		wait
@@ -161,7 +157,7 @@ if {$job_id == 0} {
 	set read_part ""
 	spawn $scontrol show job $job_id
 	expect {
-		-re "Partition=($alpha_numeric)" {
+		-re "Partition=($alpha_numeric_under)" {
 			set read_part $expect_out(1,string)
 			exp_continue
 		}

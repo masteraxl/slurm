@@ -1,10 +1,13 @@
-.TH "bluegene.conf" "5" "March 2006" "bluegene.conf 1.1" "Slurm configuration file"
+.TH "bluegene.conf" "5" "April 2008" "bluegene.conf 1.2" "Slurm configuration file"
 .SH "NAME"
 bluegene.conf \- Slurm configuration file for BlueGene systems 
 .SH "DESCRIPTION"
 \fB/etc/bluegene.conf\fP is an ASCII file which describes BlueGene specific 
 SLURM configuration information. This includes specifications for bgblock 
 layout, configuration, logging, etc.
+The file location can be modified at system build time using the
+DEFAULT_SLURM_CONF parameter. The file will always be located in the 
+same directory as the \fBslurm.conf\fP file. 
 .LP
 Paramter names are case insensitive.
 Any text following a "#" in the configuration file is treated 
@@ -17,8 +20,46 @@ of the command "scontrol reconfigure" unless otherwise noted.
 The overall configuration parameters available include:
 
 .TP
+\fBAltBlrtsImage\fR
+Alternative BlrtsImage.  This is an optional field only used for 
+mulitple images on a system and should be followed by a Groups= with
+the user groups allowed to use this image (i.e. Groups=da,jette) if 
+Groups= is not stated then this image will be able to be used by all
+groups. You can but as many alternative images as you want in the conf file.
+
+.TP
+\fBAltLinuxImage\fR
+Alternative LinuxImage.  This is an optional field only used for 
+mulitple images on a system and should be followed by a Groups= with
+the user groups allowed to use this image (i.e. Groups=da,jette) if 
+Groups= is not stated then this image will be able to be used by all
+groups. You can but as many alternative images as you want in the conf file.
+
+.TP
+\fBAltMloaderImage\fR
+Alternative MloaderImage.  This is an optional field only used for 
+mulitple images on a system and should be followed by a Groups= with
+the user groups allowed to use this image (i.e. Groups=da,jette) if 
+Groups= is not stated then this image will be able to be used by all
+groups. You can but as many alternative images as you want in the conf file.
+
+.TP
+\fBAltRamDiskImage\fR
+Alternative RamDiskImage.  This is an optional field only used for 
+mulitple images on a system and should be followed by a Groups= with
+the user groups allowed to use this image (i.e. Groups=da,jette) if 
+Groups= is not stated then this image will be able to be used by all
+groups. You can but as many alternative images as you want in the conf file.
+
+.TP
 \fBBasePartitionNodeCount\fR
-The number of c-nodes per base partition.
+The number of c\-nodes per base partition.
+There is no default value and this must be specified. (For bgl systems this
+is usually 512)
+
+.TP
+\fBBlrtsImage\fR
+BlrtsImage used for creation of all bgblocks.
 There is no default value and this must be specified.
 
 .TP
@@ -45,28 +86,11 @@ The default value is 0.
 .RE
 
 .TP
-\fBBlrtsImage\fR
-BlrtsImage used for creation of all bgblocks.
-There is no default value and this must be specified.
-.TP
-\fBLinuxImage\fR
-LinuxImage used for creation of all bgblocks.
-There is no default value and this must be specified.
-.TP
-\fBMloaderImage\fR
-MloaderImage used for creation of all bgblocks.
-There is no default value and this must be specified.
-.TP
-\fBRamDiskImage\fR
-RamDiskImage used for creation of all bgblocks.
-There is no default value and this must be specified.
-
-.TP
 \fBLayoutMode\fR
 Describes how SLURM should create bgblocks.
 .RS
 .TP
-\fBSTATIC\fR: Create and use the defined non-overlapping bgblocks.
+\fBSTATIC\fR: Create and use the defined non\-overlapping bgblocks.
 .TP
 \fBOVERLAP\fR: Create and use the defined bgblocks, which may overlap.
 It is highly recommended that none of the bgblocks have any passthroughs 
@@ -81,14 +105,33 @@ and starvation of larger jobs.
 .RE
 
 .TP
-\fBNodeCardNodeCount\fR
-Number of c-nodes per node card.
+\fBLinuxImage\fR
+LinuxImage used for creation of all bgblocks.
 There is no default value and this must be specified.
+
+.TP
+\fBMloaderImage\fR
+MloaderImage used for creation of all bgblocks.
+There is no default value and this must be specified.
+
+.TP
+\fBNodeCardNodeCount\fR
+Number of c\-nodes per node card.
+There is no default value and this must be specified. (For bgl systems this 
+is usually 32)
 
 .TP
 \fBNumPsets\fR
 The Numpsets used for creation of all bgblocks  equals this value 
 multiplied by the number of  base partitions in the bgblock.
+There is no default value and this must be specified.  The typical settings
+for bgl systems goes as follows... For IO rich systems 64 is the value that 
+should be used to create small blocks.  For systems that are not IO rich, or 
+you do not wish to create small blocks, 8 is usually the number to use.
+
+.TP
+\fBRamDiskImage\fR
+RamDiskImage used for creation of all bgblocks.
 There is no default value and this must be specified.
 
 .LP
@@ -148,7 +191,7 @@ BlrtsImage=/bgl/BlueLight/ppcfloor/bglsys/bin/rts_hw.rts
 .br
 LinuxImage=/bgl/BlueLight/ppcfloor/bglsys/bin/zImage.elf
 .br
-MloaderImage=/bgl/BlueLight/ppcfloor/bglsys/bin/mmcs-mloader.rts
+MloaderImage=/bgl/BlueLight/ppcfloor/bglsys/bin/mmcs\-mloader.rts
 .br
 RamDiskImage=/bgl/BlueLight/ppcfloor/bglsys/bin/ramdisk.elf
 .br
@@ -156,13 +199,13 @@ BasePartitionNodeCnt=512
 .br
 NodeCardNodeCnt=32
 .br
-NumPsets=8
+NumPsets=64	# An I/O rich environment
 .br
 LayoutMode=STATIC
 .br
 ##################################################################
 .br
-# LEAVE AS COMMENT, Full-system bglblock, implicitly created
+# LEAVE AS COMMENT, Full\-system bglblock, implicitly created
 .br
 # BPs=[000x333] Type=TORUS        # 4x4x4 = 64 midplanes
 .br
@@ -185,10 +228,10 @@ BPs=[333x333] Type=SMALL NodeCards=4 Quarters=3 # 1/16 * 4 + 1/4 * 3
 .SH "COPYING"
 Copyright (C) 2006 The Regents of the University of California.
 Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
-UCRL-CODE-217948.
+LLNL\-CODE\-402394.
 .LP
 This file is part of SLURM, a resource management program.
-For details, see <http://www.llnl.gov/linux/slurm/>.
+For details, see <https://computing.llnl.gov/linux/slurm/>.
 .LP
 SLURM is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free

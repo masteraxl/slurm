@@ -1,14 +1,13 @@
 /*****************************************************************************\
  *  agent.h - data structures and function definitions for parallel 
  *	background communications
- *
- *  $Id$
  *****************************************************************************
- *  Copyright (C) 2002-2006 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette@llnl.gov>, et. al.
  *  Derived from dsh written by Jim Garlick <garlick1@llnl.gov>
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -42,12 +41,12 @@
 #ifndef _AGENT_H
 #define _AGENT_H
 
-#include "src/slurmctld/agent.h"
 #include "src/slurmctld/slurmctld.h"
 
 #define AGENT_IS_THREAD  	 1	/* set if agent itself a thread of 
 					 * slurmctld, 0 for function call */
 #define AGENT_THREAD_COUNT	10	/* maximum active threads per agent */
+#define BATCH_START_TIME	300	/* allow batch jobs 300 secs to start */
 #define COMMAND_TIMEOUT 	10	/* command requeue or error, seconds */
 #define MAX_AGENT_CNT		(MAX_SERVER_THREADS / (AGENT_THREAD_COUNT + 2))
 					/* maximum simultaneous agents, note 
@@ -59,9 +58,10 @@ typedef struct agent_arg {
 	uint32_t	node_count;	/* number of nodes to communicate 
 					 * with */
 	uint16_t	retry;		/* if set, keep trying */
-	slurm_addr	*slurm_addr;	/* array of network addresses */
-	char		*node_names;	/* array with MAX_SLURM_NAME bytes
-					 * per node */
+	slurm_addr      *addr;          /* if set will send to this
+					   addr not hostlist */
+	hostlist_t	hostlist;	/* hostlist containing the
+					 * nodes we are sending to */
 	slurm_msg_type_t msg_type;	/* RPC to be issued */
 	void		*msg_args;	/* RPC data to be transmitted */
 } agent_arg_t;
@@ -70,8 +70,8 @@ typedef struct agent_arg {
  * agent - party responsible for transmitting an common RPC in parallel 
  *	across a set of nodes. agent_queue_request() if immediate 
  *	execution is not essential.
- * IN pointer to agent_arg_t, which is xfree'd (including slurm_addr, 
- *	node_names and msg_args) upon completion if AGENT_IS_THREAD is set
+ * IN pointer to agent_arg_t, which is xfree'd (including addr,
+ *	hostlist and msg_args) upon completion if AGENT_IS_THREAD is set
  * RET always NULL (function format just for use as pthread)
  */
 extern void *agent (void *args);
@@ -87,9 +87,12 @@ extern void agent_queue_request(agent_arg_t *agent_arg_ptr);
  * agent_retry - Agent for retrying pending RPCs. One pending request is 
  *	issued if it has been pending for at least min_wait seconds
  * IN min_wait - Minimum wait time between re-issue of a pending RPC
+ * IN mai_too - Send pending email too, note this performed using a 
+ *		fork/waitpid, so it can take longer than just creating 
+ *		a pthread to send RPCs
  * RET count of queued requests remaining
  */
-extern int agent_retry (int min_wait);
+extern int agent_retry (int min_wait, bool mail_too);
 
 /* agent_purge - purge all pending RPC requests */
 extern void agent_purge (void);

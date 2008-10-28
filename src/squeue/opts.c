@@ -3,10 +3,10 @@
  *
  *  $Id$
  *****************************************************************************
- *  Copyright (C) 2002 The Regents of the University of California.
+ *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov>, Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -64,7 +64,7 @@
 /* getopt_long options, integers but not characters */
 #define OPT_LONG_HELP  0x100
 #define OPT_LONG_USAGE 0x101
-#define OPT_LONG_HIDE	0x102
+#define OPT_LONG_HIDE  0x102
 
 /* FUNCTIONS */
 static List  _build_job_list( char* str );
@@ -92,7 +92,6 @@ parse_command_line( int argc, char* argv[] )
 	char *env_val = NULL;
 	int opt_char;
 	int option_index;
-	hostlist_t host_list;
 	static struct option long_options[] = {
 		{"all",        no_argument,       0, 'a'},
 		{"noheader",   no_argument,       0, 'h'},
@@ -100,6 +99,7 @@ parse_command_line( int argc, char* argv[] )
 		{"jobs",       optional_argument, 0, 'j'},
 		{"long",       no_argument,       0, 'l'},
 		{"node",       required_argument, 0, 'n'},
+		{"nodes",      required_argument, 0, 'n'},
 		{"format",     required_argument, 0, 'o'},
 		{"partitions", required_argument, 0, 'p'},
 		{"steps",      optional_argument, 0, 's'},
@@ -154,15 +154,15 @@ parse_command_line( int argc, char* argv[] )
 				params.long_list = true;
 				break;
 			case (int) 'n':
-				xfree(params.node);
-				params.node = xstrdup(optarg);
-				host_list = hostlist_create(params.node);
-				if (!host_list) {
-					error("'%s' invalid entry for --node",
-						optarg);
+				if (params.nodes)
+					hostset_destroy(params.nodes);
+
+				params.nodes = hostset_create(optarg);
+				if (params.nodes == NULL) {
+					error("'%s' invalid entry for --nodes",
+					      optarg);
 					exit(1);
 				}
-				hostlist_destroy(host_list);
 				break;
 			case (int) 'o':
 				xfree(params.format);
@@ -236,13 +236,36 @@ parse_command_line( int argc, char* argv[] )
 		exit(1);
 	}
 
-	if ( params.node ) {
+	if ( params.nodes ) {
 		char *name1 = NULL;
-		name1 = slurm_conf_get_nodename(params.node);
-		if (name1) {
-			xfree(params.node);
-			params.node = xstrdup(name1);
+		char *name2 = NULL;
+		hostset_t nodenames = hostset_create(NULL);
+		if (nodenames == NULL)
+			fatal("malloc failure");
+
+		while ( hostset_count(params.nodes) > 0 ) {
+			name1 = hostset_pop(params.nodes);
+			
+			/* localhost = use current host name */
+			if ( strcasecmp("localhost", name1) == 0 ) {
+				name2 = xmalloc(128);
+				gethostname_short(name2, 128);
+			} else {
+				/* translate NodeHostName to NodeName */
+				name2 = slurm_conf_get_nodename(name1);
+
+				/* use NodeName if translation failed */
+				if ( name2 == NULL )
+					name2 = xstrdup(name1);
+			}
+			hostset_insert(nodenames, name2);
+			free(name1);
+			xfree(name2);
 		}
+		
+		/* Replace params.nodename with the new one */
+		hostset_destroy(params.nodes);
+		params.nodes = nodenames;
 	}
 
 	if ( ( params.partitions == NULL ) && 
@@ -341,7 +364,8 @@ extern int parse_format( char* format )
 {
 	int field_size;
 	bool right_justify;
-	char *prefix, *suffix, *token, *tmp_char, *tmp_format;
+	char *prefix = NULL, *suffix = NULL, *token = NULL;
+	char *tmp_char = NULL, *tmp_format = NULL;
 	char field[1];
 
 	if (format == NULL) {
@@ -370,7 +394,12 @@ extern int parse_format( char* format )
 		_parse_token( token, field, &field_size, &right_justify, 
 			      &suffix);
 		if (params.step_flag) {
-			if      (field[0] == 'i')
+			if      (field[0] == 'A')
+				step_format_add_num_tasks( params.format_list, 
+							   field_size, 
+							   right_justify, 
+							   suffix );
+			else if (field[0] == 'i')
 				step_format_add_id( params.format_list, 
 				                    field_size, 
 						    right_justify, suffix );
@@ -474,15 +503,30 @@ extern int parse_format( char* format )
 				                       field_size, 
 				                       right_justify, 
 				                       suffix );
+			else if (field[0] == 'H')
+				job_format_add_min_sockets( params.format_list, 
+				                           field_size, 
+				                           right_justify, 
+				                           suffix );
 			else if (field[0] == 'i')
 				job_format_add_job_id( params.format_list, 
 				                       field_size, 
 				                       right_justify, 
 				                       suffix );
+			else if (field[0] == 'I')
+				job_format_add_min_cores( params.format_list, 
+				                           field_size, 
+				                           right_justify, 
+				                           suffix );
 			else if (field[0] == 'j')
 				job_format_add_name( params.format_list, 
 				                     field_size, 
 				                     right_justify, suffix );
+			else if (field[0] == 'J')
+				job_format_add_min_threads( params.format_list, 
+				                           field_size, 
+				                           right_justify, 
+				                           suffix );
 			else if (field[0] == 'l')
 				job_format_add_time_limit( params.format_list, 
 				                           field_size, 
@@ -527,6 +571,16 @@ extern int parse_format( char* format )
 				                          field_size, 
 				                          right_justify, 
 				                          suffix );
+			else if (field[0] == 'q')
+				job_format_add_comment( params.format_list, 
+				                        field_size, 
+				                        right_justify, 
+				                        suffix );
+			else if (field[0] == 'Q')
+				 job_format_add_priority_long( params.format_list,
+							field_size,
+							right_justify,
+							suffix );
 			else if (field[0] == 'r')
 				job_format_add_reason( params.format_list,
 							field_size,
@@ -573,6 +627,26 @@ extern int parse_format( char* format )
 				                          field_size, 
 				                          right_justify, 
 				                          suffix );
+			else if (field[0] == 'X')
+				job_format_add_num_sockets( params.format_list, 
+				                           field_size, 
+				                           right_justify, 
+				                           suffix );
+			else if (field[0] == 'Y')
+				job_format_add_num_cores( params.format_list, 
+				                           field_size, 
+				                           right_justify, 
+				                           suffix );
+			else if (field[0] == 'Z')
+				job_format_add_num_threads( params.format_list, 
+				                           field_size, 
+				                           right_justify, 
+				                           suffix );
+			else if (field[0] == 'z')
+				job_format_add_num_sct( params.format_list, 
+				                           field_size, 
+				                           right_justify, 
+				                           suffix );
 			else 
 				error( "Invalid job format specification: %c", 
 				       field[0] );
@@ -650,6 +724,13 @@ _print_options()
 	enum job_states *state_id;
 	squeue_job_step_t *job_step_id;
 	uint32_t *job_id;
+	char hostlist[8192];
+
+	if (params.nodes) {
+		hostset_ranged_string(params.nodes, sizeof(hostlist)-1, 
+				      hostlist);
+	} else
+		hostlist[0] = '\0';
 
 	printf( "-----------------------------\n" );
 	printf( "all        = %s\n", params.all_flag ? "true" : "false");
@@ -658,7 +739,7 @@ _print_options()
 	printf( "job_flag   = %d\n", params.job_flag );
 	printf( "jobs       = %s\n", params.jobs );
 	printf( "max_procs  = %d\n", params.max_procs ) ;
-	printf( "node       = %s\n", params.node ) ;
+	printf( "nodes      = %s\n", hostlist ) ;
 	printf( "partitions = %s\n", params.partitions ) ;
 	printf( "sort       = %s\n", params.sort ) ;
 	printf( "states     = %s\n", params.states ) ;
@@ -727,9 +808,9 @@ static List
 _build_job_list( char* str )
 {
 	List my_list;
-	char *job, *tmp_char, *my_job_list;
+	char *job = NULL, *tmp_char = NULL, *my_job_list = NULL;
 	int i;
-	uint32_t *job_id;
+	uint32_t *job_id = NULL;
 
 	if ( str == NULL)
 		return NULL;
@@ -760,7 +841,7 @@ static List
 _build_part_list( char* str )
 {
 	List my_list;
-	char *part, *tmp_char, *my_part_list;
+	char *part = NULL, *tmp_char = NULL, *my_part_list = NULL;
 
 	if ( str == NULL)
 		return NULL;
@@ -784,8 +865,8 @@ static List
 _build_state_list( char* str )
 {
 	List my_list;
-	char *state, *tmp_char, *my_state_list;
-	enum job_states *state_id;
+	char *state = NULL, *tmp_char = NULL, *my_state_list = NULL;
+	enum job_states *state_id = NULL;
 
 	if ( str == NULL)
 		return NULL;
@@ -842,10 +923,10 @@ static List
 _build_step_list( char* str )
 {
 	List my_list;
-	char *step, *tmp_char, *tmps_char, *my_step_list;
-	char *job_name, *step_name;
+	char *step = NULL, *tmp_char = NULL, *tmps_char = NULL;
+	char *job_name = NULL, *step_name = NULL, *my_step_list = NULL;
 	int i, j;
-	squeue_job_step_t *job_step_id;
+	squeue_job_step_t *job_step_id = NULL;
 
 	if ( str == NULL)
 		return NULL;
@@ -886,9 +967,10 @@ static List
 _build_user_list( char* str )
 {
 	List my_list;
-	char *user, *tmp_char, *my_user_list, *end_ptr;
-	uint32_t *uid;
-	struct passwd *passwd_ptr;
+	char *user = NULL;
+	char *tmp_char = NULL, *my_user_list = NULL, *end_ptr = NULL;
+	uint32_t *uid = NULL;
+	struct passwd *passwd_ptr = NULL;
 
 	if ( str == NULL)
 		return NULL;
@@ -937,7 +1019,7 @@ Usage: squeue [OPTIONS]\n\
   -j, --jobs                      comma separated list of jobs\n\
                                   to view, default is all\n\
   -l, --long                      long report\n\
-  -n, --node=node_name            name of single node to view, default is \n\
+  -n, --nodes=hostlist            list of nodes to view, default is \n\
                                   all nodes\n\
   -o, --format=format             format specification\n\
   -p, --partitions=partitions     comma separated list of partitions\n\

@@ -5,7 +5,7 @@
  *  Produced at Center for High Performance Computing, North Dakota State
  *  University
  *  Written by Nathan Huff <nhuff@acm.org>
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -47,12 +47,13 @@
 #  include <inttypes.h>
 #endif
 
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
 #include <paths.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <fcntl.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <pthread.h>
@@ -63,9 +64,9 @@
 #include "src/common/slurm_protocol_defs.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
+#include "src/common/node_select.h"
 #include "src/common/list.h"
 #include "src/slurmctld/slurmctld.h"
-#include "job_record.h"
 
 /*
  * These variables are required by the generic plugin interface.  If they
@@ -98,11 +99,9 @@
  */
 const char plugin_name[]       	= "Job completion logging script plugin";
 const char plugin_type[]       	= "jobcomp/script";
-const uint32_t plugin_version	= 90;
+const uint32_t plugin_version	= 100;
 
-static int plugin_errno = SLURM_SUCCESS;
 static char * script = NULL;
-static char error_str[256];
 static List comp_list = NULL;
 
 static pthread_t script_thread = 0;
@@ -112,266 +111,384 @@ static pthread_cond_t comp_list_cond = PTHREAD_COND_INITIALIZER;
 static int agent_exit = 0;
 
 /*
+ *  Local plugin errno
+ */
+static int plugin_errno = SLURM_SUCCESS;
+
+static struct jobcomp_errno {
+	int n;
+	const char *descr;
+} errno_table [] = {
+	{ 0,      "No Error"              },
+	{ EACCES, "Script access denied"  },
+	{ EEXIST, "Script does not exist" },
+	{ EINVAL, "JocCompLoc invalid"    },
+	{ -1,     "Unknown Error"         }
+};
+
+/*
+ *  Return string representation of plugin errno
+ */
+static const char * _jobcomp_script_strerror (int errnum)
+{
+	struct jobcomp_errno *ep = errno_table;
+
+	while ((ep->n != errnum) && (ep->n != -1))
+		ep++;
+
+	return (ep->descr);
+}
+
+/*
+ *  Structure for holding job completion information for later
+ *   use by script;
+ */
+struct jobcomp_info {
+	uint32_t jobid;
+	uint32_t uid;
+	uint32_t gid;
+	uint32_t limit;
+	uint32_t nprocs;
+	uint32_t nnodes;
+	uint16_t batch_flag;
+	time_t submit;
+	time_t start;
+	time_t end;
+	char *nodes;
+	char *name;
+	char *partition;
+	char *jobstate;
+	char *account;
+#ifdef HAVE_BG
+	char *connect_type;
+	char *reboot;
+	char *rotate;
+	char *maxprocs;
+	char *geometry;
+	char *block_start;
+	char *blockid;
+#endif
+};
+
+static struct jobcomp_info * _jobcomp_info_create (struct job_record *job)
+{
+	enum job_states state;
+	struct jobcomp_info * j = xmalloc (sizeof (*j));
+
+	j->jobid = job->job_id;
+	j->uid = job->user_id;
+	j->gid = job->group_id;
+	j->name = xstrdup (job->name);
+
+	/*
+	 *  Job will typically be COMPLETING when this code is called.
+	 *  We remove the COMPLETING flag to hopefully get the evenual
+	 *  completion state: e.g.: JOB_FAILED, TIMEOUT, ....
+	 */
+	state = job->job_state & (~JOB_COMPLETING);
+	j->jobstate = xstrdup (job_state_string (state));
+
+	j->partition = xstrdup (job->partition);
+	j->limit = job->time_limit;
+	j->start = job->start_time;
+	j->end = job->end_time;
+	j->submit = job->details ? job->details->submit_time:job->start_time;
+	j->batch_flag = job->batch_flag;
+	j->nodes = xstrdup (job->nodes);
+	j->nprocs = job->total_procs;
+	j->nnodes = job->node_cnt;
+	j->account = job->account ? xstrdup (job->account) : NULL;
+#ifdef HAVE_BG
+	j->connect_type = select_g_xstrdup_jobinfo(job->select_jobinfo,
+						   SELECT_PRINT_CONNECTION);
+	j->reboot = select_g_xstrdup_jobinfo(job->select_jobinfo,
+					     SELECT_PRINT_REBOOT);
+	j->rotate = select_g_xstrdup_jobinfo(job->select_jobinfo,
+					     SELECT_PRINT_ROTATE);
+	j->maxprocs = select_g_xstrdup_jobinfo(job->select_jobinfo,
+					       SELECT_PRINT_MAX_PROCS);
+	j->geometry = select_g_xstrdup_jobinfo(job->select_jobinfo,
+					       SELECT_PRINT_GEOMETRY);
+	j->block_start = select_g_xstrdup_jobinfo(job->select_jobinfo,
+						  SELECT_PRINT_START);
+	j->blockid = select_g_xstrdup_jobinfo(job->select_jobinfo,
+					      SELECT_PRINT_BG_ID);
+#endif
+	return (j);
+}
+
+static void _jobcomp_info_destroy (struct jobcomp_info *j)
+{
+	if (j == NULL)
+		return;
+	xfree (j->name);
+	xfree (j->partition);
+	xfree (j->nodes);
+	xfree (j->jobstate);
+	xfree (j->account);
+#ifdef HAVE_BG
+	xfree (j->connect_type);
+	xfree (j->reboot);
+	xfree (j->rotate);
+	xfree (j->maxprocs);
+	xfree (j->geometry);
+	xfree (j->block_start);
+	xfree (j->blockid);
+#endif
+	xfree (j);
+}
+
+/*
  * Check if the script exists and if we can execute it.
  */
 static int 
-_check_script_permissions(char * location)
+_check_script_permissions(char * path)
 {
-	struct stat filestat;
-	uid_t user;
-	gid_t group;
+	struct stat st;
 
-	if(stat(location,&filestat) < 0) {
+	if (stat(path, &st) < 0) {
 		plugin_errno = errno;
-		return error("jobcomp/script script does not exist");
+		return error("jobcomp/script: failed to stat %s: %m", path);
 	}
 
-	if(!(filestat.st_mode&S_IFREG)) {
+	if (!(st.st_mode & S_IFREG)) {
 		plugin_errno = EACCES;
-		return error("jobcomp/script script isn't a regular file");
-	}
-	
-	user = geteuid();
-	group = getegid();
-	if(user == filestat.st_uid) {
-		if (filestat.st_mode&S_IXUSR) {
-			return SLURM_SUCCESS;
-		} else {
-			plugin_errno = EACCES;
-			return error("jobcomp/script script is not executable");
-		}
-	} else if(group == filestat.st_gid) {
-		if (filestat.st_mode&S_IXGRP) {
-			return SLURM_SUCCESS;
-		} else {
-			plugin_errno = EACCES;
-			return error("jobcomp/script script is not executable");
-		}
-	} else if(filestat.st_mode&S_IXOTH) {
-		return SLURM_SUCCESS;
+		return error("jobcomp/script: %s isn't a regular file", path);
 	}
 
-	plugin_errno = EACCES;
-	return error("jobcomp/script script is not executable");
+	if (access(path, X_OK) < 0) {
+		plugin_errno = EACCES;
+		return error("jobcomp/script: %s is not executable", path);
+	}
+
+	return SLURM_SUCCESS;
 }
 
-
-/* Create a new environment pointer containing information from 
- * slurm_jobcomp_log_record so that the script can access it.
- */
-static char ** _create_environment(char *job, char *user, char *job_name,
-	char *job_state, char *partition, char *limit, char* start, char * end,
-	char * submit, char * batch, char *node_list)
+static char ** _extend_env (char ***envp)
 {
-	int len = 0;
-	char ** envptr;
-	char *ptr;
+	char **ep;
+	size_t newcnt = (xsize (*envp) / sizeof (char *)) + 1;
 
-	len += strlen(job)+7;
-	len += strlen(user)+5;
-	len += strlen(job_name)+9;
-	len += strlen(job_state)+10;
-	len += strlen(partition)+11;
-	len += strlen(limit)+7;
-	len += strlen(start)+7;
-	len += strlen(end)+5;
-	len += strlen(node_list)+7;
-        len += strlen(submit)+7;
-        len += strlen(batch)+6;
-#ifdef _PATH_STDPATH
-	len += strlen(_PATH_STDPATH)+6;
-#endif
-	len += (13*sizeof(char *));
+	*envp = xrealloc (*envp, newcnt * sizeof (char *));
 
-	if(!(envptr = (char **)try_xmalloc(len))) return NULL;
+	(*envp)[newcnt - 1] = NULL;
+	ep = &((*envp)[newcnt - 2]);
 
-	ptr = (char *)envptr + (11*sizeof(char *));
+	/* 
+	 *  Find last non-NULL entry
+	 */
+	while (*ep == NULL)
+		--ep;
 
-	envptr[0] = ptr;
-	memcpy(ptr,"JOBID=",6);
-	ptr += 6;
-	memcpy(ptr,job,strlen(job)+1);
-	ptr += strlen(job)+1;
-	
-	envptr[1] = ptr;
-	memcpy(ptr,"UID=",4);
-	ptr += 4;
-	memcpy(ptr,user,strlen(user)+1);
-	ptr += strlen(user)+1;
-	
-	envptr[2] = ptr;
-	memcpy(ptr,"JOBNAME=",8);
-	ptr += 8;
-	memcpy(ptr,job_name,strlen(job_name)+1);
-	ptr += strlen(job_name)+1;
-	
-	envptr[3] = ptr;
-	memcpy(ptr,"JOBSTATE=",9);
-	ptr += 9;
-	memcpy(ptr,job_state,strlen(job_state)+1);
-	ptr += strlen(job_state)+1;
-
-	envptr[4] = ptr;
-	memcpy(ptr,"PARTITION=",10);
-	ptr += 10;
-	memcpy(ptr,partition,strlen(partition)+1);
-	ptr += strlen(partition)+1;
-
-	envptr[5] = ptr;
-	memcpy(ptr,"LIMIT=",6);
-	ptr += 6;
-	memcpy(ptr,limit,strlen(limit)+1);
-	ptr += strlen(limit)+1;
-
-	envptr[6] = ptr;
-	memcpy(ptr,"START=",6);
-	ptr += 6;
-	memcpy(ptr,start,strlen(start)+1);
-	ptr += strlen(start)+1;
-
-	envptr[7] = ptr;
-	memcpy(ptr,"END=",4);
-	ptr += 4;
-	memcpy(ptr,end,strlen(end)+1);
-	ptr += strlen(end)+1;
-
-	envptr[8] = ptr;
-	memcpy(ptr,"NODES=",6);
-	ptr += 6;
-	memcpy(ptr,node_list,strlen(node_list)+1);
-	ptr += strlen(node_list)+1;
-
-	envptr[9] = ptr;
-	memcpy(ptr,"SUBMIT=",7);
-	ptr += 7;
-	memcpy(ptr,submit,strlen(submit)+1);
-	ptr += strlen(submit)+1;
-
-	envptr[10] = ptr;
-	memcpy(ptr, "BATCH=",6);
-	ptr += 6;
-	memcpy(ptr,batch,strlen(batch)+1);
-	ptr += strlen(batch)+1;
-
-#ifdef _PATH_STDPATH
-	envptr[11] = ptr;
-	memcpy(ptr,"PATH=",5);
-	ptr += 5;
-	memcpy(ptr,_PATH_STDPATH,strlen(_PATH_STDPATH)+1);
-	ptr += strlen(_PATH_STDPATH)+1;
-
-	envptr[12] = NULL;
-#else
-	envptr[11] = NULL;
-#endif
-	
-	return envptr;
+	return (++ep);
 }
+
+static int _env_append (char ***envp, const char *name, const char *val)
+{
+	char *entry = NULL;
+	char **ep;
+
+	if (val == NULL)
+		val = "";
+
+	xstrfmtcat (entry, "%s=%s", name, val);
+
+	if (entry == NULL)
+		return (-1);
+
+	ep = _extend_env (envp);
+	*ep = entry;
+
+	return (0);
+}
+
+static int _env_append_fmt (char ***envp, const char *name, 
+		const char *fmt, ...)
+{
+	char val[1024];
+	va_list ap;
+
+	va_start (ap, fmt);
+	vsnprintf (val, sizeof (val) - 1, fmt, ap);
+	va_end (ap);
+
+	return (_env_append (envp, name, val));
+}
+
+static char ** _create_environment (struct jobcomp_info *job)
+{
+	char **env;
+	char *tz;
+
+	env = xmalloc (1 * sizeof (*env));
+	env[0] = NULL;
+
+	_env_append_fmt (&env, "JOBID", "%u",  job->jobid);
+	_env_append_fmt (&env, "UID",   "%u",  job->uid);
+	_env_append_fmt (&env, "GID",   "%u",  job->gid);
+	_env_append_fmt (&env, "START", "%lu", job->start);
+	_env_append_fmt (&env, "END",   "%lu", job->end);
+	_env_append_fmt (&env, "SUBMIT","%lu", job->submit);
+	_env_append_fmt (&env, "PROCS", "%u",  job->nprocs);
+	_env_append_fmt (&env, "NODECNT", "%u", job->nnodes);
+
+	_env_append (&env, "BATCH", (job->batch_flag ? "yes" : "no"));
+	_env_append (&env, "NODES",     job->nodes);
+	_env_append (&env, "ACCOUNT",   job->account);
+	_env_append (&env, "JOBNAME",   job->name);
+	_env_append (&env, "JOBSTATE",  job->jobstate);
+	_env_append (&env, "PARTITION", job->partition);
+	
+#ifdef HAVE_BG
+	_env_append (&env, "CONNECT_TYPE", job->connect_type);
+	_env_append (&env, "REBOOT",       job->reboot);
+	_env_append (&env, "ROTATE",       job->rotate);
+	_env_append (&env, "MAXPROCS",     job->maxprocs);
+	_env_append (&env, "GEOMETRY",     job->geometry);
+	_env_append (&env, "BLOCK_START",  job->block_start);
+	_env_append (&env, "BLOCKID",      job->blockid);
+#endif
+
+	if (job->limit == INFINITE)
+		_env_append (&env, "LIMIT", "UNLIMITED");
+	else 
+		_env_append_fmt (&env, "LIMIT", "%lu", job->limit);
+
+	if ((tz = getenv ("TZ")))
+		_env_append_fmt (&env, "TZ", "%s", tz);
+#ifdef _PATH_STDPATH
+	_env_append (&env, "PATH", _PATH_STDPATH);
+#else
+	_env_append (&env, "PATH", "/bin:/usr/bin");
+#endif
+
+	return (env);
+}
+
+static int _redirect_stdio (void)
+{
+	int devnull;
+	if ((devnull = open ("/dev/null", O_RDWR)) < 0)
+		return error ("jobcomp/script: Failed to open /dev/null: %m");
+	if (dup2 (devnull, STDIN_FILENO) < 0)
+		return error ("jobcomp/script: Failed to redirect stdin: %m");
+	if (dup2 (devnull, STDOUT_FILENO) < 0)
+		return error ("jobcomp/script: Failed to redirect stdout: %m");
+	if (dup2 (devnull, STDERR_FILENO) < 0)
+		return error ("jobcomp/script: Failed to redirect stderr: %m");
+	close (devnull);
+	return (0);
+}
+
+static void _jobcomp_child (char * script, struct jobcomp_info *job)
+{
+	char * args[] = {script, NULL};
+	const char *tmpdir;
+	char **env;
+
+#ifdef _PATH_TMP
+	tmpdir = _PATH_TMP;
+#else
+	tmpdir = "/tmp";
+#endif
+	/*
+	 * Reinitialize log so we can log any errors for 
+	 *  diagnosis
+	 */
+	log_reinit ();
+
+	if (_redirect_stdio () < 0)
+		exit (1);
+
+	if (chdir (tmpdir) != 0) {
+		error ("jobcomp/script: chdir (%s): %m", _PATH_TMP);
+		exit(1);
+	}
+
+	if (!(env = _create_environment (job))) {
+		error ("jobcomp/script: Failed to create env!");
+		exit (1);
+	}
+
+	execve(script, args, env);
+
+	/*
+	 * Failure of execve implies error
+	 */
+	error ("jobcomp/script: execve(%s): %m\n", script);
+	exit (1);
+}
+
+static int _jobcomp_exec_child (char *script, struct jobcomp_info *job)
+{
+	pid_t pid;
+	int status = 0;
+
+	if (script == NULL || job == NULL)
+		return (-1);
+
+	if ((pid = fork()) < 0) {
+		error ("jobcomp/script: fork: %m");
+		return (-1);
+	}
+
+	if (pid == 0)
+		_jobcomp_child (script, job);
+
+	/*
+	 *  Parent continues
+	 */
+
+	if (waitpid(pid, &status, 0) < 0)
+		error ("jobcomp/script: waitpid: %m");
+
+	if (WEXITSTATUS(status)) 
+		error ("jobcomp/script: script %s exited with status %d\n",
+		       script, WEXITSTATUS(status));
+
+	return (0);
+}
+
 
 /*
  * Thread function that executes a script
  */
-void *script_agent (void *args) {
-	pid_t pid = -1;
-	char user_id_str[32],job_id_str[32], nodes_cache[1];
-	char start_str[32], end_str[32], lim_str[32];
-	char submit_str[32], *batch_str;
-	char * argvp[] = {script, NULL};
-	int status;
-	char ** envp, * nodes;
-	job_record job;
+static void * _script_agent (void *args) 
+{
+	while (1) {
+		struct jobcomp_info *job;
 
-	while(1) {
 		pthread_mutex_lock(&comp_list_mutex);
-		while ((list_is_empty(comp_list) != 0) && (agent_exit == 0)) {
+
+		if (list_is_empty(comp_list) && !agent_exit)
 			pthread_cond_wait(&comp_list_cond, &comp_list_mutex);
-		}
-		if (agent_exit) {
-			pthread_mutex_unlock(&comp_list_mutex);
-			return NULL;
-		}
-		job = (job_record)list_pop(comp_list);
+
+		/*
+		 * It is safe to unlock list mutex here. List has its
+		 *  own internal mutex that protects the comp_list itself
+		 */
 		pthread_mutex_unlock(&comp_list_mutex);
 
-		snprintf(user_id_str,sizeof(user_id_str),"%u",job->user_id);
-		snprintf(job_id_str,sizeof(job_id_str),"%u",job->job_id);
-		snprintf(start_str, sizeof(start_str),"%lu",
-			(unsigned long)job->start);
-		snprintf(end_str, sizeof(end_str),"%lu",
-			(unsigned long)job->end);
-		snprintf(submit_str, sizeof(submit_str),"%lu",
-			(unsigned long)job->submit);
-		if (job->batch_flag)
-			batch_str = "yes";
-		else
-			batch_str = "no"; 
-		nodes_cache[0] = '\0';
-
-		if (job->limit == INFINITE) {
-			strcpy(lim_str, "UNLIMITED");
-		} else {
-			snprintf(lim_str, sizeof(lim_str), "%lu", 
-				(unsigned long) job->limit);
-		}
-	
-		if(job->node_list == NULL) {
-			nodes = nodes_cache;
-		} else {
-			nodes = job->node_list;
+		if ((job = list_pop(comp_list))) {
+			_jobcomp_exec_child (script, job);
+			_jobcomp_info_destroy (job);
 		}
 
-		/*Setup environment*/
-		envp = _create_environment(job_id_str,user_id_str,
-					job->job_name, job->job_state,
-					job->partition, lim_str,
-					start_str,end_str,submit_str,
-					batch_str,nodes);
-
-		if(envp == NULL) {
-			plugin_errno = ENOMEM;
-		}
-
-		pid = fork();
-
-		if (pid < 0) {
-			xfree(envp);
-			job_record_destroy((void *)job);
-			plugin_errno = errno;
-		} else if (pid == 0) {
-			/*Change directory to tmp*/
-			if (chdir(_PATH_TMP) != 0) {
-				exit(errno);
-			}
-
-			/*Redirect stdin, stderr, and stdout to /dev/null*/
-			if (freopen(_PATH_DEVNULL, "rb", stdin) == NULL) {
-				exit(errno);
-			}
-			if (freopen(_PATH_DEVNULL, "wb", stdout) == NULL) {
-				exit(errno);
-			}
-			if (freopen(_PATH_DEVNULL, "wb", stderr) == NULL) {
-				exit(errno);
-			}
-		
-			/*Exec Script*/
-			execve(script,argvp,envp);
-		} else {
-			xfree(envp);
-			job_record_destroy((void *)job);
-			waitpid(pid,&status,0);
-			if(WIFEXITED(status) && WEXITSTATUS(status)) {
-				plugin_errno = WEXITSTATUS(status);
-			}
-		}
+		/*
+		 *  Exit if flag is set and we have no more entries to log
+		 */
+		if (agent_exit && list_is_empty (comp_list))
+			break;
 	}
+
+	return NULL;
 }
 
 /*
  * init() is called when the plugin is loaded, before any other functions
  * are called.  Put global initialization here.
  */
-int init ( void )
+extern int init (void)
 {
 	pthread_attr_t attr;
 
@@ -379,8 +496,10 @@ int init ( void )
 
 	pthread_mutex_lock(&thread_flag_mutex);
 
-	comp_list = list_create((ListDelF) job_record_destroy);
-	if(comp_list == NULL) {
+	if (comp_list)
+		error("Creating duplicate comp_list, possible memory leak");
+	if (!(comp_list = list_create((ListDelF) _jobcomp_info_destroy))) {
+		pthread_mutex_unlock(&thread_flag_mutex);
 		return SLURM_ERROR;
 	}
 
@@ -389,9 +508,10 @@ int init ( void )
 		pthread_mutex_unlock(&thread_flag_mutex);
 		return SLURM_ERROR;
 	}
+
 	slurm_attr_init(&attr);
-	pthread_attr_setdetachstate( &attr, PTHREAD_CREATE_DETACHED );
-	pthread_create(&script_thread, &attr, script_agent, NULL);
+	pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+	pthread_create(&script_thread, &attr, _script_agent, NULL);
 	
 	pthread_mutex_unlock(&thread_flag_mutex);
 	slurm_attr_destroy(&attr);
@@ -400,16 +520,15 @@ int init ( void )
 }
 
 /* Set the location of the script to run*/
-int slurm_jobcomp_set_location ( char * location )
+extern int slurm_jobcomp_set_location (char * location)
 {
 	if (location == NULL) {
 		plugin_errno = EACCES;
 		return error("jobcomp/script JobCompLoc needs to be set");
 	}
 
-	if (_check_script_permissions(location) != SLURM_SUCCESS) {
+	if (_check_script_permissions(location) != SLURM_SUCCESS)
 		return SLURM_ERROR;
-	}
 
 	xfree(script);
 	script = xstrdup(location);
@@ -417,46 +536,34 @@ int slurm_jobcomp_set_location ( char * location )
 	return SLURM_SUCCESS;
 }
 
-int slurm_jobcomp_log_record ( struct job_record *job_ptr )
+int slurm_jobcomp_log_record (struct job_record *record)
 {
-	job_record job;
-	enum job_states job_state;
-	time_t submit;
+	struct jobcomp_info * job;
 
 	debug3("Entering slurm_jobcomp_log_record");
-	/* Job will typically be COMPLETING when this is called. 
-	 * We remove this flag to get the eventual completion state:
-	 * JOB_FAILED, JOB_TIMEOUT, etc. */
-	job_state = job_ptr->job_state & (~JOB_COMPLETING);
 
-	if (job_ptr->details)
-		submit = job_ptr->details->submit_time;
-	else
-		submit = job_ptr->start_time;
+	if (!(job = _jobcomp_info_create (record))) 
+		return error ("jobcomp/script: Failed to create job info!");
 
-	job = job_record_create(job_ptr->job_id, job_ptr->user_id, job_ptr->name,
-				job_state_string(job_state), 
-				job_ptr->partition, job_ptr->time_limit,
-				job_ptr->start_time, job_ptr->end_time,
-				submit, job_ptr->batch_flag, job_ptr->nodes);
 	pthread_mutex_lock(&comp_list_mutex);
-	list_append(comp_list,(void *)job);
+	list_append(comp_list, job);
 	pthread_mutex_unlock(&comp_list_mutex);
+
 	pthread_cond_broadcast(&comp_list_cond);
+
 	return SLURM_SUCCESS;
 }
 
 /* Return the error code of the plugin*/
-int slurm_jobcomp_get_errno( void )
+extern int slurm_jobcomp_get_errno(void)
 {
 	return plugin_errno;
 }
 
 /* Return a string representation of the error */
-char *slurm_jobcomp_strerror( int errnum )
+extern const char * slurm_jobcomp_strerror(int errnum)
 {
-	strerror_r(errnum,error_str,sizeof(error_str));
-	return error_str;
+	return _jobcomp_script_strerror (errnum);
 }
 
 static int _wait_for_thread (pthread_t thread_id)
@@ -468,12 +575,18 @@ static int _wait_for_thread (pthread_t thread_id)
 			return SLURM_SUCCESS;
 		usleep(1000);
 	}
-	error("Could not kill jobcomp script pthread");
+
+	/*
+	 * jobcomp thread appears to be stuck, try harder:
+	 */
+	if (pthread_kill(thread_id, SIGKILL))
+		error("Could not kill jobcomp script pthread");
+
 	return SLURM_ERROR;
 }
 
 /* Called when script unloads */
-int fini ( void )
+extern int fini ( void )
 {
 	int rc = SLURM_SUCCESS;
 
@@ -491,8 +604,32 @@ int fini ( void )
 	if (rc == SLURM_SUCCESS) {
 		pthread_mutex_lock(&comp_list_mutex);
 		list_destroy(comp_list);
+		comp_list = NULL;
 		pthread_mutex_unlock(&comp_list_mutex);
 	}
 
 	return rc;
+}
+
+/* 
+ * get info from the storage 
+ * in/out job_list List of job_rec_t *
+ * note List needs to be freed when called
+ */
+extern List slurm_jobcomp_get_jobs(List selected_steps,
+				   List selected_parts,
+				   void *params)
+{
+
+	info("This function is not implemented.");
+	return NULL;
+}
+
+/* 
+ * expire old info from the storage 
+ */
+extern void slurm_jobcomp_archive(List selected_parts, void *params)
+{
+	info("This function is not implemented.");
+	return;
 }

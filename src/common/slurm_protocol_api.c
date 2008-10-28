@@ -1,11 +1,11 @@
 /*****************************************************************************\
  *  slurm_protocol_api.c - high-level slurm communication functions
- *  $Id$
  *****************************************************************************
- *  Copyright (C) 2002-2006 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Kevin Tew <tew1@llnl.gov>, et. al.
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -16,7 +16,7 @@
  *  any later version.
  *
  *  In addition, as a special exception, the copyright holders give permission 
- *  to link the code of portions of this program with the OpenSSL library under 
+ *  to link the code of portions of this program with the OpenSSL library under
  *  certain conditions as described in each individual source file, and 
  *  distribute linked combinations including the two. You must obey the GNU 
  *  General Public License in all respects for all of the code used other than 
@@ -54,6 +54,7 @@
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
+#include <ctype.h>
 
 /* PROJECT INCLUDES */
 #include "src/common/macros.h"
@@ -69,6 +70,7 @@
 #include "src/common/xstring.h"
 #include "src/common/log.h"
 #include "src/common/forward.h"
+#include "src/slurmdbd/read_config.h"
 
 /* EXTERNAL VARIABLES */
 
@@ -82,9 +84,15 @@
 static slurm_protocol_config_t proto_conf_default;
 static slurm_protocol_config_t *proto_conf = &proto_conf_default;
 /* static slurm_ctl_conf_t slurmctld_conf; */
+static int message_timeout = -1;
 
 /* STATIC FUNCTIONS */
-static void _remap_slurmctld_errno(void);
+static char *_global_auth_key(void);
+static void  _remap_slurmctld_errno(void);
+static int   _unpack_msg_uid(Buf buffer);
+
+/* define the slurmdbd_options flag */
+slurm_dbd_conf_t *slurmdbd_conf = NULL;
 
 /**********************************************************************\
  * protocol configuration functions
@@ -173,6 +181,23 @@ void slurm_api_clear_config(void)
 	slurm_conf_destroy();
 }
 
+/* slurm_get_complete_wait
+ * RET CompleteWait value from slurm.conf
+ */
+uint16_t slurm_get_complete_wait(void)
+{
+	uint16_t complete_wait = 0;
+	slurm_ctl_conf_t *conf;
+
+	if(slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		complete_wait = conf->complete_wait;
+		slurm_conf_unlock();
+	}
+	return complete_wait;
+}
+
 /* update internal configuration data structure as needed.
  *	exit with lock set */
 /* static inline void _lock_update_config() */
@@ -181,18 +206,106 @@ void slurm_api_clear_config(void)
 /* 	slurm_mutex_lock(&config_lock); */
 /* } */
 
+/* slurm_get_def_mem_per_task
+ * RET DefMemPerTask value from slurm.conf
+ */
+uint32_t slurm_get_def_mem_per_task(void)
+{
+	uint32_t mem_per_task = 0;
+	slurm_ctl_conf_t *conf;
+
+	if(slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		mem_per_task = conf->def_mem_per_task;
+		slurm_conf_unlock();
+	}
+	return mem_per_task;
+}
+
+/* slurm_get_debug_flags
+ * RET DebugFlags value from slurm.conf
+ */
+uint32_t slurm_get_debug_flags(void)
+{
+	uint32_t debug_flags = 0;
+	slurm_ctl_conf_t *conf;
+
+	if(slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		debug_flags = conf->debug_flags;
+		slurm_conf_unlock();
+	}
+	return debug_flags;
+}
+
+/* slurm_get_max_mem_per_task
+ * RET MaxMemPerTask value from slurm.conf
+ */
+uint32_t slurm_get_max_mem_per_task(void)
+{
+	uint32_t mem_per_task = 0;
+	slurm_ctl_conf_t *conf;
+
+	if(slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		mem_per_task = conf->max_mem_per_task;
+		slurm_conf_unlock();
+	}
+	return mem_per_task;
+}
+
+/* slurm_get_epilog_msg_time
+ * RET EpilogMsgTime value from slurm.conf
+ */
+uint32_t slurm_get_epilog_msg_time(void)
+{
+	uint32_t epilog_msg_time = 0;
+	slurm_ctl_conf_t *conf;
+
+ 	if(slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		epilog_msg_time = conf->epilog_msg_time;
+		slurm_conf_unlock();
+	}
+	return epilog_msg_time;
+}
+
+/* slurm_get_env_timeout
+ * return default timeout for srun/sbatch --get-user-env option
+ */
+int inline slurm_get_env_timeout(void)
+{
+	int timeout = 0;
+	slurm_ctl_conf_t *conf;
+
+	if(slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		timeout = conf->get_env_timeout;
+		slurm_conf_unlock();
+	}
+	return timeout;
+}
+
 /* slurm_get_mpi_default
  * get default mpi value from slurmctld_conf object
  * RET char *   - mpi default value from slurm.conf,  MUST be xfreed by caller
  */
 char *slurm_get_mpi_default(void)
 {
-	char *mpi_default;
+	char *mpi_default = NULL;
 	slurm_ctl_conf_t *conf;
 
-	conf = slurm_conf_lock();
-	mpi_default = xstrdup(conf->mpi_default);
-	slurm_conf_unlock();
+	if(slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		mpi_default = xstrdup(conf->mpi_default);
+		slurm_conf_unlock();
+	}
 	return mpi_default;
 }
 
@@ -201,16 +314,20 @@ char *slurm_get_mpi_default(void)
  */
 uint16_t slurm_get_msg_timeout(void)
 {
-        uint16_t msg_timeout;
-        slurm_ctl_conf_t *conf;
+	uint16_t msg_timeout = 0;
+	slurm_ctl_conf_t *conf;
 
-        conf = slurm_conf_lock();
-        msg_timeout = conf->msg_timeout;
-        slurm_conf_unlock();
+ 	if(slurmdbd_conf) {
+		msg_timeout = slurmdbd_conf->msg_timeout;
+	} else {
+		conf = slurm_conf_lock();
+		msg_timeout = conf->msg_timeout;
+		slurm_conf_unlock();
 #ifdef MEMORY_LEAK_DEBUG
-        msg_timeout *= 4;
+		msg_timeout *= 4;
 #endif
-        return msg_timeout;
+	}
+	return msg_timeout;
 }
 
 /* slurm_get_plugin_dir
@@ -219,13 +336,53 @@ uint16_t slurm_get_msg_timeout(void)
  */
 char *slurm_get_plugin_dir(void)
 {
-	char *plugin_dir;
+	char *plugin_dir = NULL;
 	slurm_ctl_conf_t *conf;
 
-	conf = slurm_conf_lock();
-	plugin_dir = xstrdup(conf->plugindir);
-	slurm_conf_unlock();
+	if(slurmdbd_conf) {
+		plugin_dir = xstrdup(slurmdbd_conf->plugindir);
+	} else {
+		conf = slurm_conf_lock();
+		plugin_dir = xstrdup(conf->plugindir);
+		slurm_conf_unlock();
+	}
 	return plugin_dir;
+}
+
+/* slurm_get_private_data
+ * get private data from slurmctld_conf object
+ */
+uint16_t slurm_get_private_data(void)
+{
+	uint16_t private_data = 0;
+	slurm_ctl_conf_t *conf;
+
+	if(slurmdbd_conf) {
+		private_data = slurmdbd_conf->private_data;
+	} else {
+		conf = slurm_conf_lock();
+		private_data = conf->private_data;
+		slurm_conf_unlock();
+	}
+	return private_data;
+}
+
+/* slurm_get_state_save_location
+ * get state_save_location from slurmctld_conf object from slurmctld_conf object 
+ * RET char *   - state_save_location directory, MUST be xfreed by caller
+ */
+char *slurm_get_state_save_location(void)
+{
+	char *state_save_loc = NULL;
+	slurm_ctl_conf_t *conf;
+
+	if(slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		state_save_loc = xstrdup(conf->state_save_location);
+		slurm_conf_unlock();
+	}
+	return state_save_loc;
 }
 
 /* slurm_get_auth_type
@@ -234,13 +391,71 @@ char *slurm_get_plugin_dir(void)
  */
 char *slurm_get_auth_type(void)
 {
-	char *auth_type;
+	char *auth_type = NULL;
+	slurm_ctl_conf_t *conf = NULL;
+
+	if(slurmdbd_conf) {
+		auth_type = xstrdup(slurmdbd_conf->auth_type);
+	} else {
+		conf = slurm_conf_lock();
+		auth_type = xstrdup(conf->authtype);
+		slurm_conf_unlock();
+	}
+	return auth_type;
+}
+
+/* slurm_get_checkpoint_type
+ * returns the checkpoint_type from slurmctld_conf object
+ * RET char *    - checkpoint type, MUST be xfreed by caller
+ */
+extern char *slurm_get_checkpoint_type(void)
+{
+	char *checkpoint_type = NULL;
 	slurm_ctl_conf_t *conf;
 
-	conf = slurm_conf_lock();
-	auth_type = xstrdup(conf->authtype);
-	slurm_conf_unlock();
-	return auth_type;
+	if(slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		checkpoint_type = xstrdup(conf->checkpoint_type);
+		slurm_conf_unlock();
+	}
+	return checkpoint_type;
+}
+
+/* slurm_get_cluster_name
+ * returns the cluster name from slurmctld_conf object
+ * RET char *    - cluster name,  MUST be xfreed by caller
+ */
+char *slurm_get_cluster_name(void)
+{
+	char *name = NULL;
+	slurm_ctl_conf_t *conf;
+
+	if(slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		name = xstrdup(conf->cluster_name);
+		slurm_conf_unlock();
+	}
+	return name;	
+}
+
+/* slurm_get_crypto_type
+ * returns the crypto_type from slurmctld_conf object
+ * RET char *    - crypto type, MUST be xfreed by caller
+ */
+extern char *slurm_get_crypto_type(void)
+{
+	char *crypto_type = NULL;
+	slurm_ctl_conf_t *conf;
+
+	if(slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		crypto_type = xstrdup(conf->crypto_type);
+		slurm_conf_unlock();
+	}
+	return crypto_type;
 }
 
 /* slurm_get_propagate_prio_process
@@ -248,13 +463,16 @@ char *slurm_get_auth_type(void)
  */
 extern uint16_t slurm_get_propagate_prio_process(void)
 {
-        uint16_t propagate_prio;
-        slurm_ctl_conf_t *conf;
+	uint16_t propagate_prio = 0;
+	slurm_ctl_conf_t *conf;
 
-        conf = slurm_conf_lock();
-        propagate_prio = conf->propagate_prio_process;
-        slurm_conf_unlock();
-        return propagate_prio;
+ 	if(slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		propagate_prio = conf->propagate_prio_process;
+		slurm_conf_unlock();
+	}
+	return propagate_prio;
 }
 
 /* slurm_get_fast_schedule
@@ -262,12 +480,15 @@ extern uint16_t slurm_get_propagate_prio_process(void)
  */
 extern uint16_t slurm_get_fast_schedule(void)
 {
-	uint16_t fast_val;
+	uint16_t fast_val = 0;
 	slurm_ctl_conf_t *conf;
 
-	conf = slurm_conf_lock();
-	fast_val = conf->fast_schedule;
-	slurm_conf_unlock();
+	if(slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		fast_val = conf->fast_schedule;
+		slurm_conf_unlock();
+	}
 	return fast_val;
 }
 
@@ -279,26 +500,32 @@ extern int slurm_set_tree_width(uint16_t tree_width)
 {
 	slurm_ctl_conf_t *conf;
 
-	conf = slurm_conf_lock();
-	if (tree_width == 0) {
-		error("can't have span count of 0");
-		return SLURM_ERROR;
+	if(slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		if (tree_width == 0) {
+			error("can't have span count of 0");
+			return SLURM_ERROR;
+		}
+		conf->tree_width = tree_width;
+		slurm_conf_unlock();
 	}
-	conf->tree_width = tree_width;
-	slurm_conf_unlock();
-	return SLURM_SUCCESS;
+	return 0;
 }
 /* slurm_get_tree_width
  * returns the value of tree_width in slurmctld_conf object
  */
 extern uint16_t slurm_get_tree_width(void)
 {
-	uint16_t tree_width;
+	uint16_t tree_width = 0;
 	slurm_ctl_conf_t *conf;
 
-	conf = slurm_conf_lock();
-	tree_width = conf->tree_width;
-	slurm_conf_unlock();
+	if(slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		tree_width = conf->tree_width;
+		slurm_conf_unlock();
+	}
 	return tree_width;
 }
 
@@ -311,56 +538,287 @@ extern int slurm_set_auth_type(char *auth_type)
 {
 	slurm_ctl_conf_t *conf;
 
-	conf = slurm_conf_lock();
-	xfree(conf->authtype);
-	conf->authtype = xstrdup(auth_type);
-	slurm_conf_unlock();
+	if(slurmdbd_conf) {
+		xfree(slurmdbd_conf->auth_type);
+		slurmdbd_conf->auth_type = xstrdup(auth_type);		
+	} else {
+		conf = slurm_conf_lock();
+		xfree(conf->authtype);
+		conf->authtype = xstrdup(auth_type);
+		slurm_conf_unlock();
+	}
 	return 0;
 }
 
-/* slurm_get_jobacct_loc
- * returns the job accounting loc from the slurmctld_conf object
- * RET char *    - job accounting loc,  MUST be xfreed by caller
+/* slurm_get_health_check_program
+ * get health_check_program from slurmctld_conf object from slurmctld_conf object
+ * RET char *   - health_check_program, MUST be xfreed by caller
  */
-char *slurm_get_jobacct_loc(void)
+char *slurm_get_health_check_program(void)
 {
-	char *jobacct_logfile;
+	char *health_check_program = NULL;
 	slurm_ctl_conf_t *conf;
 
-	conf = slurm_conf_lock();
-	jobacct_logfile = xstrdup(conf->job_acct_logfile);
-	slurm_conf_unlock();
-	return jobacct_logfile;
+	if(slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		health_check_program = xstrdup(conf->health_check_program);
+		slurm_conf_unlock();
+	}
+	return health_check_program;
+}
+
+/* slurm_get_accounting_storage_type
+ * returns the accounting storage type from slurmctld_conf object
+ * RET char *    - accounting storage type,  MUST be xfreed by caller
+ */
+char *slurm_get_accounting_storage_type(void)
+{
+	char *accounting_type;
+	slurm_ctl_conf_t *conf;
+
+	if(slurmdbd_conf) {
+		accounting_type = xstrdup(slurmdbd_conf->storage_type);
+	} else {
+		conf = slurm_conf_lock();
+		accounting_type = xstrdup(conf->accounting_storage_type);
+		slurm_conf_unlock();
+	}
+	return accounting_type;
+	
+}
+
+/* slurm_get_accounting_storage_user
+ * returns the storage user from slurmctld_conf object
+ * RET char *    - storage user,  MUST be xfreed by caller
+ */
+char *slurm_get_accounting_storage_user(void)
+{
+	char *storage_user;
+	slurm_ctl_conf_t *conf;
+
+	if(slurmdbd_conf) {
+		storage_user = xstrdup(slurmdbd_conf->storage_user);
+	} else {
+		conf = slurm_conf_lock();
+		storage_user = xstrdup(conf->accounting_storage_user);
+		slurm_conf_unlock();
+	}
+	return storage_user;	
+}
+
+/* slurm_get_accounting_storage_host
+ * returns the storage host from slurmctld_conf object
+ * RET char *    - storage host,  MUST be xfreed by caller
+ */
+char *slurm_get_accounting_storage_host(void)
+{
+	char *storage_host;
+	slurm_ctl_conf_t *conf;
+
+	if(slurmdbd_conf) {
+		storage_host = xstrdup(slurmdbd_conf->storage_host);
+	} else {
+		conf = slurm_conf_lock();
+		storage_host = xstrdup(conf->accounting_storage_host);
+		slurm_conf_unlock();
+	}
+	return storage_host;	
+}
+
+/* slurm_get_accounting_storage_loc
+ * returns the storage location from slurmctld_conf object
+ * RET char *    - storage location,  MUST be xfreed by caller
+ */
+char *slurm_get_accounting_storage_loc(void)
+{
+	char *storage_loc;
+	slurm_ctl_conf_t *conf;
+
+	if(slurmdbd_conf) {
+		storage_loc = xstrdup(slurmdbd_conf->storage_loc);
+	} else {
+		conf = slurm_conf_lock();
+		storage_loc = xstrdup(conf->accounting_storage_loc);
+		slurm_conf_unlock();
+	}
+	return storage_loc;	
+}
+
+/* slurm_get_accounting_storage_enforce
+ * returns what level to enforce associations at
+ */
+int slurm_get_accounting_storage_enforce(void)
+{
+	int enforce = 0;
+	slurm_ctl_conf_t *conf;
+
+	if(slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		enforce = conf->accounting_storage_enforce;
+		slurm_conf_unlock();
+	}
+	return enforce;	
+
+}
+
+/* slurm_get_is_association_based_accounting
+ * returns if we are doing accounting by associations
+ */
+int slurm_get_is_association_based_accounting(void)
+{
+	int enforce = 0;
+	slurm_ctl_conf_t *conf;
+
+	if(slurmdbd_conf) {
+		return 1;
+	} else {
+		conf = slurm_conf_lock();
+		if(!strcasecmp(conf->accounting_storage_type, 
+			      "accounting_storage/slurmdbd")
+		   || strcasecmp(conf->accounting_storage_type,
+				 "accounting_storage/mysql")) 
+			enforce = 1;
+		slurm_conf_unlock();
+	}
+	return enforce;	
+
+}
+
+/* slurm_set_accounting_storage_loc
+ * IN: char *loc (name of file or database)
+ * RET 0 or error code
+ */
+int slurm_set_accounting_storage_loc(char *loc)
+{
+	slurm_ctl_conf_t *conf;
+
+	if(slurmdbd_conf) {
+		xfree(slurmdbd_conf->storage_loc);
+		slurmdbd_conf->storage_loc = xstrdup(loc);
+	} else {
+		conf = slurm_conf_lock();
+		xfree(conf->accounting_storage_loc);
+		conf->accounting_storage_loc = xstrdup(loc);
+		slurm_conf_unlock();
+	}
+	return 0;	
+}
+
+/* slurm_get_accounting_storage_pass
+ * returns the storage password from slurmctld_conf object
+ * RET char *    - storage password,  MUST be xfreed by caller
+ */
+char *slurm_get_accounting_storage_pass(void)
+{
+	char *storage_pass;
+	slurm_ctl_conf_t *conf;
+
+	if(slurmdbd_conf) {
+		storage_pass = xstrdup(slurmdbd_conf->storage_pass);
+	} else {
+		conf = slurm_conf_lock();
+		storage_pass = xstrdup(conf->accounting_storage_pass);
+		slurm_conf_unlock();
+	}
+	return storage_pass;
+}
+
+/* _global_auth_key
+ * returns the storage password from slurmctld_conf or slurmdbd_conf object
+ * cache value in local buffer for best performance
+ * RET char *    - storage password
+ */
+static char *_global_auth_key(void)
+{
+	static bool loaded_storage_pass = false;
+	static char storage_pass[512] = "\0";
+	static char *storage_pass_ptr = NULL;
+	slurm_ctl_conf_t *conf;
+
+	if(loaded_storage_pass)
+		return storage_pass_ptr;
+
+	if(slurmdbd_conf) {
+		if(slurmdbd_conf->auth_info) {
+			if(strlen(slurmdbd_conf->auth_info) > 
+			   sizeof(storage_pass))
+				fatal("AuthInfo is too long");
+			strncpy(storage_pass, slurmdbd_conf->auth_info, 
+				sizeof(storage_pass));
+			storage_pass_ptr = storage_pass;
+		}
+	} else {
+		conf = slurm_conf_lock();
+		if(conf->accounting_storage_pass) {
+			if(strlen(conf->accounting_storage_pass) > 
+			   sizeof(storage_pass))
+				fatal("AccountingStoragePass is too long");
+			strncpy(storage_pass, conf->accounting_storage_pass, 
+				sizeof(storage_pass));
+			storage_pass_ptr = storage_pass;
+		}
+		slurm_conf_unlock();
+	}
+	loaded_storage_pass = true;
+	return storage_pass_ptr;
+}
+
+/* slurm_get_accounting_storage_port
+ * returns the storage port from slurmctld_conf object
+ * RET uint32_t   - storage port
+ */
+uint32_t slurm_get_accounting_storage_port(void)
+{
+	uint32_t storage_port;
+	slurm_ctl_conf_t *conf;
+
+	if(slurmdbd_conf) {
+		storage_port = slurmdbd_conf->storage_port;
+	} else {
+		conf = slurm_conf_lock();
+		storage_port = conf->accounting_storage_port;
+		slurm_conf_unlock();
+	}
+	return storage_port;
+	
+}
+
+/* slurm_get_jobacct_gather_type
+ * returns the job accounting type from the slurmctld_conf object
+ * RET char *    - job accounting type,  MUST be xfreed by caller
+ */
+char *slurm_get_jobacct_gather_type(void)
+{
+	char *jobacct_type = NULL;
+	slurm_ctl_conf_t *conf;
+
+	if(slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		jobacct_type = xstrdup(conf->job_acct_gather_type);
+		slurm_conf_unlock();
+	}
+	return jobacct_type;
 }
 
 /* slurm_get_jobacct_freq
  * returns the job accounting poll frequency from the slurmctld_conf object
  * RET int    - job accounting frequency
  */
-uint16_t slurm_get_jobacct_freq(void)
+uint16_t slurm_get_jobacct_gather_freq(void)
 {
-	uint16_t freq;
+	uint16_t freq = 0;
 	slurm_ctl_conf_t *conf;
 
-	conf = slurm_conf_lock();
-	freq = conf->job_acct_freq;
-	slurm_conf_unlock();
+	if(slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		freq = conf->job_acct_gather_freq;
+		slurm_conf_unlock();
+	}
 	return freq;
-}
-
-/* slurm_get_jobacct_type
- * returns the job accounting type from the slurmctld_conf object
- * RET char *    - job accounting type,  MUST be xfreed by caller
- */
-char *slurm_get_jobacct_type(void)
-{
-	char *jobacct_type;
-	slurm_ctl_conf_t *conf;
-
-	conf = slurm_conf_lock();
-	jobacct_type = xstrdup(conf->job_acct_type);
-	slurm_conf_unlock();
-	return jobacct_type;
 }
 
 /* slurm_get_jobcomp_type
@@ -369,13 +827,107 @@ char *slurm_get_jobacct_type(void)
  */
 char *slurm_get_jobcomp_type(void)
 {
-	char *jobcomp_type;
+	char *jobcomp_type = NULL;
 	slurm_ctl_conf_t *conf;
 
-	conf = slurm_conf_lock();
-	jobcomp_type = xstrdup(conf->job_comp_type);
-	slurm_conf_unlock();
+	if(slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		jobcomp_type = xstrdup(conf->job_comp_type);
+		slurm_conf_unlock();
+	}
 	return jobcomp_type;
+}
+
+/* slurm_get_jobcomp_loc
+ * returns the job completion loc from slurmctld_conf object
+ * RET char *    - job completion location,  MUST be xfreed by caller
+ */
+char *slurm_get_jobcomp_loc(void)
+{
+	char *jobcomp_loc = 0;
+	slurm_ctl_conf_t *conf;
+
+	if(slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		jobcomp_loc = xstrdup(conf->job_comp_loc);
+		slurm_conf_unlock();
+	}
+	return jobcomp_loc;	
+}
+
+/* slurm_get_jobcomp_user
+ * returns the storage user from slurmctld_conf object
+ * RET char *    - storage user,  MUST be xfreed by caller
+ */
+char *slurm_get_jobcomp_user(void)
+{
+	char *storage_user = NULL;
+	slurm_ctl_conf_t *conf;
+
+	if(slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		storage_user = xstrdup(conf->job_comp_user);
+		slurm_conf_unlock();
+	}
+	return storage_user;	
+}
+
+/* slurm_get_jobcomp_host
+ * returns the storage host from slurmctld_conf object
+ * RET char *    - storage host,  MUST be xfreed by caller
+ */
+char *slurm_get_jobcomp_host(void)
+{
+	char *storage_host = NULL;
+	slurm_ctl_conf_t *conf;
+
+	if(slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		storage_host = xstrdup(conf->job_comp_host);
+		slurm_conf_unlock();
+	}
+	return storage_host;	
+}
+
+/* slurm_get_jobcomp_pass
+ * returns the storage password from slurmctld_conf object
+ * RET char *    - storage password,  MUST be xfreed by caller
+ */
+char *slurm_get_jobcomp_pass(void)
+{
+	char *storage_pass = NULL;
+	slurm_ctl_conf_t *conf;
+
+	if(slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		storage_pass = xstrdup(conf->job_comp_pass);
+		slurm_conf_unlock();
+	}
+	return storage_pass;	
+}
+
+/* slurm_get_jobcomp_port
+ * returns the storage port from slurmctld_conf object
+ * RET uint32_t   - storage port
+ */
+uint32_t slurm_get_jobcomp_port(void)
+{
+	uint32_t storage_port = 0;
+	slurm_ctl_conf_t *conf;
+
+	if(slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		storage_port = conf->job_comp_port;
+		slurm_conf_unlock();
+	}
+	return storage_port;
+	
 }
 
 /* slurm_get_proctrack_type
@@ -384,12 +936,15 @@ char *slurm_get_jobcomp_type(void)
  */
 char *slurm_get_proctrack_type(void)
 {
-	char *proctrack_type;
+	char *proctrack_type = NULL;
 	slurm_ctl_conf_t *conf;
 
-	conf = slurm_conf_lock();
-	proctrack_type = xstrdup(conf->proctrack_type);
-	slurm_conf_unlock();
+	if(slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		proctrack_type = xstrdup(conf->proctrack_type);
+		slurm_conf_unlock();
+	}
 	return proctrack_type;
 }
 
@@ -399,12 +954,15 @@ char *slurm_get_proctrack_type(void)
  */
 uint16_t slurm_get_slurmd_port(void)
 {
-	uint16_t slurmd_port;
+	uint16_t slurmd_port = 0;
 	slurm_ctl_conf_t *conf;
 
-	conf = slurm_conf_lock();
-	slurmd_port = conf->slurmd_port;
-	slurm_conf_unlock();
+	if(slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		slurmd_port = conf->slurmd_port;
+		slurm_conf_unlock();
+	}
 	return slurmd_port;
 }
 
@@ -414,13 +972,48 @@ uint16_t slurm_get_slurmd_port(void)
  */
 uint32_t slurm_get_slurm_user_id(void)
 {
-	uint32_t slurm_uid;
+	uint32_t slurm_uid = 0;
 	slurm_ctl_conf_t *conf;
 
-	conf = slurm_conf_lock();
-	slurm_uid = conf->slurm_user_id;
-	slurm_conf_unlock();
+	if(slurmdbd_conf) {
+		slurm_uid = slurmdbd_conf->slurm_user_id;
+	} else {
+		conf = slurm_conf_lock();
+		slurm_uid = conf->slurm_user_id;
+		slurm_conf_unlock();
+	}
 	return slurm_uid;
+}
+
+/* slurm_get_root_filter
+ * RET uint16_t  - Value of SchedulerRootFilter */
+extern uint16_t slurm_get_root_filter(void)
+{
+	uint16_t root_filter = 0;
+	slurm_ctl_conf_t *conf;
+ 
+ 	if(slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		root_filter = conf->schedrootfltr;
+		slurm_conf_unlock();
+	}
+	return root_filter;
+}
+/* slurm_get_sched_port
+ * RET uint16_t  - Value of SchedulerPort */
+extern uint16_t slurm_get_sched_port(void)
+{
+	uint16_t port = 0;
+	slurm_ctl_conf_t *conf;
+
+ 	if(slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		port = conf->schedport;
+		slurm_conf_unlock();
+	}
+	return port;
 }
 
 /* slurm_get_sched_type
@@ -429,12 +1022,15 @@ uint32_t slurm_get_slurm_user_id(void)
  */
 char *slurm_get_sched_type(void)
 {
-	char *sched_type;
+	char *sched_type = NULL;
 	slurm_ctl_conf_t *conf;
 
-	conf = slurm_conf_lock();
-	sched_type = xstrdup(conf->schedtype);
-	slurm_conf_unlock();
+	if(slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		sched_type = xstrdup(conf->schedtype);
+		slurm_conf_unlock();
+	}
 	return sched_type;
 }
 
@@ -444,12 +1040,15 @@ char *slurm_get_sched_type(void)
  */
 char *slurm_get_select_type(void)
 {
-	char *select_type;
+	char *select_type = NULL;
 	slurm_ctl_conf_t *conf;
 
-	conf = slurm_conf_lock();
-	select_type = xstrdup(conf->select_type);
-	slurm_conf_unlock();
+	if(slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		select_type = xstrdup(conf->select_type);
+		slurm_conf_unlock();
+	}
 	return select_type;
 }
 
@@ -459,7 +1058,7 @@ char *slurm_get_select_type(void)
  */
 char *slurm_get_switch_type(void)
 {
-	char *switch_type;
+	char *switch_type = NULL;
 	slurm_ctl_conf_t *conf;
 
 	conf = slurm_conf_lock();
@@ -474,12 +1073,15 @@ char *slurm_get_switch_type(void)
  */
 uint16_t slurm_get_wait_time(void)
 {
-	uint16_t wait_time;
+	uint16_t wait_time = 0;
 	slurm_ctl_conf_t *conf;
 
-	conf = slurm_conf_lock();
-	wait_time = conf->wait_time;
-	slurm_conf_unlock();
+	if(slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		wait_time = conf->wait_time;
+		slurm_conf_unlock();
+	}
 	return wait_time;
 }
 
@@ -489,12 +1091,15 @@ uint16_t slurm_get_wait_time(void)
  */
 char *slurm_get_srun_prolog(void)
 {
-	char *prolog;
+	char *prolog = NULL;
 	slurm_ctl_conf_t *conf;
 
-	conf = slurm_conf_lock();
-	prolog = xstrdup(conf->srun_prolog);
-	slurm_conf_unlock();
+	if(slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		prolog = xstrdup(conf->srun_prolog);
+		slurm_conf_unlock();
+	}
 	return prolog;
 }
 
@@ -504,12 +1109,15 @@ char *slurm_get_srun_prolog(void)
  */
 char *slurm_get_srun_epilog(void)
 {
-	char *epilog;
+	char *epilog = NULL;
 	slurm_ctl_conf_t *conf;
 
-	conf = slurm_conf_lock();
-	epilog = xstrdup(conf->srun_epilog);
-	slurm_conf_unlock();
+	if(slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		epilog = xstrdup(conf->srun_epilog);
+		slurm_conf_unlock();
+	}
 	return epilog;
 }
 
@@ -517,40 +1125,62 @@ char *slurm_get_srun_epilog(void)
  * RET task_epilog name, must be xfreed by caller */
 char *slurm_get_task_epilog(void)
 {
-        char *task_epilog;
+	char *task_epilog = NULL;
 	slurm_ctl_conf_t *conf;
 
-	conf = slurm_conf_lock();
-        task_epilog = xstrdup(conf->task_epilog);
-	slurm_conf_unlock();
-        return task_epilog;
+	if(slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		task_epilog = xstrdup(conf->task_epilog);
+		slurm_conf_unlock();
+	}
+	return task_epilog;
 }
 
 /* slurm_get_task_prolog
  * RET task_prolog name, must be xfreed by caller */
 char *slurm_get_task_prolog(void)
 {
-        char *task_prolog;
+	char *task_prolog = NULL;
 	slurm_ctl_conf_t *conf;
 
-	conf = slurm_conf_lock();
-        task_prolog = xstrdup(conf->task_prolog);
-	slurm_conf_unlock();
-        return task_prolog;
+	if(slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		task_prolog = xstrdup(conf->task_prolog);
+		slurm_conf_unlock();
+	}
+	return task_prolog;
 }
 
 /* slurm_get_task_plugin
  * RET task_plugin name, must be xfreed by caller */
 char *slurm_get_task_plugin(void)
 {
-        char *task_plugin;
+	char *task_plugin = NULL;
 	slurm_ctl_conf_t *conf;
 
 	conf = slurm_conf_lock();
-        task_plugin = xstrdup(conf->task_plugin);
+	task_plugin = xstrdup(conf->task_plugin);
 	slurm_conf_unlock();
-        return task_plugin;
+	return task_plugin;
 }
+
+/* slurm_get_task_plugin_param */
+uint16_t slurm_get_task_plugin_param(void)
+{
+	uint16_t task_plugin_param = 0;
+	slurm_ctl_conf_t *conf;
+
+	if(slurmdbd_conf) {
+	} else {
+		conf = slurm_conf_lock();
+		task_plugin_param = conf->task_plugin_param;
+		slurm_conf_unlock();
+	}
+	return task_plugin_param;
+}
+
 /* Change general slurm communication errors to slurmctld specific errors */
 static void _remap_slurmctld_errno(void)
 {
@@ -631,44 +1261,57 @@ int slurm_shutdown_msg_conn(slurm_fd fd)
  *	is defined to only receive messages from the address/port pair  
  *	argument of the connect call slurm_address - for now it is  
  *	really just a sockaddr_in
- * IN slurm_address     - slurm_addr of the connection destination
- * RET slurm_fd         - file descriptor of the connection created
+ * IN slurm_address	- slurm_addr of the connection destination
+ * RET slurm_fd		- file descriptor of the connection created
  */
 slurm_fd slurm_open_msg_conn(slurm_addr * slurm_address)
 {
 	return _slurm_open_msg_conn(slurm_address);
 }
 
-/* calls connect to make a connection-less datagram connection to the 
- *	primary or secondary slurmctld message engine
+/* Calls connect to make a connection-less datagram connection to the 
+ *	primary or secondary slurmctld message engine. If the controller
+ *	is very busy the connect may fail, so retry a couple of times.
+ * OUT addr     - address of controller contacted
  * RET slurm_fd	- file descriptor of the connection created
  */
-slurm_fd slurm_open_controller_conn()
+slurm_fd slurm_open_controller_conn(slurm_addr *addr)
 {
 	slurm_fd fd;
 	slurm_ctl_conf_t *conf;
+	int retry, have_backup = 0;
 
 	if (slurm_api_set_default_config() < 0)
 		return SLURM_FAILURE;
 
-	if ((fd = slurm_open_msg_conn(&proto_conf->primary_controller)) >= 0)
-		return fd;
-	
-	debug("Failed to contact primary controller: %m");
+	for (retry=0; retry<4; retry++) {
+		if (retry)
+			sleep(1);
 
-	conf = slurm_conf_lock();
-	if (!conf->backup_controller) {
-		slurm_conf_unlock();
-		goto fail;
+		addr = &proto_conf->primary_controller;
+		fd = slurm_open_msg_conn(&proto_conf->primary_controller);
+		if (fd >= 0)
+			return fd;
+		debug("Failed to contact primary controller: %m");
+
+		if (retry == 0) {
+			conf = slurm_conf_lock();
+			if (conf->backup_controller)
+				have_backup = 1;
+			slurm_conf_unlock();
+		}
+
+		if (have_backup) {
+			addr = &proto_conf->secondary_controller;
+			fd = slurm_open_msg_conn(&proto_conf->
+						 secondary_controller);
+			if (fd >= 0)
+				return fd;
+			debug("Failed to contact secondary controller: %m");
+		}
 	}
-	slurm_conf_unlock();
 
-	if ((fd = slurm_open_msg_conn(&proto_conf->secondary_controller)) >= 0)
-		return fd;
-
-	debug("Failed to contact secondary controller: %m");
-
-    fail:
+	addr = NULL;
 	slurm_seterrno_ret(SLURMCTLD_COMMUNICATIONS_CONNECTION_ERROR);
 }
 
@@ -686,18 +1329,37 @@ slurm_fd slurm_open_controller_conn_spec(enum controller_id dest)
 		debug3("Error: Unable to set default config");
 		return SLURM_ERROR;
 	}
-		
-	addr = (dest == PRIMARY_CONTROLLER) ? 
-		  &proto_conf->primary_controller : 
-		  &proto_conf->secondary_controller;
 
-	if (!addr) return SLURM_ERROR;
+	if (dest == PRIMARY_CONTROLLER)
+		addr = &proto_conf->primary_controller;
+	else {	/* (dest == SECONDARY_CONTROLLER) */
+		slurm_ctl_conf_t *conf;
+		addr = NULL;
+		conf = slurm_conf_lock();
+		if (conf->backup_addr)
+			addr = &proto_conf->secondary_controller;
+		slurm_conf_unlock();
+		if (!addr)
+			return SLURM_ERROR;
+	}
 
 	rc = slurm_open_msg_conn(addr);
 	if (rc == -1)
 		_remap_slurmctld_errno();
 	return rc;
 }
+
+/* gets the slurm_addr of the specified controller
+ *	primary or secondary slurmctld message engine
+ * IN dest      - controller to contact, primary or secondary
+ * OUT addr     - slurm_addr to the specified controller
+ */
+void slurm_get_controller_addr_spec(enum controller_id dest, slurm_addr *addr)
+{
+	addr = (dest == PRIMARY_CONTROLLER) ? 
+		  &proto_conf->primary_controller : 
+		  &proto_conf->secondary_controller;
+} 
 
 /* In the bsd implmentation maps directly to a accept call 
  * IN open_fd		- file descriptor to accept connection on
@@ -725,16 +1387,14 @@ int slurm_close_accepted_conn(slurm_fd open_fd)
 \**********************************************************************/
 
 /*
- * NOTE: memory is allocated for the returned msg and the returned list
- *       both must be freed at some point using the slurm_free_functions 
- *       and list_destroy function.
+ * NOTE: memory is allocated for the returned msg must be freed at 
+ *       some point using the slurm_free_functions.
  * IN open_fd	- file descriptor to receive msg on
  * OUT msg	- a slurm_msg struct to be filled in by the function
  * IN timeout	- how long to wait in milliseconds
- * RET List	- List containing the responses of the childern (if any) we 
- *                forwarded the message to. List containing type (ret_types_t).
+ * RET int	- returns 0 on success, -1 on failure and sets errno
  */
-List slurm_receive_msg(slurm_fd fd, slurm_msg_t *msg, int timeout)
+int slurm_receive_msg(slurm_fd fd, slurm_msg_t *msg, int timeout)
 {
 	char *buf = NULL;
 	size_t buflen = 0;
@@ -742,26 +1402,22 @@ List slurm_receive_msg(slurm_fd fd, slurm_msg_t *msg, int timeout)
 	int rc;
 	void *auth_cred = NULL;
 	Buf buffer;
-	ret_types_t *ret_type = NULL;
-	List ret_list = list_create(destroy_ret_types);
 
 	xassert(fd >= 0);
 
 	slurm_msg_t_init(msg);
 	msg->conn_fd = fd;
 	
-	if (timeout == 0)
+	if (timeout <= 0)
 		/* convert secs to msec */
-                timeout  = slurm_get_msg_timeout() * 1000; 
+		timeout  = slurm_get_msg_timeout() * 1000; 
 
-	if(timeout >= (slurm_get_msg_timeout() * 10000)) {
-		error("You are sending a message with timeout's greater "
-		      "than %d seconds, your's is %d seconds", 
-		      (slurm_get_msg_timeout() * 10), 
-		      (timeout/1000));
+	else if(timeout > (slurm_get_msg_timeout() * 10000)) {
+		debug("You are receiving a message with very long "
+		      "timeout of %d seconds", (timeout/1000));
 	} else if(timeout < 1000) {
-		debug("You are sending a message with a very short timeout of "
-		      "%d milliseconds", timeout);
+		error("You are receiving a message with a very short "
+		      "timeout of %d msecs", timeout);
 	} 
 	
 
@@ -788,28 +1444,387 @@ List slurm_receive_msg(slurm_fd fd, slurm_msg_t *msg, int timeout)
 	}
 	
 	if (check_header_version(&header) < 0) {
+		int uid = _unpack_msg_uid(buffer);
+		error("Invalid Protocol Version %u from uid=%d", 
+			header.version, uid);
 		free_buf(buffer);
 		rc = SLURM_PROTOCOL_VERSION_ERROR;
 		goto total_return;
 	}
 	//info("ret_cnt = %d",header.ret_cnt);
 	if(header.ret_cnt > 0) {
-		while((ret_type = list_pop(header.ret_list)) != NULL)
-			list_push(ret_list, ret_type);
+		error("we received more than one message back use "
+		      "slurm_receive_msgs instead");
 		header.ret_cnt = 0;
 		list_destroy(header.ret_list);
 		header.ret_list = NULL;
 	}
 	
+	
+	/* Forward message to other nodes */
+	if(header.forward.cnt > 0) {
+		error("We need to forward this to other nodes use "
+		      "slurm_receive_msg_and_forward instead");
+	}
+	
+	if ((auth_cred = g_slurm_auth_unpack(buffer)) == NULL) {
+		error( "authentication: %s ",
+			g_slurm_auth_errstr(g_slurm_auth_errno(NULL)));
+		free_buf(buffer);
+		rc = ESLURM_PROTOCOL_INCOMPLETE_PACKET;
+		goto total_return;
+	}
+	if(header.flags & SLURM_GLOBAL_AUTH_KEY) {
+		rc = g_slurm_auth_verify( auth_cred, NULL, 2, 
+					  _global_auth_key() );
+	} else
+		rc = g_slurm_auth_verify( auth_cred, NULL, 2, NULL );
+	
+	if (rc != SLURM_SUCCESS) {
+		error( "authentication: %s ",
+		       g_slurm_auth_errstr(g_slurm_auth_errno(auth_cred)));
+		(void) g_slurm_auth_destroy(auth_cred);
+		free_buf(buffer);
+		rc = SLURM_PROTOCOL_AUTHENTICATION_ERROR;
+		goto total_return;
+	}	
+
+	/*
+	 * Unpack message body 
+	 */
+	msg->msg_type = header.msg_type;
+	msg->flags = header.flags;
+	
+	if ( (header.body_length > remaining_buf(buffer)) ||
+	     (unpack_msg(msg, buffer) != SLURM_SUCCESS) ) {
+		(void) g_slurm_auth_destroy(auth_cred);
+		free_buf(buffer);
+		rc = ESLURM_PROTOCOL_INCOMPLETE_PACKET;
+		goto total_return;
+	}
+	
+	msg->auth_cred = (void *)auth_cred;
+
+	free_buf(buffer);
+	rc = SLURM_SUCCESS;
+	
+total_return:
+	destroy_forward(&header.forward);
+	
+	slurm_seterrno(rc);
+	if(rc != SLURM_SUCCESS) {
+		msg->auth_cred = (void *) NULL;
+		error("slurm_receive_msg: %s", slurm_strerror(rc));
+		rc = -1;
+	} else {
+		rc = 0;
+	}
+	return rc;
+		
+}
+
+/*
+ * NOTE: memory is allocated for the returned list
+ *       and must be freed at some point using the list_destroy function.
+ * IN open_fd	- file descriptor to receive msg on
+ * IN steps	- how many steps down the tree we have to wait for
+ * IN timeout	- how long to wait in milliseconds
+ * RET List	- List containing the responses of the childern (if any) we
+ *		  forwarded the message to. List containing type
+ *		  (ret_data_info_t).
+ */
+List slurm_receive_msgs(slurm_fd fd, int steps, int timeout)
+{
+	char *buf = NULL;
+	size_t buflen = 0;
+	header_t header;
+	int rc;
+	void *auth_cred = NULL;
+	slurm_msg_t msg;
+	Buf buffer;
+	ret_data_info_t *ret_data_info = NULL;
+	List ret_list = NULL;
+	int orig_timeout = timeout;
+
+	xassert(fd >= 0);
+
+	slurm_msg_t_init(&msg);
+	msg.conn_fd = fd;
+	
+	if(timeout <= 0) {
+		/* convert secs to msec */
+		timeout  = slurm_get_msg_timeout() * 1000; 
+		orig_timeout = timeout;
+	}
+	if(steps) {
+		if (message_timeout < 0)
+			message_timeout = slurm_get_msg_timeout() * 1000;
+		orig_timeout = (timeout -
+				(message_timeout*(steps-1)))/steps;
+		steps--;
+	} 
+
+	debug4("orig_timeout was %d we have %d steps and a timeout of %d",
+	       orig_timeout, steps, timeout);
+	/* we compare to the orig_timeout here because that is really
+	 *  what we are going to wait for each step
+	 */
+	if(orig_timeout >= (slurm_get_msg_timeout() * 10000)) {
+		debug("slurm_receive_msgs: "
+		      "You are sending a message with timeout's greater "
+		      "than %d seconds, your's is %d seconds", 
+		      (slurm_get_msg_timeout() * 10), 
+		      (timeout/1000));
+	} else if(orig_timeout < 1000) {
+		debug("slurm_receive_msgs: "
+		      "You are sending a message with a very short timeout of "
+		      "%d milliseconds each step in the tree has %d "
+		      "milliseconds", timeout, orig_timeout);
+	} 
+	
+
+	/*
+	 * Receive a msg. slurm_msg_recvfrom() will read the message
+	 *  length and allocate space on the heap for a buffer containing
+	 *  the message. 
+	 */
+	if(_slurm_msg_recvfrom_timeout(fd, &buf, &buflen, 0, timeout) < 0) {
+		forward_init(&header.forward, NULL);
+		rc = errno;		
+		goto total_return;
+	}
+	
+#if	_DEBUG
+	_print_data (buftemp, rc);
+#endif
+	buffer = create_buf(buf, buflen);
+
+	if(unpack_header(&header, buffer) == SLURM_ERROR) {
+		free_buf(buffer);
+		rc = SLURM_COMMUNICATIONS_RECEIVE_ERROR;
+		goto total_return;
+	}
+	
+	if(check_header_version(&header) < 0) {
+		int uid = _unpack_msg_uid(buffer);
+		error("Invalid Protocol Version %u from uid=%d",
+			header.version, uid);
+		free_buf(buffer);
+		rc = SLURM_PROTOCOL_VERSION_ERROR;
+		goto total_return;
+	}
+	//info("ret_cnt = %d",header.ret_cnt);
+	if(header.ret_cnt > 0) {
+		ret_list = list_create(destroy_data_info);
+		while((ret_data_info = list_pop(header.ret_list)))
+			list_push(ret_list, ret_data_info);
+		header.ret_cnt = 0;
+		list_destroy(header.ret_list);
+		header.ret_list = NULL;
+	}
+	
+	/* Forward message to other nodes */
+	if(header.forward.cnt > 0) {
+		error("We need to forward this to other nodes use "
+		      "slurm_receive_msg_and_forward instead");
+	}
+	
+	if((auth_cred = g_slurm_auth_unpack(buffer)) == NULL) {
+		error( "authentication: %s ",
+			g_slurm_auth_errstr(g_slurm_auth_errno(NULL)));
+		free_buf(buffer);
+		rc = ESLURM_PROTOCOL_INCOMPLETE_PACKET;
+		goto total_return;
+	}
+	if(header.flags & SLURM_GLOBAL_AUTH_KEY) {
+		rc = g_slurm_auth_verify( auth_cred, NULL, 2, 
+					  _global_auth_key() );
+	} else
+		rc = g_slurm_auth_verify( auth_cred, NULL, 2, NULL );
+	
+	if(rc != SLURM_SUCCESS) {
+		error("authentication: %s ",
+		      g_slurm_auth_errstr(g_slurm_auth_errno(auth_cred)));
+		(void) g_slurm_auth_destroy(auth_cred);
+		free_buf(buffer);
+		rc = SLURM_PROTOCOL_AUTHENTICATION_ERROR;
+		goto total_return;
+	}	
+
+	/*
+	 * Unpack message body 
+	 */
+	msg.msg_type = header.msg_type;
+	msg.flags = header.flags;
+	
+	if((header.body_length > remaining_buf(buffer)) ||
+	   (unpack_msg(&msg, buffer) != SLURM_SUCCESS)) {
+		(void) g_slurm_auth_destroy(auth_cred);
+		free_buf(buffer);
+		rc = ESLURM_PROTOCOL_INCOMPLETE_PACKET;
+		goto total_return;
+	}
+	g_slurm_auth_destroy(auth_cred);
+	
+	free_buf(buffer);
+	rc = SLURM_SUCCESS;
+	
+total_return:
+	destroy_forward(&header.forward);
+	
+	if(rc != SLURM_SUCCESS) {
+		if(ret_list) {
+			ret_data_info = xmalloc(sizeof(ret_data_info_t));
+			ret_data_info->err = rc;
+			ret_data_info->type = RESPONSE_FORWARD_FAILED;
+			ret_data_info->data = NULL;
+			list_push(ret_list, ret_data_info);
+		}
+		error("slurm_receive_msgs: %s", slurm_strerror(rc));
+	} else {
+		if(!ret_list)
+			ret_list = list_create(destroy_data_info);
+		ret_data_info = xmalloc(sizeof(ret_data_info_t));
+		ret_data_info->err = rc;
+		ret_data_info->node_name = NULL;
+		ret_data_info->type = msg.msg_type;
+		ret_data_info->data = msg.data;
+		list_push(ret_list, ret_data_info);
+	}
+			
+	
+	errno = rc;
+	return ret_list;
+		
+}
+
+/* try to determine the UID associated with a message with different 
+ * message header version, return -1 if we can't tell */
+static int _unpack_msg_uid(Buf buffer)
+{
+	int uid = -1;
+	void *auth_cred = NULL;
+
+	if ((auth_cred = g_slurm_auth_unpack(buffer)) == NULL)
+		return uid;
+	uid = (int) g_slurm_auth_get_uid(auth_cred, NULL);
+	g_slurm_auth_destroy(auth_cred);
+
+	return uid;
+}
+
+/*
+ * NOTE: memory is allocated for the returned msg and the returned list
+ *       both must be freed at some point using the slurm_free_functions 
+ *       and list_destroy function.
+ * IN open_fd	- file descriptor to receive msg on
+ * IN/OUT msg	- a slurm_msg struct to be filled in by the function
+ *		  we use the orig_addr from this var for forwarding. 
+ * IN timeout	- how long to wait in milliseconds
+ * RET int	- returns 0 on success, -1 on failure and sets errno
+ */
+int slurm_receive_msg_and_forward(slurm_fd fd, slurm_addr *orig_addr, 
+				  slurm_msg_t *msg, int timeout)
+{
+	char *buf = NULL;
+	size_t buflen = 0;
+	header_t header;
+	int rc;
+	void *auth_cred = NULL;
+	Buf buffer;
+
+	xassert(fd >= 0);
+
+	if(msg->forward.init != FORWARD_INIT)
+		slurm_msg_t_init(msg);
+	/* set msg connection fd to accepted fd. This allows 
+	 *  possibility for slurmd_req () to close accepted connection
+	 */
+	msg->conn_fd = fd;
+	/* this always is the connection */
+	memcpy(&msg->address, orig_addr, sizeof(slurm_addr));
+
+	/* where the connection originated from, this
+	 * might change based on the header we receive */
+	memcpy(&msg->orig_addr, orig_addr, sizeof(slurm_addr));
+
+	msg->ret_list = list_create(destroy_data_info);
+
+	if (timeout <= 0)
+		/* convert secs to msec */
+		timeout  = slurm_get_msg_timeout() * 1000; 
+		
+	if(timeout >= (slurm_get_msg_timeout() * 10000)) {
+		debug("slurm_receive_msg_and_forward: "
+		      "You are sending a message with timeout's greater "
+		      "than %d seconds, your's is %d seconds", 
+		      (slurm_get_msg_timeout() * 10), 
+		      (timeout/1000));
+	} else if(timeout < 1000) {
+		debug("slurm_receive_msg_and_forward: "
+		      "You are sending a message with a very short timeout of "
+		      "%d milliseconds", timeout);
+	} 	
+
+	/*
+	 * Receive a msg. slurm_msg_recvfrom() will read the message
+	 *  length and allocate space on the heap for a buffer containing
+	 *  the message. 
+	 */
+	if (_slurm_msg_recvfrom_timeout(fd, &buf, &buflen, 0, timeout) < 0) {
+		forward_init(&header.forward, NULL);
+		rc = errno;		
+		goto total_return;
+	}
+	
+#if	_DEBUG
+	_print_data (buftemp, rc);
+#endif
+	buffer = create_buf(buf, buflen);
+
+	if(unpack_header(&header, buffer) == SLURM_ERROR) {
+		free_buf(buffer);
+		rc = SLURM_COMMUNICATIONS_RECEIVE_ERROR;
+		goto total_return;
+	}
+	
+	if (check_header_version(&header) < 0) {
+		int uid = _unpack_msg_uid(buffer);
+		error("Invalid Protocol Version %u from uid=%d", 
+			header.version, uid);
+		free_buf(buffer);
+		rc = SLURM_PROTOCOL_VERSION_ERROR;
+		goto total_return;
+	}
+	if(header.ret_cnt > 0) {
+		error("we received more than one message back use "
+		      "slurm_receive_msgs instead");
+		header.ret_cnt = 0;
+		list_destroy(header.ret_list);
+		header.ret_list = NULL;
+	}
+	//info("ret_cnt = %d",header.ret_cnt);
+	/* if(header.ret_cnt > 0) { */
+/* 		while((ret_data_info = list_pop(header.ret_list))) */
+/* 			list_push(msg->ret_list, ret_data_info); */
+/* 		header.ret_cnt = 0; */
+/* 		list_destroy(header.ret_list); */
+/* 		header.ret_list = NULL; */
+/* 	} */
+	/* 
+	 * header.orig_addr will be set to where the first message
+	 * came from if this is a forward else we set the
+	 * header.orig_addr to our addr just incase we need to send it off.
+	 */
 	if(header.orig_addr.sin_addr.s_addr != 0) {
 		memcpy(&msg->orig_addr, &header.orig_addr, sizeof(slurm_addr));
 	} else {
-		memcpy(&header.orig_addr, &msg->orig_addr, sizeof(slurm_addr));
+		memcpy(&header.orig_addr, orig_addr, sizeof(slurm_addr));
 	}
-
+	
 	/* Forward message to other nodes */
 	if(header.forward.cnt > 0) {
-		debug("forwarding to %d", header.forward.cnt);
+		debug("forwarding to %u", header.forward.cnt);
 		msg->forward_struct = xmalloc(sizeof(forward_struct_t));
 		msg->forward_struct->buf_len = remaining_buf(buffer);
 		msg->forward_struct->buf = 
@@ -818,14 +1833,14 @@ List slurm_receive_msg(slurm_fd fd, slurm_msg_t *msg, int timeout)
 		       &buffer->head[buffer->processed], 
 		       msg->forward_struct->buf_len);
 		
-		msg->forward_struct->ret_list = ret_list;
+		msg->forward_struct->ret_list = msg->ret_list;
 		/* take out the amount of timeout from this hop */
-		msg->forward_struct->timeout = 
-			(timeout - header.forward.timeout);
+		msg->forward_struct->timeout = header.forward.timeout;
+		if(msg->forward_struct->timeout <= 0)
+			msg->forward_struct->timeout = message_timeout;
 		msg->forward_struct->fwd_cnt = header.forward.cnt;
 
-		debug3("forwarding messages to %d nodes!!!! "
-		       "with a timeout of %d", 
+		debug3("forwarding messages to %u nodes with timeout of %d", 
 		       msg->forward_struct->fwd_cnt,
 		       msg->forward_struct->timeout);
 		
@@ -841,7 +1856,11 @@ List slurm_receive_msg(slurm_fd fd, slurm_msg_t *msg, int timeout)
 		rc = ESLURM_PROTOCOL_INCOMPLETE_PACKET;
 		goto total_return;
 	}
-	rc = g_slurm_auth_verify( auth_cred, NULL, 2 );
+	if(header.flags & SLURM_GLOBAL_AUTH_KEY) {
+		rc = g_slurm_auth_verify( auth_cred, NULL, 2, 
+					  _global_auth_key() );
+	} else
+		rc = g_slurm_auth_verify( auth_cred, NULL, 2, NULL );
 	
 	if (rc != SLURM_SUCCESS) {
 		error( "authentication: %s ",
@@ -856,7 +1875,7 @@ List slurm_receive_msg(slurm_fd fd, slurm_msg_t *msg, int timeout)
 	 * Unpack message body 
 	 */
 	msg->msg_type = header.msg_type;
-	msg->srun_node_id = header.srun_node_id;
+	msg->flags = header.flags;
 	
 	if ( (header.body_length > remaining_buf(buffer)) ||
 	     (unpack_msg(msg, buffer) != SLURM_SUCCESS) ) {
@@ -874,13 +1893,17 @@ List slurm_receive_msg(slurm_fd fd, slurm_msg_t *msg, int timeout)
 total_return:
 	destroy_forward(&header.forward);
 	
+	slurm_seterrno(rc);
 	if(rc != SLURM_SUCCESS) {
-		msg->msg_type = REQUEST_PING;
+		msg->msg_type = RESPONSE_FORWARD_FAILED;
 		msg->auth_cred = (void *) NULL;
-		error("slurm_receive_msg: %s", slurm_strerror(rc));
+		msg->data = NULL;
+		error("slurm_receive_msg_and_forward: %s",
+		      slurm_strerror(rc));
+	} else {
+		rc = 0;
 	}
-	errno = rc;
-	return ret_list;
+	return rc;
 		
 }
 
@@ -912,77 +1935,6 @@ _pack_msg(slurm_msg_t *msg, header_t *hdr, Buf buffer)
 }
 
 /* 
- *  Adds header to buffer and sends message over an open file descriptor `fd'
- *    Returns the size of the message sent in bytes, or -1 on failure.
- */
-int slurm_add_header_and_send(slurm_fd fd, slurm_msg_t *msg)
-{
-	Buf send_buf = NULL;
-	header_t header;
-	int buf_len = get_buf_offset(msg->buffer);
-	int rc = SLURM_SUCCESS;
-	void *auth_cred = NULL;
-
-	init_header(&header, msg, SLURM_PROTOCOL_NO_FLAGS);
-	header.body_length = buf_len;
-	send_buf = init_buf(BUF_SIZE+buf_len);
-	
-	/*
-	 * Pack header into buffer for transmission
-	 */
-	pack_header(&header, send_buf);
-	/* 
-	 * Initialize header with Auth credential and message type.
-	 */
-	auth_cred = g_slurm_auth_create(NULL, 2);
-	if (auth_cred == NULL) {
-		error("authentication: %s",
-		       g_slurm_auth_errstr(g_slurm_auth_errno(NULL)) );
-		errno = SLURM_PROTOCOL_AUTHENTICATION_ERROR;
-		goto ret_error;
-	}
-	/* 
-	 * Pack auth credential
-	 */
-	rc = g_slurm_auth_pack(auth_cred, send_buf);
-	(void) g_slurm_auth_destroy(auth_cred);
-	if (rc) {
-		error("authentication: %s",
-		       g_slurm_auth_errstr(g_slurm_auth_errno(auth_cred)));
-		free_buf(send_buf);
-		send_buf = NULL;
-		errno = SLURM_PROTOCOL_AUTHENTICATION_ERROR;
-		goto ret_error;
-	}
-
-	/* add to send_buf */
-	if (remaining_buf(send_buf) < buf_len) {
-		send_buf->size += (buf_len + BUF_SIZE);
-		xrealloc(send_buf->head, send_buf->size);
-	}
-	if (buf_len) {
-		memcpy(&send_buf->head[send_buf->processed],
-		       msg->buffer->head, buf_len);
-		send_buf->processed += buf_len;
-	}
-	
-	/*
-	 * send message
-	 */
-	rc = _slurm_msg_sendto(fd, 
-			       get_buf_data(send_buf), 
-			       get_buf_offset(send_buf),
-			       SLURM_PROTOCOL_NO_SEND_RECV_FLAGS);
-ret_error:
-	if (rc < 0) 
-		error("slurm_add_header_and_send: %m");
-	free_buf(send_buf);
-	return rc;
-
-}
-
-
-/* 
  *  Send a slurm message over an open file descriptor `fd'
  *    Returns the size of the message sent in bytes, or -1 on failure.
  */
@@ -992,11 +1944,16 @@ int slurm_send_node_msg(slurm_fd fd, slurm_msg_t * msg)
 	Buf      buffer;
 	int      rc;
 	void *   auth_cred;
+	uint16_t auth_flags = SLURM_PROTOCOL_NO_FLAGS;
 	
 	/* 
 	 * Initialize header with Auth credential and message type.
 	 */
-	auth_cred = g_slurm_auth_create(NULL, 2);
+	if (msg->flags & SLURM_GLOBAL_AUTH_KEY) {
+		auth_flags = SLURM_GLOBAL_AUTH_KEY;
+		auth_cred = g_slurm_auth_create(NULL, 2, _global_auth_key());
+	} else
+		auth_cred = g_slurm_auth_create(NULL, 2, NULL);
 	if (auth_cred == NULL) {
 		error("authentication: %s",
 		       g_slurm_auth_errstr(g_slurm_auth_errno(NULL)) );
@@ -1009,8 +1966,8 @@ int slurm_send_node_msg(slurm_fd fd, slurm_msg_t * msg)
 	}
 	forward_wait(msg);
 	
-	init_header(&header, msg, SLURM_PROTOCOL_NO_FLAGS);
-
+	init_header(&header, msg, msg->flags);
+	
 	/*
 	 * Pack header into buffer for transmission
 	 */
@@ -1043,7 +2000,7 @@ int slurm_send_node_msg(slurm_fd fd, slurm_msg_t * msg)
 	rc = _slurm_msg_sendto( fd, get_buf_data(buffer), 
 				get_buf_offset(buffer),
 				SLURM_PROTOCOL_NO_SEND_RECV_FLAGS );
-
+	
 	if (rc < 0) 
 		error("slurm_msg_sendto: %m");
 		
@@ -1079,7 +2036,7 @@ slurm_fd slurm_accept_stream(slurm_fd open_fd, slurm_addr * slurm_address)
 /* slurm_open_stream
  * opens a client connection to stream server
  * IN slurm_address     - slurm_addr of the connection destination
- * RET slurm_fd         - file descriptor of the connection created
+ * RET slurm_fd	 - file descriptor of the connection created
  * NOTE: Retry with various ports as needed if connection is refused
  */
 slurm_fd slurm_open_stream(slurm_addr * slurm_address)
@@ -1331,11 +2288,11 @@ int slurm_unpack_slurm_addr_no_alloc(slurm_addr * slurm_address,
  * returns		- SLURM error code
  */
 void slurm_pack_slurm_addr_array(slurm_addr * slurm_address,
-				 uint16_t size_val, Buf buffer)
+				 uint32_t size_val, Buf buffer)
 {
 	int i = 0;
-	uint16_t nl = htons(size_val);
-	pack16((uint16_t)nl, buffer);
+	uint32_t nl = htonl(size_val);
+	pack32(nl, buffer);
 	
 	for (i = 0; i < size_val; i++) {
 		slurm_pack_slurm_addr(slurm_address + i, buffer);
@@ -1351,14 +2308,14 @@ void slurm_pack_slurm_addr_array(slurm_addr * slurm_address,
  * returns		- SLURM error code
  */
 int slurm_unpack_slurm_addr_array(slurm_addr ** slurm_address,
-			    uint16_t * size_val, Buf buffer)
+			    uint32_t * size_val, Buf buffer)
 {
 	int i = 0;
-	uint16_t nl;
+	uint32_t nl;
 
 	*slurm_address = NULL;
-	safe_unpack16(&nl, buffer);
-	*size_val = ntohs(nl);
+	safe_unpack32(&nl, buffer);
+	*size_val = ntohl(nl);
 	*slurm_address = xmalloc((*size_val) * sizeof(slurm_addr));
 
 	for (i = 0; i < *size_val; i++) {
@@ -1393,18 +2350,21 @@ int slurm_send_rc_msg(slurm_msg_t *msg, int rc)
 	slurm_msg_t resp_msg;
 	return_code_msg_t rc_msg;
 	
-	if (msg->conn_fd < 0)
-		return (ENOTCONN);
+	if (msg->conn_fd < 0) {
+		slurm_seterrno(ENOTCONN);
+		return SLURM_ERROR;
+	}
 	rc_msg.return_code = rc;
 
+	slurm_msg_t_init(&resp_msg);
 	resp_msg.address  = msg->address;
 	resp_msg.msg_type = RESPONSE_SLURM_RC;
 	resp_msg.data     = &rc_msg;
+	resp_msg.flags = msg->flags;
 	resp_msg.forward = msg->forward;
 	resp_msg.forward_struct = msg->forward_struct;
 	resp_msg.ret_list = msg->ret_list;
 	resp_msg.orig_addr = msg->orig_addr;
-	resp_msg.srun_node_id = msg->srun_node_id;
 	
 	/* send message */
 	return slurm_send_node_msg(msg->conn_fd, &resp_msg);
@@ -1412,33 +2372,80 @@ int slurm_send_rc_msg(slurm_msg_t *msg, int rc)
 
 /*
  * Send and recv a slurm request and response on the open slurm descriptor
- * with a list containing the responses of the children (if any) we 
- * forwarded the message to. List containing type (ret_types_t).
- * IN open_fd	- file descriptor to receive msg on
+ * IN fd	- file descriptor to receive msg on
  * IN req	- a slurm_msg struct to be sent by the function
  * OUT resp	- a slurm_msg struct to be filled in by the function
  * IN timeout	- how long to wait in milliseconds
- * RET List	- List containing the responses of the childern (if any) we 
- *                forwarded the message to. List containing type (ret_types_t).
+ * RET int	- returns 0 on success, -1 on failure and sets errno
  */
-static List 
+static int
 _send_and_recv_msg(slurm_fd fd, slurm_msg_t *req, 
 		   slurm_msg_t *resp, int timeout)
 {
 	int retry = 0;
+	int rc = -1; 
+	slurm_msg_t_init(resp);
+
+	if(slurm_send_node_msg(fd, req) >= 0) {
+		/* no need to adjust and timeouts here since we are not
+		   forwarding or expecting anything other than 1 message
+		   and the regular timeout will be altered in
+		   slurm_receive_msg if it is 0 */
+		rc = slurm_receive_msg(fd, resp, timeout);
+	}
+	
+
+	/* 
+	 *  Attempt to close an open connection
+	 */
+	while ((slurm_shutdown_msg_conn(fd) < 0) && (errno == EINTR) ) {
+		if (retry++ > MAX_SHUTDOWN_RETRY) {
+			break;
+		}
+	}
+
+	return rc;
+}
+
+/*
+ * Send and recv a slurm request and response on the open slurm descriptor
+ * with a list containing the responses of the children (if any) we 
+ * forwarded the message to. List containing type (ret_data_info_t).
+ * IN fd	- file descriptor to receive msg on
+ * IN req	- a slurm_msg struct to be sent by the function
+ * IN timeout	- how long to wait in milliseconds
+ * RET List	- List containing the responses of the childern (if any) we
+ *		  forwarded the message to. List containing type
+ *		  (ret_data_info_t). 
+ */
+static List
+_send_and_recv_msgs(slurm_fd fd, slurm_msg_t *req, int timeout)
+{
+	int retry = 0;
 	List ret_list = NULL;
 	int steps = 0;
-	resp->auth_cred = NULL;
-	if(slurm_send_node_msg(fd, req) >= 0) {
-		if (!timeout)
+	
+	if (!req->forward.timeout) {
+		if(!timeout)
 			timeout = slurm_get_msg_timeout() * 1000;
-		
+		req->forward.timeout = timeout;
+	}
+	if(slurm_send_node_msg(fd, req) >= 0) {
 		if(req->forward.cnt>0) {
-			steps = req->forward.cnt/slurm_get_tree_width();
-			steps += 1;
+			/* figure out where we are in the tree and set
+			 * the timeout for to wait for our childern
+			 * correctly
+			 * (timeout+message_timeout sec per step)
+			 * to let the child timeout */
+			if (message_timeout < 0)
+				message_timeout = slurm_get_msg_timeout() * 1000;
+			steps = (req->forward.cnt+1)/slurm_get_tree_width();
+			timeout = (message_timeout*steps);
+			steps++;
+			
 			timeout += (req->forward.timeout*steps);
 		}
-		ret_list = slurm_receive_msg(fd, resp, timeout);
+		ret_list = slurm_receive_msgs(fd, steps, timeout);
 	}
 	
 
@@ -1454,24 +2461,25 @@ _send_and_recv_msg(slurm_fd fd, slurm_msg_t *req,
 	return ret_list;
 }
 
+
 /*
  * slurm_send_recv_controller_msg
  * opens a connection to the controller, sends the controller a message, 
  * listens for the response, then closes the connection
  * IN request_msg	- slurm_msg request
- * OUT response_msg     - slurm_msg response
- * RET int              - returns 0 on success, -1 on failure and sets errno
+ * OUT response_msg	- slurm_msg response
+ * RET int		- returns 0 on success, -1 on failure and sets errno
  */
 int slurm_send_recv_controller_msg(slurm_msg_t *req, slurm_msg_t *resp)
 {
 	slurm_fd fd = -1;
 	int rc = 0;
 	time_t start_time = time(NULL);
-	List ret_list = NULL;
 	int retry = 1;
 	slurm_ctl_conf_t *conf;
 	bool backup_controller_flag;
 	uint16_t slurmctld_timeout;
+	slurm_addr ctrl_addr;
 
 	/* Just in case the caller didn't initialize his slurm_msg_t, and
 	 * since we KNOW that we are only sending to one node (the controller),
@@ -1481,7 +2489,7 @@ int slurm_send_recv_controller_msg(slurm_msg_t *req, slurm_msg_t *resp)
 	req->ret_list = NULL;
 	req->forward_struct = NULL;
 	
-	if ((fd = slurm_open_controller_conn()) < 0) {
+	if ((fd = slurm_open_controller_conn(&ctrl_addr)) < 0) {
 		rc = -1;
 		goto cleanup;
 	}
@@ -1495,26 +2503,16 @@ int slurm_send_recv_controller_msg(slurm_msg_t *req, slurm_msg_t *resp)
 		/* If the backup controller is in the process of assuming 
 		 * control, we sleep and retry later */
 		retry = 0;
-		ret_list = _send_and_recv_msg(fd, req, resp, 0);
+		rc = _send_and_recv_msg(fd, req, resp, 0);
 		if (resp->auth_cred)
 			g_slurm_auth_destroy(resp->auth_cred);
 		else 
 			rc = -1;
-		
-		if (ret_list) {
-			if (list_count(ret_list)>0) {
-				error("We didn't do things correctly "
-				      "got %d responses didn't expect any",
-				      list_count(ret_list));
-			}
-			list_destroy(ret_list);
-		}
-		
+
 		if ((rc == 0)
 		    && (resp->msg_type == RESPONSE_SLURM_RC)
 		    && ((((return_code_msg_t *) resp->data)->return_code) 
 			== ESLURM_IN_STANDBY_MODE)
-		    && (req->msg_type != MESSAGE_NODE_REGISTRATION_STATUS)
 		    && (backup_controller_flag)
 		    && (difftime(time(NULL), start_time)
 			< (slurmctld_timeout + (slurmctld_timeout / 2)))) {
@@ -1523,7 +2521,8 @@ int slurm_send_recv_controller_msg(slurm_msg_t *req, slurm_msg_t *resp)
 			      "responding, sleep and retry");
 			slurm_free_return_code_msg(resp->data);
 			sleep(30);
-			if ((fd = slurm_open_controller_conn()) < 0) {
+			if ((fd = slurm_open_controller_conn(&ctrl_addr)) 
+			    < 0) {
 				rc = -1;
 			} else {
 				retry = 1;
@@ -1546,17 +2545,16 @@ int slurm_send_recv_controller_msg(slurm_msg_t *req, slurm_msg_t *resp)
  * for the response, then closes the connection
  * IN request_msg	- slurm_msg request
  * OUT response_msg	- slurm_msg response
- * IN timeout	        - how long to wait in milliseconds
- * RET List		- return list from multiple nodes
- *                        List containing type (ret_types_t).
+ * IN timeout		- how long to wait in milliseconds
+ * RET int		- returns 0 on success, -1 on failure and sets errno
  */
-List slurm_send_recv_node_msg(slurm_msg_t *req, slurm_msg_t *resp, int timeout)
+int slurm_send_recv_node_msg(slurm_msg_t *req, slurm_msg_t *resp, int timeout)
 {
 	slurm_fd fd = -1;
 
 	resp->auth_cred = NULL;
 	if ((fd = slurm_open_msg_conn(&req->address)) < 0)
-		return NULL; 
+		return -1; 
 	
 	return _send_and_recv_msg(fd, req, resp, timeout);
 
@@ -1573,16 +2571,22 @@ int slurm_send_only_controller_msg(slurm_msg_t *req)
 	int      rc = SLURM_SUCCESS;
 	int      retry = 0;
 	slurm_fd fd = -1;
+	slurm_addr ctrl_addr;
 
 	/*
 	 *  Open connection to SLURM controller:
 	 */
-	if ((fd = slurm_open_controller_conn()) < 0) {
+	if ((fd = slurm_open_controller_conn(&ctrl_addr)) < 0) {
 		rc = SLURM_SOCKET_ERROR;
 		goto cleanup;
 	}
 
-	rc = slurm_send_node_msg(fd, req);
+	if((rc = slurm_send_node_msg(fd, req) < 0)) {
+		rc = SLURM_ERROR;
+	} else {
+		debug3("slurm_send_only_controller_msg: sent %d", rc);
+		rc = SLURM_SUCCESS;
+	}
 
 	/* 
 	 *  Attempt to close an open connection
@@ -1612,11 +2616,16 @@ int slurm_send_only_node_msg(slurm_msg_t *req)
 	int      retry = 0;
 	slurm_fd fd = -1;
 	
-	if ((fd = slurm_open_msg_conn(&req->address)) < 0)
+	if ((fd = slurm_open_msg_conn(&req->address)) < 0) {
 		return SLURM_SOCKET_ERROR;
+	}
 
-	rc = slurm_send_node_msg(fd, req);
-
+	if((rc = slurm_send_node_msg(fd, req) < 0)) {
+		rc = SLURM_ERROR;
+	} else {
+		debug3("slurm_send_only_node_msg: sent %d", rc);
+		rc = SLURM_SUCCESS;
+	}
 	/* 
 	 *  Attempt to close an open connection
 	 */
@@ -1628,188 +2637,170 @@ int slurm_send_only_node_msg(slurm_msg_t *req)
 	return rc;
 }
 
-
 /*
- *  Send message and recv "return code" message on an already open
- *  slurm file descriptor return List containing type (ret_types_t).
- * IN fd	- file descriptor to receive msg on
- * IN req	- slurm_msg request
- * IN timeout   - how long to wait in milliseconds
+ *  Send a message to the nodelist specificed using fanout
+ *    Then return List containing type (ret_data_info_t).
+ * IN nodelist	  - list of nodes to send to.
+ * IN msg	  - a slurm_msg struct to be sent by the function
+ * IN timeout	  - how long to wait in milliseconds
+ * IN quiet       - if set, reduce logging details
+ * RET List	  - List containing the responses of the childern
+ *		    (if any) we forwarded the message to. List
+ *		    containing type (ret_data_info_t).
  */
-static List _send_recv_rc_msg(slurm_fd fd, slurm_msg_t *req, int timeout)
+List slurm_send_recv_msgs(const char *nodelist, slurm_msg_t *msg, 
+			  int timeout, bool quiet)
 {
-	slurm_msg_t	msg;
 	List ret_list = NULL;
-	ListIterator itr = NULL;
-	ret_types_t *ret_type = NULL;
+	List tmp_ret_list = NULL;
+	slurm_fd fd = -1;
+	char *name = NULL;
+	char buf[8192];
+	hostlist_t hl = NULL;
 	ret_data_info_t *ret_data_info = NULL;
-	int msg_rc;
-	int set = 0;
-	int err;
-	//info("here 1");
-	
-	ret_list = _send_and_recv_msg(fd, req, &msg, timeout);
-	err = errno;	
+	ListIterator itr;
 
-	if(!msg.auth_cred) {
-		msg.msg_type = REQUEST_PING;
-		msg_rc = SLURM_ERROR;	
-	} else {
-		msg_rc = ((return_code_msg_t *)msg.data)->return_code;
-		slurm_free_return_code_msg(msg.data);
-		g_slurm_auth_destroy(msg.auth_cred);
+	if(!nodelist || !strlen(nodelist)) {
+		error("slurm_send_recv_msgs: no nodelist given");
+		return NULL;
 	}
-	
-	if(!ret_list) {
-		return ret_list;
-	} 
-	
-	ret_data_info = xmalloc(sizeof(ret_data_info_t));
-	ret_data_info->node_name = NULL;
-	ret_data_info->data = NULL;
-	debug3("got reply for %s rc %d %d", 
-	       ret_data_info->node_name, 
-	       msg_rc, 
-	       err);
-	
-	itr = list_iterator_create(ret_list);		
-	while((ret_type = list_next(itr)) != NULL) {
-		if(ret_type->msg_rc == msg_rc) {
-			list_push(ret_type->ret_data_list, ret_data_info);
-			set = 1;
-			break;
+#ifdef HAVE_FRONT_END
+	/* only send to the front end node */
+	name = nodelist_nth_host(nodelist, 0);
+	if (!name) {
+		error("slurm_send_recv_msgs: "
+		      "can't get the first name out of %s",
+		      nodelist);
+		return NULL;
+	}
+	hl = hostlist_create(name);
+	free(name);
+#else
+/* 	info("total sending to %s",nodelist); */
+	hl = hostlist_create(nodelist);
+#endif
+	while((name = hostlist_shift(hl))) {
+		
+		if(slurm_conf_get_addr(name, &msg->address) == SLURM_ERROR) {
+			if (quiet) {
+				debug("slurm_send_recv_msgs: can't get addr "
+				      "for host %s", name);
+			} else {
+				error("slurm_send_recv_msgs: can't get addr "
+				      "for host %s", name);
+			}
+			mark_as_failed_forward(&tmp_ret_list, name, 
+					SLURM_COMMUNICATIONS_CONNECTION_ERROR);
+			free(name);
+			continue;
 		}
+		
+		if ((fd = slurm_open_msg_conn(&msg->address)) < 0) {
+			if (quiet)
+				debug("slurm_send_recv_msgs to %s: %m", name);
+			else
+				error("slurm_send_recv_msgs to %s: %m", name);
+			mark_as_failed_forward(&tmp_ret_list, name, 
+					SLURM_COMMUNICATIONS_CONNECTION_ERROR);
+			free(name);
+			continue;
+		}
+
+		hostlist_ranged_string(hl, sizeof(buf), buf);
+		forward_init(&msg->forward, NULL);
+		msg->forward.nodelist = xstrdup(buf);
+		msg->forward.timeout = timeout;
+		msg->forward.cnt = hostlist_count(hl);
+		if (msg->forward.nodelist[0]) {
+			debug3("sending to %s along with to %s", 
+			       name, msg->forward.nodelist);
+		} else
+			debug3("sending to %s", name);
+		
+		if(!(ret_list = _send_and_recv_msgs(fd, msg, timeout))) {
+			xfree(msg->forward.nodelist);
+			if (quiet) {
+				debug("slurm_send_recv_msgs"
+				      "(_send_and_recv_msgs) to %s: %m", 
+				      name);
+			} else {
+				error("slurm_send_recv_msgs"
+				      "(_send_and_recv_msgs) to %s: %m", 
+				      name);
+			}
+			mark_as_failed_forward(&tmp_ret_list, name, errno);
+			free(name);
+			continue;
+		} else {
+			itr = list_iterator_create(ret_list);
+			while((ret_data_info = list_next(itr))) 
+				if(!ret_data_info->node_name) {
+					ret_data_info->node_name =
+						xstrdup(name);
+				}
+			list_iterator_destroy(itr);
+		}
+		xfree(msg->forward.nodelist);
+		free(name);
+		break;		
 	}
-	list_iterator_destroy(itr);
-	if(!set) {
-		ret_type = xmalloc(sizeof(ret_types_t));
-		list_push(ret_list, ret_type);
-		ret_type->type = msg.msg_type;
-		ret_type->msg_rc = msg_rc;
-		ret_type->err = err;
-		ret_type->ret_data_list = list_create(destroy_data_info);
-		list_push(ret_type->ret_data_list, ret_data_info);
-	}
+	hostlist_destroy(hl);
+
+	if(tmp_ret_list) {
+		if(!ret_list)
+			ret_list = tmp_ret_list;
+		else {
+			while((ret_data_info = list_pop(tmp_ret_list))) 
+				list_push(ret_list, ret_data_info);
+			list_destroy(tmp_ret_list);
+		}
+	} 
 	return ret_list;
 }
 
 /*
- *  Open a connection to req->address, send message (forward if told), 
- *  req must contain the message already packed in it's buffer variable,
- *  and receive List of type ret_types_t from all childern nodes
- * IN msg	- a slurm_msg struct to be sent by the function
- * IN timeout	- how long to wait in milliseconds
- * RET List	- List containing the responses of the childern (if any) we 
- *                forwarded the message to. List containing type (ret_types_t).
+ *  Send a message to msg->address
+ *    Then return List containing type (ret_data_info_t). 
+ * IN msg	  - a slurm_msg struct to be sent by the function
+ * IN timeout	  - how long to wait in milliseconds
+ * RET List	  - List containing the responses of the childern
+ *		    (if any) we forwarded the message to. List
+ *		    containing type (ret_types_t).
  */
-List slurm_send_recv_rc_packed_msg(slurm_msg_t *msg, int timeout)
+List slurm_send_addr_recv_msgs(slurm_msg_t *msg, char *name, int timeout)
 {
-	slurm_fd fd = -1;
-	int err = SLURM_SUCCESS;
-	int steps = 0;
-	slurm_msg_t resp;
 	List ret_list = NULL;
-	ListIterator itr;
-	ret_types_t *ret_type = NULL;
+	List tmp_ret_list = NULL;
+	slurm_fd fd = -1;
 	ret_data_info_t *ret_data_info = NULL;
-	int msg_rc;
-	int set = 0;
-	int retry = 0;
-
-	if(!msg->buffer) {
-		err = SLURMCTLD_COMMUNICATIONS_SEND_ERROR;
-		goto failed;	
-	}
+	ListIterator itr;
 
 	if ((fd = slurm_open_msg_conn(&msg->address)) < 0) {
-		err = SLURM_SOCKET_ERROR;
-		goto failed;
+		mark_as_failed_forward(&ret_list, name, 
+				       SLURM_COMMUNICATIONS_CONNECTION_ERROR);
+		return ret_list;
 	}
 
-	if(slurm_add_header_and_send(fd, msg) >= 0) {
-		if (!timeout)
-			timeout = slurm_get_msg_timeout() * 1000;
-		
-		if(msg->forward.cnt>0) {
-			steps = msg->forward.cnt/slurm_get_tree_width();
-			steps += 1;
-			timeout += (msg->forward.timeout*steps);
-		}
-				
-		ret_list = slurm_receive_msg(fd, &resp, timeout);
-	}
-	err = errno;
-			
-	/* 
-	 *  Attempt to close an open connection
-	 */
-	while ((slurm_shutdown_msg_conn(fd) < 0) && (errno == EINTR) ) {
-		if (retry++ > MAX_RETRIES) {
-			err = errno;
-			break;
-		}
-	}
-	
-failed:
-	if(!ret_list || list_count(ret_list) == 0) {
-		no_resp_forwards(&msg->forward, &ret_list, err);
-	}
-	
-	if(err != SLURM_SUCCESS) {
-		resp.msg_type = REQUEST_PING;
-		msg_rc = SLURM_ERROR;	
+	/*just to make sure */
+	forward_init(&msg->forward, NULL);
+	msg->ret_list = NULL;
+	msg->forward_struct = NULL;
+	if(!(ret_list = _send_and_recv_msgs(fd, msg, timeout))) {
+		mark_as_failed_forward(&tmp_ret_list, name, errno);
+		return ret_list;
 	} else {
-		msg_rc = ((return_code_msg_t *)resp.data)->return_code;
-		slurm_free_return_code_msg(resp.data);
-		g_slurm_auth_destroy(resp.auth_cred);
+		itr = list_iterator_create(ret_list);
+		while((ret_data_info = list_next(itr))) 
+			if(!ret_data_info->node_name) {
+				ret_data_info->node_name = xstrdup(name);
+			}
+		list_iterator_destroy(itr);
 	}
-	
-	ret_data_info = xmalloc(sizeof(ret_data_info_t));
-	ret_data_info->node_name = NULL;
-	ret_data_info->data = NULL;
-	ret_data_info->nodeid = msg->srun_node_id;
-		
-	itr = list_iterator_create(ret_list);		
-	while((ret_type = list_next(itr)) != NULL) {
-		if(ret_type->msg_rc == msg_rc) {
-			list_push(ret_type->ret_data_list, ret_data_info);
-			set = 1;
-			break;
-		}
-	}
-	list_iterator_destroy(itr);
-	if(!set) {
-		ret_type = xmalloc(sizeof(ret_types_t));
-		list_push(ret_list, ret_type);
-		ret_type->type = resp.msg_type;
-		ret_type->msg_rc = msg_rc;
-		ret_type->err = err;
-		ret_type->ret_data_list = list_create(destroy_data_info);
-		list_push(ret_type->ret_data_list, ret_data_info);
-	}
-	
-	return ret_list; 
+	return ret_list;
 }
 
-/*
- *  Open a connection to the "address" specified in the the slurm msg "req"
- *    Then read back an "rc" message returning List containing 
- *    type (ret_types_t).
- * IN req	- a slurm_msg struct to be sent by the function
- * IN timeout	- how long to wait in milliseconds
- * RET List	- List containing the responses of the childern (if any) we 
- *                forwarded the message to. List containing type (ret_types_t).
- */
-List slurm_send_recv_rc_msg(slurm_msg_t *req, int timeout)
-{
-	slurm_fd fd = -1;
-	
-	if ((fd = slurm_open_msg_conn(&req->address)) < 0) {
-		errno = SLURM_SOCKET_ERROR;
-		return NULL;
-	}
-	return _send_recv_rc_msg(fd, req, timeout);
-}
+
+
 /*
  *  Open a connection to the "address" specified in the the slurm msg "req"
  *    Then read back an "rc" message returning the "return_code" specified
@@ -1822,9 +2813,10 @@ List slurm_send_recv_rc_msg(slurm_msg_t *req, int timeout)
 int slurm_send_recv_rc_msg_only_one(slurm_msg_t *req, int *rc, int timeout)
 {
 	slurm_fd fd = -1;
-	List ret_list = NULL;
-	ret_types_t *ret_type = NULL;
 	int ret_c = 0;
+	slurm_msg_t resp;
+
+	slurm_msg_t_init(&resp);
 
 	/* Just in case the caller didn't initialize his slurm_msg_t, and
 	 * since we KNOW that we are only sending to one node,
@@ -1838,77 +2830,45 @@ int slurm_send_recv_rc_msg_only_one(slurm_msg_t *req, int *rc, int timeout)
 		return -1;
 	}
 			
-	ret_list = _send_recv_rc_msg(fd, req, timeout);
-	if(ret_list) {
-		if(list_count(ret_list)>1) 
-			error("Got %d, expecting 1 from message receiving",
-			      list_count(ret_list));
-
-		ret_type = list_pop(ret_list);
-	
-		if(ret_type) {
-			*rc = ret_type->msg_rc;
-			// make sure we only send 0 or -1 for an error
-			if(ret_type->err != 0) 
-				//ret_c = ret_type->err;
-				ret_c = -1;
-			destroy_ret_types(ret_type);
-		}
-		list_destroy(ret_list);
+	if(!_send_and_recv_msg(fd, req, &resp, timeout)) {
+		if(resp.auth_cred)
+			g_slurm_auth_destroy(resp.auth_cred);	
+		*rc = slurm_get_return_code(resp.msg_type, resp.data);
+		slurm_free_msg_data(resp.msg_type, resp.data);
+		ret_c = 0;
 	} else 
 		ret_c = -1;
 	return ret_c;
 }
 
 /*
- *  Same as above, but send message to controller
+ *  Send message to controller and get return code.
+ *  Make use of slurm_send_recv_controller_msg(), which handles 
+ *  support for backup controller and retry during transistion.
  */
 int slurm_send_recv_controller_rc_msg(slurm_msg_t *req, int *rc)
 {
-	slurm_fd fd = -1;
-	List ret_list = NULL;
-	ret_types_t *ret_type = NULL;
-	int ret_val = 0;
+	int ret_c;
+	slurm_msg_t resp;
 
-	/* Just in case the caller didn't initialize his slurm_msg_t, and
-	 * since we KNOW that we are only sending to one node (the controller),
-	 * we initialize some forwarding variables to disable forwarding.
-	 */
-	forward_init(&req->forward, NULL);
-	req->ret_list = NULL;
-	req->forward_struct = NULL;
-		
-	if ((fd = slurm_open_controller_conn()) < 0)
-		return -1;
-	ret_list = _send_recv_rc_msg(fd, req, 0);
+	if(!slurm_send_recv_controller_msg(req, &resp)) {
+		*rc = slurm_get_return_code(resp.msg_type, resp.data);
+		slurm_free_msg_data(resp.msg_type, resp.data);
+		ret_c = 0;
+	} else {
+		ret_c = -1;
+	}
 	
-	if(ret_list) {
-		if(list_count(ret_list)>1)
-			error("controller_rc_msg: Got %d instead of 1 back",
-			      list_count(ret_list));
-		ret_type = list_pop(ret_list);
-		
-		if(ret_type) {
-			*rc = ret_type->msg_rc;
-			// make sure we only send 0 or -1 for an error
-			if(ret_type->err != 0) 
-				//ret_c = ret_type->err;
-				ret_val = -1;
-			destroy_ret_types(ret_type);
-		}
-		list_destroy(ret_list);
-	} else 
-		ret_val = -1;
-	return ret_val;
+	return ret_c;
 }
 
 /* this is used to set how many nodes are going to be on each branch
  * of the tree.  
  * IN total       - total number of nodes to send to
  * IN tree_width  - how wide the tree should be on each hop
- * RET int *      - int array tree_width in length each space
- *                  containing the number of nodes to send to each hop
- *                  on the span. 
+ * RET int *	  - int array tree_width in length each space
+ *		    containing the number of nodes to send to each hop
+ *		    on the span. 
  */
 
 extern int *set_span(int total,  uint16_t tree_width)
@@ -1917,12 +2877,11 @@ extern int *set_span(int total,  uint16_t tree_width)
 	int left = total;
 	int i = 0;
 
-        if (tree_width == 0)
-	        tree_width = slurm_get_tree_width();
+	if (tree_width == 0)
+		tree_width = slurm_get_tree_width();
 
 	span = xmalloc(sizeof(int) * tree_width);
 	//info("span count = %d", tree_width);
-	memset(span, 0, tree_width);
 	if(total <= tree_width) {
 		return span;
 	} 
@@ -1955,11 +2914,14 @@ extern int *set_span(int total,  uint16_t tree_width)
  */
 extern void slurm_free_msg(slurm_msg_t * msg)
 {
-	(void) g_slurm_auth_destroy(msg->auth_cred);
+	if(msg->auth_cred)
+		(void) g_slurm_auth_destroy(msg->auth_cred);
+
 	if(msg->ret_list) {
 		list_destroy(msg->ret_list);
 		msg->ret_list = NULL;
 	}
+
 	xfree(msg);
 }
 
@@ -1971,14 +2933,21 @@ extern char *nodelist_nth_host(const char *nodelist, int inx)
 	return name;
 }
 
-void convert_num_unit(float num, char *buf, int orig_type)
+extern int nodelist_find(const char *nodelist, const char *name)
 {
-#ifdef HAVE_BG
+	hostlist_t hl = hostlist_create(nodelist);
+	int id = hostlist_find(hl, name);
+	hostlist_destroy(hl);
+	return id;
+}
+
+extern void convert_num_unit(float num, char *buf, int buf_size, int orig_type)
+{
 	char *unit = "\0KMGP?";
 	int i = (int)num % 512;
-	
-	if(i > 0 || (int)num == 0) {
-		sprintf(buf, "%d", (int)num);
+
+	if((i > 0 && num < 1024) || (int)num == 0) {
+		snprintf(buf, buf_size, "%d%c", (int)num, unit[orig_type]);
 		return;
 	}
 	
@@ -1991,12 +2960,30 @@ void convert_num_unit(float num, char *buf, int orig_type)
 		orig_type = UNIT_UNKNOWN;
 	i = (int)num;
 	if(i == num)
-		sprintf(buf, "%d%c", i, unit[orig_type]);
+		snprintf(buf, buf_size, "%d%c", i, unit[orig_type]);
 	else
-		sprintf(buf, "%.2f%c", num, unit[orig_type]);
-#else
-	sprintf(buf, "%d", (int)num);
-#endif
+		snprintf(buf, buf_size, "%.2f%c", num, unit[orig_type]);
+}
+
+extern int revert_num_unit(const char *buf)
+{
+	char *unit = "\0KMGP\0";
+	int i = 1, j = 0, number = 0;
+	
+	if(!buf)
+		return -1;
+	j = strlen(buf) - 1;
+	while(unit[i]) {
+		if(toupper((int)buf[j]) == unit[i]) 
+			break;
+		i++;
+	}
+	
+	number = atoi(buf);
+	if(unit[i]) 
+		number *= (i*1024);
+		
+	return number;
 }
 
 #if _DEBUG

@@ -5,7 +5,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Jim Garlick <garlick@llnl.gov>, et. al.
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -99,9 +99,19 @@ void _xmemcat(char **str, char *start, char *end);
 char *xstrdup(const char *str);
 
 /*
+** strdup formatted which uses xmalloc routines
+*/
+char *xstrdup_printf(const char *fmt, ...);
+
+/*
 ** strndup which uses xmalloc routines
 */
 char *xstrndup(const char *str, size_t n);
+
+/*
+** strtol which only reads 'n' number of chars in the str to get the number
+*/
+long int xstrntol(const char *str, char **endptr, size_t n, int base);
 
 /*
 ** replacement for libc basename
@@ -113,6 +123,14 @@ char *xbasename(char *path);
 ** and replace it with the string "replacement".
 */
 void _xstrsubstitute(char **str, const char *pattern, const char *replacement);
+
+/* 
+ * Remove all quotes that surround a string in the string "str",
+ *   str (IN)	        target string (pointer to in case of expansion)
+ *   increased (IN/OUT)	current position in "str"
+ *   RET char *         str returned without quotes in it. needs to be xfreed
+ */
+char *xstrstrip(char *str);
 
 /* xshort_hostname
  *   Returns an xmalloc'd string containing the hostname

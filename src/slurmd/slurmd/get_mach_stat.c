@@ -10,7 +10,7 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>.
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -78,8 +78,8 @@
 
 static char* _cpuinfo_path = "/proc/cpuinfo";
 
-int compute_block_map(uint32_t numproc,
-			uint32_t **block_map, uint32_t **block_map_inv);
+int compute_block_map(uint16_t numproc,
+			uint16_t **block_map, uint16_t **block_map_inv);
 int chk_cpuinfo_str(char *buffer, char *keyword, char **valptr);
 int chk_cpuinfo_uint32(char *buffer, char *keyword, uint32_t *val);
 int chk_cpuinfo_float(char *buffer, char *keyword, float *val);
@@ -102,13 +102,13 @@ int
 main(int argc, char * argv[]) 
 {
 	int error_code;
-	uint32_t sockets, cores, threads;
-	uint32_t block_map_size;
-	uint32_t *block_map, *block_map_inv;
+	uint16_t sockets, cores, threads;
+	uint16_t block_map_size;
+	uint16_t *block_map, *block_map_inv;
 	struct config_record this_node;
 	char node_name[MAX_SLURM_NAME];
 	float speed;
-	uint32_t testnumproc = 0;
+	uint16_t testnumproc = 0;
 
 	if (argc > 1) {
 	    	_cpuinfo_path = argv[1];
@@ -127,6 +127,8 @@ main(int argc, char * argv[])
 				  &this_node.threads,
 				  &block_map_size,
 				  &block_map, &block_map_inv);
+	xfree(block_map);	/* not used here */
+	xfree(block_map_inv);	/* not used here */
 	error_code += get_memory(&this_node.real_memory);
 	error_code += get_tmp_disk(&this_node.tmp_disk, "/tmp");
 #ifdef USE_CPU_SPEED
@@ -134,10 +136,10 @@ main(int argc, char * argv[])
 #endif
 
 	debug3("\n");
-	debug3("NodeName=%s CPUs=%d Sockets=%d Cores=%d Threads=%d\n",
+	debug3("NodeName=%s CPUs=%u Sockets=%u Cores=%u Threads=%u\n",
 		node_name, this_node.cpus,
 		this_node.sockets, this_node.cores, this_node.threads);
-	debug3("\tRealMemory=%d TmpDisk=%d Speed=%f\n",
+	debug3("\tRealMemory=%u TmpDisk=%u Speed=%f\n",
 		this_node.real_memory, this_node.tmp_disk, speed);
 	if (error_code != 0) 
 		debug3("get_mach_stat error_code=%d encountered\n", error_code);
@@ -145,13 +147,13 @@ main(int argc, char * argv[])
 }
 
 
-/* getnodename - equivalent to gethostname, but return only the first 
+/* gethostname_short - equivalent to gethostname, but return only the first 
  * component of the fully qualified name 
  * (e.g. "linux123.foo.bar" becomes "linux123") 
  * OUT name
  */
 int
-getnodename (char *name, size_t len)
+gethostname_short (char *name, size_t len)
 {
 	int error_code, name_len;
 	char *dot_ptr, path_name[1024];
@@ -183,7 +185,7 @@ getnodename (char *name, size_t len)
  *         return code - 0 if no error, otherwise errno
  */
 extern int 
-get_procs(uint32_t *procs) 
+get_procs(uint16_t *procs) 
 {
 #ifdef LPAR_INFO_FORMAT2
 	/* AIX 5.3 only */
@@ -195,7 +197,7 @@ get_procs(uint32_t *procs)
 		return EINVAL;
 	}
 	
-	*procs = (uint32_t)info.online_vcpus;
+	*procs = (uint16_t) info.online_vcpus;
 #else /* !LPAR_INFO_FORMAT2 */
 
 #  ifdef _SC_NPROCESSORS_ONLN
@@ -208,7 +210,7 @@ get_procs(uint32_t *procs)
 		return EINVAL;
 	} 
 
-	*procs = my_proc_tally;
+	*procs = (uint16_t) my_proc_tally;
 #  else
 #    ifdef HAVE_SYSCTLBYNAME
 	int ncpu;
@@ -219,7 +221,7 @@ get_procs(uint32_t *procs)
 		error("get_procs: error running sysctl(HW_NCPU)");
 		return EINVAL;
 	}
-	*procs = ncpu;
+	*procs = (uint16_t) ncpu;
 #    else /* !HAVE_SYSCTLBYNAME */
 	*procs = 1;
 #    endif /* HAVE_SYSCTLBYNAME */
@@ -274,9 +276,9 @@ get_mach_name(char *node_name)
 {
     int error_code;
 
-    error_code = getnodename(node_name, MAX_SLURM_NAME);
+    error_code = gethostname_short(node_name, MAX_SLURM_NAME);
     if (error_code != 0)
-	error ("get_mach_name: getnodename error %d\n", error_code);
+	error ("get_mach_name: gethostname_short error %d\n", error_code);
 
     return error_code;
 }
@@ -389,7 +391,7 @@ int chk_cpuinfo_str(char *buffer, char *keyword, char **valptr)
 
 /* chk_cpuinfo_uint32
  *	check a line of cpuinfo data (buffer) for a keyword.  If it
- *	exists, return the uint32 value for that keyword in *valptr.
+ *	exists, return the uint16 value for that keyword in *valptr.
  * Input:  buffer - single line of cpuinfo data
  *	   keyword - keyword to check for
  * Output: valptr - uint32 value corresponding to keyword
@@ -399,7 +401,7 @@ int chk_cpuinfo_uint32(char *buffer, char *keyword, uint32_t *val)
 {
 	char *valptr;
 	if (chk_cpuinfo_str(buffer, keyword, &valptr)) {
-		*val = (float) strtoul(valptr, (char **)NULL, 10);
+		*val = strtoul(valptr, (char **)NULL, 10);
 		return true;
 	} else {
 		return false;
@@ -464,47 +466,46 @@ get_speed(float *speed)
  *         block_map - asbtract->physical block distribution map 
  *         block_map_inv - physical->abstract block distribution map (inverse)
  *         return code - 0 if no error, otherwise errno
+ * NOTE: User must xfree block_map and block_map_inv  
  */
 typedef struct cpuinfo {
-	int seen;
-	uint32_t id;
+	uint16_t seen;
+	uint32_t cpuid;
 	uint32_t physid;
-	uint32_t physcnt;
-	uint32_t siblings;
-	uint32_t cores;
+	uint16_t physcnt;
 	uint32_t coreid;
-	uint32_t corecnt;
+	uint16_t corecnt;
+	uint16_t siblings;
+	uint16_t cores;
 } cpuinfo_t;
 static cpuinfo_t *cpuinfo = NULL; /* array of CPU information for get_cpuinfo */
 				  /* Note: file static for qsort/_compare_cpus*/
 extern int
-get_cpuinfo(uint32_t numproc,
-		uint32_t *p_sockets, uint32_t *p_cores, uint32_t *p_threads,
-		uint32_t *block_map_size,
-		uint32_t **block_map, uint32_t **block_map_inv)
+get_cpuinfo(uint16_t numproc,
+		uint16_t *p_sockets, uint16_t *p_cores, uint16_t *p_threads,
+		uint16_t *block_map_size,
+		uint16_t **block_map, uint16_t **block_map_inv)
 {
 	FILE *cpu_info_file;
 	char buffer[128];
 	int retval;
-	uint32_t curcpu, sockets, cores, threads;
-	uint32_t numcpu	   = 0;		/* number of cpus seen */
-	uint32_t numphys   = 0;		/* number of unique "physical id"s */
-	uint32_t numcores  = 0;		/* number of unique "cores id"s */
+	uint16_t curcpu, sockets, cores, threads;
+	uint16_t numcpu	   = 0;		/* number of cpus seen */
+	uint16_t numphys   = 0;		/* number of unique "physical id"s */
+	uint16_t numcores  = 0;		/* number of unique "cores id"s */
 
-	uint32_t maxsibs   = 0;		/* maximum value of "siblings" */
-	uint32_t maxcores  = 0;		/* maximum value of "cores" */
-	uint32_t minsibs   = INT_MAX;	/* minimum value of "siblings" */
-	uint32_t mincores  = INT_MAX;	/* minimum value of "cores" */
+	uint16_t maxsibs   = 0;		/* maximum value of "siblings" */
+	uint16_t maxcores  = 0;		/* maximum value of "cores" */
+	uint16_t minsibs   = 0xffff;	/* minimum value of "siblings" */
+	uint16_t mincores  = 0xffff;	/* minimum value of "cores" */
 
 	uint32_t maxcpuid  = 0;		/* maximum CPU ID ("processor") */
 	uint32_t maxphysid = 0;		/* maximum "physical id" */
 	uint32_t maxcoreid = 0;		/* maximum "core id" */
-	uint32_t mincpuid  = INT_MAX;	/* minimum CPU ID ("processor") */
-	uint32_t minphysid = INT_MAX;	/* minimum "physical id" */
-	uint32_t mincoreid = INT_MAX;	/* minimum "core id" */
-#ifdef DEBUG_DETAIL
+	uint32_t mincpuid  = 0xffffffff;/* minimum CPU ID ("processor") */
+	uint32_t minphysid = 0xffffffff;/* minimum "physical id" */
+	uint32_t mincoreid = 0xffffffff;/* minimum "core id" */
 	int i;
-#endif
 
 	*p_sockets = numproc;		/* initially all single core/thread */
 	*p_cores   = 1;
@@ -515,45 +516,96 @@ get_cpuinfo(uint32_t numproc,
 
 	cpu_info_file = fopen(_cpuinfo_path, "r");
 	if (cpu_info_file == NULL) {
-		error ("get_cpuinfo: error %d opening %s\n", errno, _cpuinfo_path);
+		error ("get_cpuinfo: error %d opening %s\n", 
+			errno, _cpuinfo_path);
 		return errno;
 	}
 
+
 	/* Note: assumes all processor IDs are within [0:numproc-1] */
-	cpuinfo = xmalloc(numproc * sizeof(cpuinfo_t));
-	memset(cpuinfo, 0, numproc * sizeof(cpuinfo_t));
-	if (cpuinfo == NULL) {
-		error ("get_cpuinfo: error %d allocating cpuinfo\n", errno);
-		return errno;
-	}
+	/*       treats physical/core IDs as tokens, not indices */
+	if (cpuinfo)
+		memset(cpuinfo, 0, numproc * sizeof(cpuinfo_t));
+	else
+		cpuinfo = xmalloc(numproc * sizeof(cpuinfo_t));
+
 	curcpu = 0;
 	while (fgets(buffer, sizeof(buffer), cpu_info_file) != NULL) {
 		uint32_t val;
 		if (chk_cpuinfo_uint32(buffer, "processor", &val)) {
-			curcpu = val;
-			cpuinfo[val].seen = 1;
-			cpuinfo[val].id = val;
 			numcpu++;
+			curcpu = val;
+		    	if (val >= numproc) {	/* out of bounds, ignore */
+				debug("cpuid is %u (> %d), ignored", 
+					val, numproc);
+				continue;
+			}
+			cpuinfo[val].seen = 1;
+			cpuinfo[val].cpuid = val;
 			maxcpuid = MAX(maxcpuid, val);
 			mincpuid = MIN(mincpuid, val);
 		} else if (chk_cpuinfo_uint32(buffer, "physical id", &val)) {
-			cpuinfo[curcpu].physid = val;
-			if (cpuinfo[val].physcnt == 0) numphys++;
-			cpuinfo[val].physcnt++;
+			/* see if the ID has already been seen */
+			for (i=0; i<numproc; i++) {
+				if ((cpuinfo[i].physid == val)
+				&&  (cpuinfo[i].physcnt))
+					break;
+			}
+
+			if (i == numproc) {		/* new ID... */
+				numphys++;		/* ...increment total */
+			} else {			/* existing ID... */
+				cpuinfo[i].physcnt++;	/* ...update ID cnt */
+			}
+
+			if (curcpu < numproc) {
+				cpuinfo[curcpu].physcnt++;
+				cpuinfo[curcpu].physid = val;
+			}
+
 			maxphysid = MAX(maxphysid, val);
 			minphysid = MIN(minphysid, val);
 		} else if (chk_cpuinfo_uint32(buffer, "core id", &val)) {
-			cpuinfo[curcpu].coreid = val;
-			if (cpuinfo[val].corecnt == 0) numcores++;
-			cpuinfo[val].corecnt++;
+			/* see if the ID has already been seen */
+			for (i = 0; i < numproc; i++) {
+				if ((cpuinfo[i].coreid == val)
+				&&  (cpuinfo[i].corecnt))
+					break;
+			}
+
+			if (i == numproc) {		/* new ID... */
+				numcores++;		/* ...increment total */
+			} else {			/* existing ID... */
+				cpuinfo[i].corecnt++;	/* ...update ID cnt */
+			}
+
+			if (curcpu < numproc) {
+				cpuinfo[curcpu].corecnt++;
+				cpuinfo[curcpu].coreid = val;
+			}
+
 			maxcoreid = MAX(maxcoreid, val);
 			mincoreid = MIN(mincoreid, val);
 		} else if (chk_cpuinfo_uint32(buffer, "siblings", &val)) {
-			cpuinfo[curcpu].siblings = val;
-			maxsibs = MAX(maxsibs, val) ;
-			minsibs = MIN(minsibs, val) ;
+			/* Note: this value is a count, not an index */
+		    	if (val > numproc) {	/* out of bounds, ignore */
+				debug("siblings is %u (> %d), ignored",
+					val, numproc);
+				continue;
+			}
+			if (curcpu < numproc)
+				cpuinfo[curcpu].siblings = val;
+			maxsibs = MAX(maxsibs, val);
+			minsibs = MIN(minsibs, val);
 		} else if (chk_cpuinfo_uint32(buffer, "cpu cores", &val)) {
-			cpuinfo[curcpu].cores = val;
+			/* Note: this value is a count, not an index */
+		    	if (val > numproc) {	/* out of bounds, ignore */
+				debug("cores is %u (> %d), ignored",
+					val, numproc);
+				continue;
+			}
+			if (curcpu < numproc)
+				cpuinfo[curcpu].cores = val;
 			maxcores = MAX(maxcores, val);
 			mincores = MIN(mincores, val);
 		}
@@ -578,24 +630,27 @@ get_cpuinfo(uint32_t numproc,
 	    (mincores == maxcores)) {
 		sockets = numphys; 		/* unique "physical id" */
 		if (sockets <= 1) {		/* verify single socket */
-		    sockets = numcpu / maxsibs;	/* maximum "siblings" */
+			sockets = numcpu / maxsibs; /* maximum "siblings" */
 		}
-		if (sockets == 0) sockets = 1;	/* guarantee non-zero */
+		if (sockets == 0)
+			sockets = 1;		/* guarantee non-zero */
 	
 		cores = numcores / sockets;	/* unique "core id" */
 		cores = MAX(maxcores, cores);	/* maximum "cpu cores" */
-			cores = maxcores;
 	
 		if (cores == 0) {
-		    cores = numcpu / sockets;	/* assume multi-core */
-		    if (cores > 1) {
-			debug3("Warning: cpuinfo missing 'core id' or 'cpu cores' but assuming multi-core");
-		    }
+			cores = numcpu / sockets;	/* assume multi-core */
+			if (cores > 1) {
+				debug3("Warning: cpuinfo missing 'core id' or "
+					"'cpu cores' but assuming multi-core");
+			}
 		}
-		if (cores == 0) cores = 1;	/* guarantee non-zero */
+		if (cores == 0)
+			cores = 1;	/* guarantee non-zero */
 	
 		threads = numcpu / (sockets * cores); /* solve for threads */
-		if (threads == 0) threads = 1;	/* guarantee non-zero */
+		if (threads == 0)
+			threads = 1;	/* guarantee non-zero */
 	} else {				/* heterogeneous system */
 		sockets = numcpu;
 		cores   = 1;			/* one core per socket */
@@ -609,33 +664,33 @@ get_cpuinfo(uint32_t numproc,
 #if DEBUG_DETAIL
 	/*** Display raw data ***/
 	debug3("\n");
-	debug3("numcpu:     %d\n", numcpu);
-	debug3("numphys:    %d\n", numphys);
-	debug3("numcores:   %d\n", numcores);
+	debug3("numcpu:     %u\n", numcpu);
+	debug3("numphys:    %u\n", numphys);
+	debug3("numcores:   %u\n", numcores);
 
-	debug3("cores:      %d->%d\n", mincores, maxcores);
-	debug3("sibs:       %d->%d\n", minsibs, maxsibs);
+	debug3("cores:      %u->%u\n", mincores, maxcores);
+	debug3("sibs:       %u->%u\n", minsibs,  maxsibs);
 
-	debug3("cpuid:      %d->%d\n", mincpuid, maxcpuid);
-	debug3("physid:     %d->%d\n", minphysid, maxphysid);
-	debug3("coreid:     %d->%d\n", mincoreid, maxcoreid);
+	debug3("cpuid:      %u->%u\n", mincpuid,  maxcpuid);
+	debug3("physid:     %u->%u\n", minphysid, maxphysid);
+	debug3("coreid:     %u->%u\n", mincoreid, maxcoreid);
 
 	for (i = 0; i <= maxcpuid; i++) {
 		debug3("CPU %d:", i);
-		debug3(" seen: %d", cpuinfo[i].seen);
-		debug3(" physid: %d", cpuinfo[i].physid);
-		debug3(" physcnt: %d", cpuinfo[i].physcnt);
-		debug3(" siblings: %d", cpuinfo[i].siblings);
-		debug3(" cores: %d", cpuinfo[i].cores);
-		debug3(" coreid: %d", cpuinfo[i].coreid);
-		debug3(" corecnt: %d", cpuinfo[i].corecnt);
+		debug3(" seen:     %u", cpuinfo[i].seen);
+		debug3(" physid:   %u", cpuinfo[i].physid);
+		debug3(" physcnt:  %u", cpuinfo[i].physcnt);
+		debug3(" siblings: %u", cpuinfo[i].siblings);
+		debug3(" cores:    %u", cpuinfo[i].cores);
+		debug3(" coreid:   %u", cpuinfo[i].coreid);
+		debug3(" corecnt:  %u", cpuinfo[i].corecnt);
 		debug3("\n");
 	}
 
 	debug3("\n");
-	debug3("Sockets:          %d\n", sockets);
-	debug3("Cores per socket: %d\n", cores);
-	debug3("Threads per core: %d\n", threads);
+	debug3("Sockets:          %u\n", sockets);
+	debug3("Cores per socket: %u\n", cores);
+	debug3("Threads per core: %u\n", threads);
 #endif
 
 	*block_map_size = numcpu;
@@ -653,8 +708,9 @@ get_cpuinfo(uint32_t numproc,
  *   actual machine processor ID ordering (which can be BIOS/OS dependendent)
  * Input:  numproc - number of processors on the system
  *	   cpu - array of cpuinfo (file static for qsort/_compare_cpus)
- * Output: block_map - asbtract->physical block distribution map 
+ * Output: block_map, block_map_inv - asbtract->physical block distribution map 
  *         return code - 0 if no error, otherwise errno
+ * NOTE: User must free block_map and block_map_inv
  *
  * For example, given a system with 8 logical processors arranged as:
  *
@@ -686,57 +742,64 @@ get_cpuinfo(uint32_t numproc,
 /* physical cpu comparison with void * arguments to allow use with
  * libc qsort()
  */
-static int _icmp(uint32_t a, uint32_t b)
+static int _icmp16(uint16_t a, uint16_t b)
 {
     	if (a < b) {
-	    return -1;
+		return -1;
 	} else if (a == b) {
-	    return 0;
+		return 0;
 	} else {
-	    return 1;
+		return 1;
+	}
+}
+static int _icmp32(uint32_t a, uint32_t b)
+{
+	if (a < b) {
+		return -1;
+	} else if (a == b) {
+		return 0;
+	} else {
+		return 1;
 	}
 }
 
 int _compare_cpus(const void *a1, const void *b1) {
-	uint32_t *a = (uint32_t *) a1;
-	uint32_t *b = (uint32_t *) b1;
+	uint16_t *a = (uint16_t *) a1;
+	uint16_t *b = (uint16_t *) b1;
 	int cmp;
-	cmp = -1 * _icmp(cpuinfo[*a].seen,cpuinfo[*b].seen); /* seen to front */
-	if (cmp != 0) return cmp;
-	cmp = _icmp(cpuinfo[*a].physid, cpuinfo[*b].physid); /* key 1: physid */
-	if (cmp != 0) return cmp;
-	cmp = _icmp(cpuinfo[*a].coreid, cpuinfo[*b].coreid); /* key 2: coreid */
-	if (cmp != 0) return cmp;
-	cmp = _icmp(cpuinfo[*a].id, cpuinfo[*b].id); 	     /* key 3: cpu id */
+
+	cmp = -1 * _icmp16(cpuinfo[*a].seen,cpuinfo[*b].seen); /* seen to front */
+	if (cmp != 0)
+		return cmp;
+
+	cmp = _icmp32(cpuinfo[*a].physid, cpuinfo[*b].physid); /* key 1: physid */
+	if (cmp != 0)
+		return cmp;
+
+	cmp = _icmp32(cpuinfo[*a].coreid, cpuinfo[*b].coreid); /* key 2: coreid */
+	if (cmp != 0)
+		return cmp;
+
+	cmp = _icmp32(cpuinfo[*a].cpuid, cpuinfo[*b].cpuid);   /* key 3: cpu id */
 	return cmp;
 }
 
-int compute_block_map(uint32_t numproc,
-		uint32_t **block_map, uint32_t **block_map_inv)
+int compute_block_map(uint16_t numproc,
+		uint16_t **block_map, uint16_t **block_map_inv)
 {
-	uint32_t i;
+	uint16_t i;
 	/* Compute abstract->machine block mapping (and inverse) */
 	if (block_map) {
-		*block_map = xmalloc(numproc * sizeof(uint32_t));
-		memset(*block_map, 0, numproc * sizeof(uint32_t));
-		if (*block_map == NULL) {
-			error ("get_cpuinfo: error %d allocating block_map\n", errno);
-			return errno;
-		}
+		*block_map = xmalloc(numproc * sizeof(uint16_t));
 		for (i = 0; i < numproc; i++) {
 			(*block_map)[i] = i;
 		}
-		qsort(*block_map, numproc, sizeof(uint32_t), &_compare_cpus);
+		qsort(*block_map, numproc, sizeof(uint16_t), &_compare_cpus);
 	}
 	if (block_map_inv) {
-		*block_map_inv = xmalloc(numproc * sizeof(uint32_t));
-		memset(*block_map_inv, 0, numproc * sizeof(uint32_t));
-		if (*block_map_inv == NULL) {
-			error("get_cpuinfo: error %d allocating block_map_inv\n", errno);
-			return errno;
-		}
+		*block_map_inv = xmalloc(numproc * sizeof(uint16_t));
 		for (i = 0; i < numproc; i++) {
-			uint32_t idx = (*block_map)[i];
+			uint16_t idx = (*block_map)[i];
 			(*block_map_inv)[idx] = i;
 		}
 	}
@@ -752,7 +815,7 @@ int compute_block_map(uint32_t numproc,
 	debug3("\n");
 	debug3("Physical Socket ID:  ");
 	for (i = 0; i < numproc; i++) {
-		debug3("%3d", cpuinfo[i].physid);
+		debug3("%3u", cpuinfo[i].physid);
 	}
 	debug3("\n");
 
@@ -765,19 +828,20 @@ int compute_block_map(uint32_t numproc,
 		debug3("\n");
 		debug3("Output: (Machine ID) ");
 		for (i = 0; i < numproc; i++) {
-			debug3("%3d", (*block_map)[i]);
+			debug3("%3u", (*block_map)[i]);
 		}
 		debug3("\n");
 		debug3("Physical Socket ID:  ");
 		for (i = 0; i < numproc; i++) {
-			uint32_t id = (*block_map)[i];
-			debug3("%3d", cpuinfo[id].physid);
+			uint16_t id = (*block_map)[i];
+			debug3("%3u", cpuinfo[id].physid);
 		}
 		debug3("\n");
 	}
 
 	if (block_map_inv) {
-		debug3("\nMachine -> Abstract logical CPU ID block mapping: (inverse)\n");
+		debug3("\nMachine -> Abstract logical CPU ID block mapping: "
+			"(inverse)\n");
 		debug3("Input: (Machine ID)  ");
 		for (i = 0; i < numproc; i++) {
 			debug3("%3d", i);
@@ -785,12 +849,12 @@ int compute_block_map(uint32_t numproc,
 		debug3("\n");
 		debug3("Output: (Abstract ID)");
 		for (i = 0; i < numproc; i++) {
-			debug3("%3d", (*block_map_inv)[i]);
+			debug3("%3u", (*block_map_inv)[i]);
 		}
 		debug3("\n");
 		debug3("Physical Socket ID:  ");
 		for (i = 0; i < numproc; i++) {
-			debug3("%3d", cpuinfo[i].physid);
+			debug3("%3u", cpuinfo[i].physid);
 		}
 		debug3("\n");
 	}

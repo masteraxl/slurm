@@ -7,10 +7,10 @@
 #          "FAILURE: ..." otherwise with an explanation of the failure, OR
 #          anything else indicates a failure mode that must be investigated.
 ############################################################################
-# Copyright (C) 2002 The Regents of the University of California.
+# Copyright (C) 2002-2006 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-217948.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -50,15 +50,19 @@ make_bash_script $file_in "
 #
 # Submit a job so we have something to work with
 #
-spawn $srun --batch --output=/dev/null --error=/dev/null -t2 $file_in
+set sbatch_pid [spawn $sbatch --output=/dev/null --error=/dev/null -t2 $file_in]
 expect {
-	-re "jobid ($number) submitted" {
+	-re "Submitted batch job ($number)" {
 		set job_id $expect_out(1,string)
 		exp_continue
 	}
 	timeout {
 		send_user "\nFAILURE: srun not responding\n"
-		kill_srun
+		if {$job_id == 0} {
+			slow_kill $sbatch_pid
+		} else {
+			cancel_job $job_id
+		}
 		exit 1
 	}
 	eof {
@@ -67,21 +71,17 @@ expect {
 }
 if {$job_id == 0} {
 	send_user "\nFAILURE: srun submit failed\n"
-	kill_srun
 	exit 1
 }
 
-exec $bin_rm -f $file_in
-
 #
-# Wait for job to begin execution
+# Wait for step  to begin execution
 #
-if {[wait_for_job $job_id RUNNING] != 0} {
-	send_user "\nFAILURE: waiting for job $job_id to run\n"
-	kill_srun
+if {[wait_for_step $job_id.0] != 0} {
+	send_user "\nFAILURE: waiting for step $job_id.0 to run\n"
+	cancel_job $job_id
 	exit 1
 }
-exec $bin_sleep 2
 
 #
 # Enable/disable/test ability to heckpoint
@@ -154,6 +154,13 @@ expect {
 if {$matches != 1} {
 	send_user "\nFAILURE: scontrol failed to change checkpoint ability\n"
 	set exit_code 1
+}
+
+# Actual checkpoint on AIX only works for tasks launched using POE
+if {[test_aix] == 1} {
+	send_user "WARNING: Further testing is incompatible with AIX\n"
+	cancel_job $job_id
+	exit $exit_code
 }
 
 #
@@ -235,6 +242,7 @@ if {$matches != 1} {
 #
 cancel_job $job_id
 if {$exit_code == 0} {
+	exec $bin_rm -f $file_in
 	send_user "\nSUCCESS\n"
 }
 exit $exit_code

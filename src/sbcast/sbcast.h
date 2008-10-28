@@ -1,12 +1,11 @@
 /****************************************************************************\
  *  sbcast.h - definitions used for sbcast data functions
- *
- *  $Id: sbcast.h 6965 2006-01-04 23:31:07Z jette $
  *****************************************************************************
- *  Copyright (C) 2006 The Regents of the University of California.
+ *  Copyright (C) 2006-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -54,6 +53,7 @@ struct sbcast_parameters {
 	int  fanout;
 	bool force;
 	bool preserve;
+	int  timeout;
 	int  verbose;
 	char *src_fname;
 	char *dst_fname;

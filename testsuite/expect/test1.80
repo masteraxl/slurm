@@ -9,10 +9,11 @@
 #          "FAILURE: ..." otherwise with an explanation of the failure, OR
 #          anything else indicates a failure mode that must be investigated.
 ############################################################################
-# Copyright (C) 2002-2006 The Regents of the University of California.
+# Copyright (C) 2002-2007 The Regents of the University of California.
+# Copyright (C) 2008 Lawrence Livermore National Security.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-217948.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -38,8 +39,8 @@ set exit_code   0
 
 print_header $test_id
 
-if { [test_xcpu] } {
-	send_user "\nWARNING: This test is incompatable with XCPU systems\n"
+if { [test_front_end] } {
+	send_user "\nWARNING: This test is incompatable with front end systems\n"
 	exit 0
 }
 
@@ -49,9 +50,13 @@ if { [test_xcpu] } {
 set timeout $max_job_delay
 set expected_layout [list 0 0 1 1]
 set tested_layout [list -1 -1 -1 -1] 
-spawn $srun -O -N2 -n4 -l --distribution=block -t1 $bin_printenv SLURM_NODEID  
+set srun_pid [spawn $srun -O -N2 -n4 -l --distribution=block -t1 $bin_printenv SLURM_NODEID]
 expect {
-	-re "More ($alpha) requested than permitted" {
+	-re "More processors requested than permitted" {
+		send_user "\nWARNING: can't test srun task distribution\n"
+		exit 0
+	}
+	-re "Node count specification invalid" {
 		send_user "\nWARNING: can't test srun task distribution\n"
 		exit 0
 	}
@@ -63,9 +68,8 @@ expect {
 	}
 	timeout {
 		send_user "\nFAILURE: srun not responding\n"
-		kill_srun
+		slow_kill $srun_pid
 		set exit_code 1
-		exp_continue
 	}
 	eof {
 		wait
@@ -93,9 +97,13 @@ if {[test_front_end] != 0} {
 set timeout $max_job_delay
 set expected_layout [list 0 1 0 1]
 set tested_layout [list -1 -1 -1 -1] 
-spawn $srun -O -N2 -n4 -l --distribution=cyclic -t1 $bin_printenv SLURM_NODEID  
+set srun_pid [spawn $srun -O -N2 -n4 -l --distribution=cyclic -t1 $bin_printenv SLURM_NODEID]
 expect {
-	-re "More ($alpha) requested than permitted" {
+	-re "More processors requested than permitted" {
+		send_user "\nWARNING: can't test srun task distribution\n"
+		exit 0
+	}
+	-re "Node count specification invalid" {
 		send_user "\nWARNING: can't test srun task distribution\n"
 		exit 0
 	}
@@ -107,9 +115,8 @@ expect {
 	}
 	timeout {
 		send_user "\nFAILURE: srun not responding\n"
-		kill_srun
+		slow_kill $srun_pid
 		set exit_code 1
-		exp_continue
 	}
 	eof {
 		wait

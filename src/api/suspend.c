@@ -5,7 +5,7 @@
  *  Copyright (C) 2005-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -57,6 +57,7 @@ static int _suspend_op (uint16_t op, uint32_t job_id)
 	suspend_msg_t sus_req;
 	slurm_msg_t req_msg;
 
+	slurm_msg_t_init(&req_msg);
 	sus_req.op       = op;
 	sus_req.job_id   = job_id;
 	req_msg.msg_type = REQUEST_SUSPEND;
@@ -100,6 +101,7 @@ extern int slurm_requeue (uint32_t job_id)
 	job_id_msg_t requeue_req;
 	slurm_msg_t req_msg;
 
+	slurm_msg_t_init(&req_msg);
 	requeue_req.job_id	= job_id;
 	req_msg.msg_type	= REQUEST_JOB_REQUEUE;
 	req_msg.data		= &requeue_req;

@@ -5,7 +5,7 @@
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.com>
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -77,6 +77,9 @@ extern int checkpoint_op(uint16_t op, uint16_t data, void * step_ptr,
 /* note checkpoint completion */
 extern int checkpoint_comp(void * step_ptr, time_t event_time, uint32_t error_code,
 		char *error_msg);
+
+extern int checkpoint_task_comp(void * step_ptr, uint32_t task_id, 
+			time_t event_time, uint32_t error_code, char *error_msg);
 
 /* gather checkpoint error info */
 extern int checkpoint_error(void * step_ptr, 

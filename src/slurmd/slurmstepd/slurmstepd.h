@@ -5,7 +5,7 @@
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Christopher J. Morrone <morrone2@llnl.gov>.
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -42,6 +42,7 @@
 #include "src/common/bitstring.h"
 
 #define STEPD_MESSAGE_COMP_WAIT 15 /* seconds */
+#define MAX_RETRIES    3
 
 extern int slurmstepd_blocked_signals[];
 
@@ -54,6 +55,7 @@ typedef struct {
 	slurm_addr parent_addr;
 	int children;
 	int max_depth;
+	bool wait_children;
 	bitstr_t *bits;
 	int step_rc;
 	jobacctinfo_t *jobacct;

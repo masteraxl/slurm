@@ -4,7 +4,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -128,7 +128,7 @@ static void _mark_shutdown_true(List obj_list)
 {
 	ListIterator objs;
 	eio_obj_t *obj;
-	
+
 	objs = list_iterator_create(obj_list);
 	while ((obj = list_next(objs))) {
 		obj->shutdown = true;
@@ -277,40 +277,32 @@ _poll_dispatch(struct pollfd *pfds, unsigned int nfds, eio_obj_t *map[],
 	       List objList)
 {
 	int i;
-	ListIterator iter;
-	eio_obj_t *obj;
 
 	for (i = 0; i < nfds; i++) {
 		if (pfds[i].revents > 0)
 			_poll_handle_event(pfds[i].revents, map[i], objList);
 	}
-
-	iter = list_iterator_create(objList);
-	while ((obj = list_next(iter))) {
-		if (_is_writable(obj) && obj->ops->handle_write)
-			(*obj->ops->handle_write) (obj, objList);
-	}
-	list_iterator_destroy(iter);
 }
 
 static void
 _poll_handle_event(short revents, eio_obj_t *obj, List objList)
 {
-	if (revents & POLLNVAL) {
-		debug("POLLNVAL on fd %d, shutting down eio object", obj->fd);
-		obj->shutdown = true;
-		return;
-	}
+	bool read_called = false;
+	bool write_called = false;
 
-	if (revents & POLLERR) {
+	if (revents & (POLLERR|POLLNVAL)) {
 		if (obj->ops->handle_error) {
 			(*obj->ops->handle_error) (obj, objList);
 		} else if (obj->ops->handle_read) {
 			(*obj->ops->handle_read) (obj, objList);
+			read_called = true;
 		} else if (obj->ops->handle_write) {
 			(*obj->ops->handle_write) (obj, objList);
+			write_called = true;
 		} else {
-			debug("No handler for POLLERR");
+			debug("No handler for %s on fd %d",
+			      revents & POLLERR ? "POLLERR" : "POLLNVAL",
+			      obj->fd);
 			obj->shutdown = true;
 		}
 		return;
@@ -320,9 +312,15 @@ _poll_handle_event(short revents, eio_obj_t *obj, List objList)
 		if (obj->ops->handle_close) {
 			(*obj->ops->handle_close) (obj, objList);
 		} else if (obj->ops->handle_read) {
-			(*obj->ops->handle_read) (obj, objList);
+			if (!read_called) {
+				(*obj->ops->handle_read) (obj, objList);
+				read_called = true;
+			}
 		} else if (obj->ops->handle_write) {
-			(*obj->ops->handle_write) (obj, objList);
+			if (!write_called) {
+				(*obj->ops->handle_write) (obj, objList);
+				write_called = true;
+			}
 		} else {
 			debug("No handler for POLLHUP");
 			obj->shutdown = true;
@@ -331,7 +329,10 @@ _poll_handle_event(short revents, eio_obj_t *obj, List objList)
 
 	if (revents & POLLIN) {
 		if (obj->ops->handle_read) {
-			(*obj->ops->handle_read ) (obj, objList);
+			if (!read_called) {
+				(*obj->ops->handle_read ) (obj, objList);
+				read_called = true;
+			}
 		} else {
 			debug("No handler for POLLIN");
 			obj->shutdown = true;
@@ -340,7 +341,10 @@ _poll_handle_event(short revents, eio_obj_t *obj, List objList)
 
 	if (revents & POLLOUT) {
 		if (obj->ops->handle_write) {
-			(*obj->ops->handle_write) (obj, objList);
+			if (!write_called) {
+				(*obj->ops->handle_write) (obj, objList);
+				write_called = true;
+			}
 		} else {
 			debug("No handler for POLLOUT");
 			obj->shutdown = true;

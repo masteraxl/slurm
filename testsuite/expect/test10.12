@@ -10,7 +10,7 @@
 # Copyright (C) 2002 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Danny Auble <da@llnl.gov>
-# UCRL-CODE-217948.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -38,13 +38,22 @@ set non_bg      0
 
 print_header $test_id
 
+if { [test_bluegene] == 0 } {
+	send_user "\nWARNING: This test is only compatable with bluegene systems\n"
+	exit 0
+}
+if {[file exists $smap] == 0} {
+	send_user "\nFAILURE: smap not installed\n"
+	exit 1
+}
+
 #
 # Test smap resolve ablilty
 # for XYZ coords to Rack Midplane
 #
 spawn $smap --resolve 000
 expect {
-	-re "must be on BG SN to resolve." {
+	-re "Must be on BG" {
 		set non_bg 1
 		exp_continue;
 	}

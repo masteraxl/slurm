@@ -1,10 +1,10 @@
 /*****************************************************************************\
  *  sched_plugin.c - scheduler plugin stub.
  *****************************************************************************
- *  Copyright (C) 2002 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Jay Windley <jwindley@lnxi.com>.
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -44,6 +44,7 @@
 #include "src/common/xstring.h"
 
 #include "src/slurmctld/sched_plugin.h"
+#include "src/slurmctld/slurmctld.h"
 
 
 /* ************************************************************************ */
@@ -51,10 +52,18 @@
 /* ************************************************************************ */
 typedef struct slurm_sched_ops {
 	int		(*schedule)		( void );
-	uint32_t	(*initial_priority)	( uint32_t );
+	int		(*newalloc)		( struct job_record * );
+	int		(*freealloc)		( struct job_record * );
+	uint32_t	(*initial_priority)	( uint32_t, 
+						  struct job_record * );
 	void            (*job_is_pending)     	( void );
+	int		(*reconfig)		( void );
+	void            (*partition_change)    	( void );
 	int		(*get_errno)		( void );
 	char *		(*strerror)		( int );
+	void		(*job_requeue)		( struct job_record *,
+						  char *reason );
+	char *		(*get_conf)		( void );
 } slurm_sched_ops_t;
 
 
@@ -84,13 +93,29 @@ slurm_sched_get_ops( slurm_sched_context_t *c )
 	 */
 	static const char *syms[] = {
 		"slurm_sched_plugin_schedule",
+		"slurm_sched_plugin_newalloc",
+		"slurm_sched_plugin_freealloc",
 		"slurm_sched_plugin_initial_priority",
 		"slurm_sched_plugin_job_is_pending",
+		"slurm_sched_plugin_reconfig",
+		"slurm_sched_plugin_partition_change",
 		"slurm_sched_get_errno",
-		"slurm_sched_strerror"
+		"slurm_sched_strerror",
+		"slurm_sched_plugin_requeue",
+		"slurm_sched_get_conf"
 	};
 	int n_syms = sizeof( syms ) / sizeof( char * );
 
+	/* Find the correct plugin. */
+        c->cur_plugin = plugin_load_and_link(c->sched_type, n_syms, syms,
+					     (void **) &c->ops);
+        if ( c->cur_plugin != PLUGIN_INVALID_HANDLE ) 
+        	return &c->ops;
+
+	error("Couldn't find the specified plugin name for %s "
+	      "looking at all files",
+	      c->sched_type);
+	
 	/* Get plugin list. */
 	if ( c->plugin_list == NULL ) {
 		char *plugin_dir;
@@ -164,6 +189,8 @@ slurm_sched_context_destroy( slurm_sched_context_t *c )
 		if ( plugrack_destroy( c->plugin_list ) != SLURM_SUCCESS ) {
 			return SLURM_ERROR;
 		}
+	} else {
+		plugin_unload(c->cur_plugin);
 	}
 
 	xfree( c->sched_type );
@@ -231,6 +258,18 @@ slurm_sched_fini( void )
 
 
 /* *********************************************************************** */
+/*  TAG(                        slurm_sched_reconfig                    )  */
+/* *********************************************************************** */
+extern int
+slurm_sched_reconfig( void )
+{
+	if ( slurm_sched_init() < 0 )
+		return SLURM_ERROR;
+
+	return (*(g_sched_context->ops.reconfig))();
+}
+
+/* *********************************************************************** */
 /*  TAG(                        slurm_sched_schedule                    )  */
 /* *********************************************************************** */
 int
@@ -242,18 +281,45 @@ slurm_sched_schedule( void )
 	return (*(g_sched_context->ops.schedule))();
 }
 
+/* *********************************************************************** */
+/*  TAG(                        slurm_sched_newalloc                    )  */
+/* *********************************************************************** */
+int
+slurm_sched_newalloc( struct job_record *job_ptr )
+{
+	if ( slurm_sched_init() < 0 )
+		return SLURM_ERROR;
+	
+	return (*(g_sched_context->ops.newalloc))( job_ptr );
+}
+
+/* *********************************************************************** */
+/*  TAG(                        slurm_sched_freealloc                    )  */
+/* *********************************************************************** */
+int
+slurm_sched_freealloc( struct job_record *job_ptr )
+{
+	if ( slurm_sched_init() < 0 )
+		return SLURM_ERROR;
+	
+	return (*(g_sched_context->ops.freealloc))( job_ptr );
+}
+
 
 /* *********************************************************************** */
 /*  TAG(                   slurm_sched_initital_priority                )  */
 /* *********************************************************************** */
 uint32_t
-slurm_sched_initial_priority( u_int32_t last_prio )
+slurm_sched_initial_priority( u_int32_t last_prio, 
+			      struct job_record *job_ptr )
 {
 	if ( slurm_sched_init() < 0 )
 		return SLURM_ERROR;
 
-	return (*(g_sched_context->ops.initial_priority))( last_prio );
+	return (*(g_sched_context->ops.initial_priority))( last_prio, 
+							   job_ptr );
 }
+
 /* *********************************************************************** */
 /*  TAG(                   slurm_sched_job_is_pending                   )  */
 /* *********************************************************************** */
@@ -264,6 +330,18 @@ slurm_sched_job_is_pending( void )
 		return;
 
 	(*(g_sched_context->ops.job_is_pending))();
+}
+
+/* *********************************************************************** */
+/*  TAG(                   slurm_sched_partition_change                 )  */
+/* *********************************************************************** */
+void
+slurm_sched_partition_change( void )
+{
+	if ( slurm_sched_init() < 0 )
+		return;
+
+	(*(g_sched_context->ops.partition_change))();
 }
 
 /* *********************************************************************** */
@@ -289,3 +367,29 @@ slurm_sched_p_strerror( int errnum )
 
 	return (*(g_sched_context->ops.strerror))( errnum );
 }
+
+/* *********************************************************************** */
+/*  TAG(                   slurm_sched_requeue                          )  */
+/* *********************************************************************** */
+void
+slurm_sched_requeue( struct job_record *job_ptr, char *reason )
+{
+        if ( slurm_sched_init() < 0 )
+                return;
+
+        (*(g_sched_context->ops.job_requeue))( job_ptr, reason );
+}
+
+/* *********************************************************************** */
+/*  TAG(                   slurm_sched_p_get_conf                       )  */
+/* *********************************************************************** */
+char *
+slurm_sched_p_get_conf( void )
+{
+        if ( slurm_sched_init() < 0 )
+                return NULL;
+
+        return (*(g_sched_context->ops.get_conf))( );
+}
+
+

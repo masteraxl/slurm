@@ -1,10 +1,10 @@
 /*****************************************************************************\
  *  print.h - squeue print job definitions
  *****************************************************************************
- *  Copyright (C) 2002 The Regents of the University of California.
+ *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov>
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -86,9 +86,9 @@ int job_format_add_function(List list, int width, bool right_justify,
 #define job_format_add_prefix(list,wid,right,prefix) \
 	job_format_add_function(list,0,0,prefix,_print_job_prefix)
 #define job_format_add_reason(list,wid,right,prefix) \
-        job_format_add_function(list,0,0,prefix,_print_job_reason)
+        job_format_add_function(list,wid,right,prefix,_print_job_reason)
 #define job_format_add_reason_list(list,wid,right,prefix) \
-	job_format_add_function(list,0,0,prefix,_print_job_reason_list)
+	job_format_add_function(list,wid,right,prefix,_print_job_reason_list)
 #define job_format_add_name(list,wid,right,suffix) \
 	job_format_add_function(list,wid,right,suffix,_print_job_name)
 #define job_format_add_user_name(list,wid,right,suffix) \
@@ -115,6 +115,8 @@ int job_format_add_function(List list, int width, bool right_justify,
 	job_format_add_function(list,wid,right,suffix,_print_job_time_end)
 #define job_format_add_priority(list,wid,right,suffix) \
 	job_format_add_function(list,wid,right,suffix,_print_job_priority)
+#define job_format_add_priority_long(list,wid,right,suffix) \
+	job_format_add_function(list,wid,right,suffix,_print_job_priority_long)
 #define job_format_add_nodes(list,wid,right,suffix) \
 	job_format_add_function(list,wid,right,suffix,_print_job_nodes)
 #define job_format_add_node_inx(list,wid,right,suffix) \
@@ -123,12 +125,26 @@ int job_format_add_function(List list, int width, bool right_justify,
 	job_format_add_function(list,wid,right,suffix,_print_job_num_procs)
 #define job_format_add_num_nodes(list,wid,right,suffix) \
 	job_format_add_function(list,wid,right,suffix,_print_job_num_nodes)
+#define job_format_add_num_sct(list,wid,right,suffix) \
+	job_format_add_function(list,wid,right,suffix,_print_job_num_sct)
+#define job_format_add_num_sockets(list,wid,right,suffix) \
+	job_format_add_function(list,wid,right,suffix,_print_job_num_sockets)
+#define job_format_add_num_cores(list,wid,right,suffix) \
+	job_format_add_function(list,wid,right,suffix,_print_job_num_cores)
+#define job_format_add_num_threads(list,wid,right,suffix) \
+	job_format_add_function(list,wid,right,suffix,_print_job_num_threads)
 #define job_format_add_shared(list,wid,right,suffix) \
 	job_format_add_function(list,wid,right,suffix,_print_job_shared)
 #define job_format_add_contiguous(list,wid,right,suffix) \
 	job_format_add_function(list,wid,right,suffix,_print_job_contiguous)
 #define job_format_add_min_procs(list,wid,right,suffix) \
 	job_format_add_function(list,wid,right,suffix,_print_job_min_procs)
+#define job_format_add_min_sockets(list,wid,right,suffix) \
+	job_format_add_function(list,wid,right,suffix,_print_job_min_sockets)
+#define job_format_add_min_cores(list,wid,right,suffix) \
+	job_format_add_function(list,wid,right,suffix,_print_job_min_cores)
+#define job_format_add_min_threads(list,wid,right,suffix) \
+	job_format_add_function(list,wid,right,suffix,_print_job_min_threads)
 #define job_format_add_min_memory(list,wid,right,suffix) \
 	job_format_add_function(list,wid,right,suffix,_print_job_min_memory)
 #define job_format_add_min_tmp_disk(list,wid,right,suffix) \
@@ -149,6 +165,8 @@ int job_format_add_function(List list, int width, bool right_justify,
 	job_format_add_function(list,wid,right,suffix,_print_job_dependency)
 #define job_format_add_select_jobinfo(list,wid,right,suffix) \
 	job_format_add_function(list,wid,right,suffix,_print_job_select_jobinfo)
+#define job_format_add_comment(list,wid,right,suffix) \
+	job_format_add_function(list,wid,right,suffix,_print_job_comment)
 
 /*****************************************************************************
  * Job Line Print Functions
@@ -187,6 +205,8 @@ int _print_job_time_end(job_info_t * job, int width, bool right_justify,
 			char* suffix);
 int _print_job_priority(job_info_t * job, int width, bool right_justify, 
 			char* suffix);
+int _print_job_priority_long(job_info_t * job, int width, bool right_justify,
+			char* suffix);
 int _print_job_nodes(job_info_t * job, int width, bool right_justify, 
 			char* suffix);
 int _print_job_node_inx(job_info_t * job, int width, bool right_justify, 
@@ -197,11 +217,25 @@ int _print_job_num_procs(job_info_t * job, int width, bool right_justify,
 			char* suffix);
 int _print_job_num_nodes(job_info_t * job, int width, bool right_justify, 
 			char* suffix);
+int _print_job_num_sct(job_info_t * job, int width, bool right_justify, 
+			char* suffix);
+int _print_job_num_sockets(job_info_t * job, int width, bool right_justify, 
+			char* suffix);
+int _print_job_num_cores(job_info_t * job, int width, bool right_justify, 
+			char* suffix);
+int _print_job_num_threads(job_info_t * job, int width, bool right_justify, 
+			char* suffix);
 int _print_job_shared(job_info_t * job, int width, bool right_justify, 
 			char* suffix);
 int _print_job_contiguous(job_info_t * job, int width, bool right_justify, 
 			char* suffix);
 int _print_job_min_procs(job_info_t * job, int width, bool right_justify, 
+			char* suffix);
+int _print_job_min_sockets(job_info_t * job, int width, bool right_justify, 
+			char* suffix);
+int _print_job_min_cores(job_info_t * job, int width, bool right_justify, 
+			char* suffix);
+int _print_job_min_threads(job_info_t * job, int width, bool right_justify, 
 			char* suffix);
 int _print_job_min_memory(job_info_t * job, int width, bool right_justify, 
 			char* suffix);
@@ -222,6 +256,8 @@ int _print_job_account(job_info_t * job, int width, bool right_justify,
 int _print_job_dependency(job_info_t * job, int width, bool right_justify,
 			char* suffix);
 int _print_job_select_jobinfo(job_info_t * job, int width, bool right_justify,
+			char* suffix);
+int _print_job_comment(job_info_t * job, int width, bool right_justify,
 			char* suffix);
 
 /*****************************************************************************
@@ -249,6 +285,8 @@ int step_format_add_function(List list, int width, bool right_justify,
 	step_format_add_function(list,wid,right,suffix,_print_step_nodes)
 #define step_format_add_name(list,wid,right,suffix) \
 	step_format_add_function(list,wid,right,suffix,_print_step_name)
+#define step_format_add_num_tasks(list,wid,right,suffix) \
+	step_format_add_function(list,wid,right,suffix,_print_step_num_tasks)
 
 /*****************************************************************************
  * Step Line Print Functions
@@ -270,6 +308,8 @@ int _print_step_time_used(job_step_info_t * step, int width,
 int _print_step_name(job_step_info_t * step, int width,
 			bool right_justify, char *suffix);
 int _print_step_nodes(job_step_info_t * step, int width,
+			bool right_justify, char *suffix);
+int _print_step_num_tasks(job_step_info_t * step, int width,
 			bool right_justify, char *suffix);
 
 #endif

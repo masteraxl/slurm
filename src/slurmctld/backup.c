@@ -4,7 +4,7 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette@llnl.gov>, Kevin Tew <tew1@llnl.gov>, et. al.
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -66,6 +66,7 @@
 #include "src/slurmctld/slurmctld.h"
 
 static int          _background_process_msg(slurm_msg_t * msg);
+static int          _backup_reconfig(void);
 static void *       _background_rpc_mgr(void *no_data);
 static void *       _background_signal_hand(void *no_data);
 static int          _ping_controller(void);
@@ -124,7 +125,7 @@ void run_backup(void)
 		/* Lock of slurmctld_conf below not important */
 		if (slurmctld_conf.slurmctld_timeout
 		&&  (difftime(time(NULL), last_ping) <
-		     (slurmctld_conf.slurmctld_timeout / 2)))
+		     (slurmctld_conf.slurmctld_timeout / 3)))
 			continue;
 
 		last_ping = time(NULL);
@@ -226,9 +227,9 @@ static void *_background_signal_hand(void *no_data)
 			 * restart the (possibly new) plugin.
 			 */
 			lock_slurmctld(config_write_lock);
-			rc = read_slurm_conf(0);
+			rc = _backup_reconfig();
 			if (rc)
-				error("read_slurm_conf: %s",
+				error("_backup_reconfig: %s",
 					slurm_strerror(rc));
 			else {
 				/* Leave config lock set through this */
@@ -271,8 +272,7 @@ static void *_background_rpc_mgr(void *no_data)
 	slurm_addr cli_addr;
 	slurm_msg_t *msg = NULL;
 	int error_code;
-	List ret_list = NULL;
-
+	
 	/* Read configuration only */
 	slurmctld_lock_t config_read_lock = { 
 		READ_LOCK, NO_LOCK, NO_LOCK, NO_LOCK };
@@ -313,21 +313,16 @@ static void *_background_rpc_mgr(void *no_data)
 		}
 
 		msg = xmalloc(sizeof(slurm_msg_t));
-		msg->conn_fd = newsockfd;
-		ret_list = slurm_receive_msg(newsockfd, msg, 0);
-		if(ret_list) {
-			if(list_count(ret_list)>0) 
-				error("Got %d, expecting 0 from "
-				      "message received",
-				      list_count(ret_list));
-			error_code = _background_process_msg(msg);
-			if ((error_code == SLURM_SUCCESS)
-			&&  (msg->msg_type == REQUEST_SHUTDOWN_IMMEDIATE)
-			&&  (slurmctld_config.shutdown_time == 0))
-				slurmctld_config.shutdown_time = time(NULL);
-			list_destroy(ret_list);
-		} else if(errno != SLURM_SUCCESS) 
+		slurm_msg_t_init(msg);
+		if(slurm_receive_msg(newsockfd, msg, 0) != 0)
 			error("slurm_receive_msg: %m");
+		
+		error_code = _background_process_msg(msg);
+		if ((error_code == SLURM_SUCCESS)
+		    &&  (msg->msg_type == REQUEST_SHUTDOWN_IMMEDIATE)
+		    &&  (slurmctld_config.shutdown_time == 0))
+			slurmctld_config.shutdown_time = time(NULL);
+		
 		slurm_free_msg(msg);
 
 		/* close should only be called when the socket 
@@ -349,7 +344,7 @@ static int _background_process_msg(slurm_msg_t * msg)
 
 	if (msg->msg_type != REQUEST_PING) {
 		bool super_user = false;
-		uid_t uid = g_slurm_auth_get_uid(msg->auth_cred);
+		uid_t uid = g_slurm_auth_get_uid(msg->auth_cred, NULL);
 		if ((uid == 0) || (uid == getuid()))
 			super_user = true;
 
@@ -363,9 +358,10 @@ static int _background_process_msg(slurm_msg_t * msg)
 		} else if (super_user && 
 			   (msg->msg_type == REQUEST_CONTROL)) {
 			debug3("Ignoring RPC: REQUEST_CONTROL");
+			error_code = ESLURM_DISABLED;
 		} else {
-			error("Invalid RPC received %d from uid %u", 
-			      msg->msg_type, uid);
+			error("Invalid RPC received %d while in standby mode", 
+			      msg->msg_type);
 			error_code = ESLURM_IN_STANDBY_MODE;
 		}
 	}
@@ -387,6 +383,7 @@ static int _ping_controller(void)
 	/* 
 	 *  Set address of controller to ping
 	 */
+	slurm_msg_t_init(&req);
 	lock_slurmctld(config_read_lock);
 	debug3("pinging slurmctld at %s", slurmctld_conf.control_addr);
 	slurm_set_addr(&req.address, slurmctld_conf.slurmctld_port, 
@@ -408,3 +405,17 @@ static int _ping_controller(void)
 	return SLURM_PROTOCOL_SUCCESS;
 }
 
+/*
+ * Reload the slurm.conf parameters without any processing
+ * of the node, partition, or state information.
+ * Specifically, we don't want to purge batch scripts based 
+ * upon old job state information.
+ * This is a stripped down version of read_slurm_conf(0).
+ */
+static int _backup_reconfig(void)
+{
+	slurm_conf_reinit(NULL);
+	update_logging();
+	slurmctld_conf.last_update = time(NULL);
+	return SLURM_SUCCESS;
+}

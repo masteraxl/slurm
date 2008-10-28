@@ -5,7 +5,7 @@
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.com>
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -62,6 +62,8 @@ typedef struct slurm_checkpoint_ops {
 			 uint32_t *error_code, char **error_msg);
 	int	(*ckpt_comp) (struct step_record * step_ptr, time_t event_time,
 			 uint32_t error_code, char *error_msg);
+	int	(*ckpt_task_comp) (struct step_record * step_ptr, uint32_t task_id,
+			 time_t event_time, uint32_t error_code, char *error_msg);
 
 	int	(*ckpt_alloc_jobinfo) (check_jobinfo_t *jobinfo);
 	int	(*ckpt_free_jobinfo) (check_jobinfo_t jobinfo);
@@ -125,6 +127,8 @@ _slurm_checkpoint_context_destroy( slurm_checkpoint_context_t c )
 		if ( plugrack_destroy( c->plugin_list ) != SLURM_SUCCESS ) {
 			 return SLURM_ERROR;
 		}
+	} else {
+		plugin_unload(c->cur_plugin);
 	}
 
 	xfree( c->checkpoint_type );
@@ -146,6 +150,7 @@ _slurm_checkpoint_get_ops( slurm_checkpoint_context_t c )
 	static const char *syms[] = {
 		"slurm_ckpt_op",
 		"slurm_ckpt_comp",
+		"slurm_ckpt_task_comp",
 		"slurm_ckpt_alloc_job",
 		"slurm_ckpt_free_job",
 		"slurm_ckpt_pack_job",
@@ -153,6 +158,16 @@ _slurm_checkpoint_get_ops( slurm_checkpoint_context_t c )
 	};
         int n_syms = sizeof( syms ) / sizeof( char * );
 
+	/* Find the correct plugin. */
+        c->cur_plugin = plugin_load_and_link(c->checkpoint_type, n_syms, syms,
+					     (void **) &c->ops);
+        if ( c->cur_plugin != PLUGIN_INVALID_HANDLE ) 
+        	return &c->ops;
+
+	error("Couldn't find the specified plugin name for %s "
+	      "looking at all files",
+	      c->checkpoint_type);
+	
         /* Get the plugin list, if needed. */
         if ( c->plugin_list == NULL ) {
 		char *plugin_dir;
@@ -268,6 +283,25 @@ checkpoint_comp(void * step_ptr, time_t event_time, uint32_t error_code,
 	if ( g_context )
 		retval = (*(g_context->ops.ckpt_comp))(
 			(struct step_record *) step_ptr,
+			event_time, error_code, error_msg);
+	else {
+		error ("slurm_checkpoint plugin context not initialized");
+		retval = ENOENT;
+	}
+	slurm_mutex_unlock( &context_lock );
+	return retval;
+}
+
+extern int
+checkpoint_task_comp(void * step_ptr, uint32_t task_id, time_t event_time,
+		     uint32_t error_code, char *error_msg)
+{
+	int retval = SLURM_SUCCESS;
+
+	slurm_mutex_lock( &context_lock );
+	if ( g_context )
+		retval = (*(g_context->ops.ckpt_task_comp))(
+			(struct step_record *) step_ptr, task_id, 
 			event_time, error_code, error_msg);
 	else {
 		error ("slurm_checkpoint plugin context not initialized");

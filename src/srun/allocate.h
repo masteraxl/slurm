@@ -5,7 +5,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -43,6 +43,12 @@
 
 #include "src/srun/srun_job.h"
 
+typedef struct slurmctld_communication_addr {
+	uint16_t port;
+} slurmctld_comm_addr_t;
+
+slurmctld_comm_addr_t slurmctld_comm_addr;
+
 /* 
  * Allocate nodes from the slurm controller -- retrying the attempt
  * if the controller appears to be down, and optionally waiting for
@@ -53,24 +59,41 @@
  */
 resource_allocation_response_msg_t * allocate_nodes(void);
 
+/* dummy function to handle all signals we want to ignore */
+void ignore_signal(int signo);
+
+/* clean up the msg thread polling for information from the controller */
+int cleanup_allocation();
+
 /*
  * Test if an allocation would occur now given the job request.
  * Do not actually allocate resources
  */
 int allocate_test(void);
 
+/* Set up port to handle messages from slurmctld */
+slurm_fd slurmctld_msg_init(void);
+
 /*
  * Create a job_desc_msg_t object, filled in from the current srun options
- * (see opt.h), if script != NULL then this is a batch job.
+ * (see opt.h)
  * The resulting memory must be freed with  job_desc_msg_destroy()
  */
-job_desc_msg_t * job_desc_msg_create_from_opts (char *script);
+job_desc_msg_t * job_desc_msg_create_from_opts ();
 
 /* 
  * Destroy (free memory from) a job_desc_msg_t object allocated with
  * job_desc_msg_create()
  */
 void job_desc_msg_destroy (job_desc_msg_t *j);
+
+/*
+ * Check for SLURM_JOBID environment variable, and if it is a valid
+ * jobid, return a pseudo allocation response pointer.
+ *
+ * Returns NULL if SLURM_JOBID is not present or is invalid.
+ */
+resource_allocation_response_msg_t * existing_allocation(void);
 
 /*
  * Return the jobid number stored in SLURM_JOBID env var
@@ -83,10 +106,11 @@ uint32_t jobid_from_env(void);
 /*
  * Create a job step given the job information stored in 'j'
  * After returning, 'j' is filled in with information for job step.
+ * IN use_all_cpus - true to use every CPU allocated to the job
  *
  * Returns -1 if job step creation failure, 0 otherwise
  */
-int create_job_step(srun_job_t *j);
+int create_job_step(srun_job_t *j, bool use_all_cpus);
 
 /* set the job for debugging purpose */
 void set_allocate_job(srun_job_t *job);

@@ -1,4 +1,4 @@
-.TH SINFO "1" "March 2006" "sinfo 1.1" "Slurm components"
+.TH SINFO "1" "September 2008" "sinfo 1.4" "Slurm components"
 
 .SH "NAME"
 sinfo \- view information about SLURM nodes and partitions.
@@ -10,28 +10,21 @@ sinfo \- view information about SLURM nodes and partitions.
 system running SLURM. 
 
 .SH "OPTIONS"
+
 .TP
 \fB\-a\fR, \fB\-\-all\fR
 Display information about all partions. This causes information to be 
 displayed about partitions that are configured as hidden and partitions that
 are unavailable to user's group.
+
 .TP
 \fB\-b\fR, \fB\-\-bgl\fR
 Display information about bglblocks (on Blue Gene systems only).
-.TP
-\fB\-\-help\fR
-Print a message describing all \fBsinfo\fR options.
-.TP
-\fB\-\-hide\fR
-Do not display information about hidden partitions. By default, partitions 
-that are configured as hidden or are not available to the user's group 
-will not be displayed (i.e. this is the default behavior).
-.TP
-\fB\-\-usage\fR
-Print a brief message listing the \fBsinfo\fR options.
+
 .TP
 \fB\-d\fR, \fB\-\-dead\fR
 If set only report state information for non\-responding (dead) nodes.
+
 .TP
 \fB\-e\fR, \fB\-\-exact\fR
 If set, do not group node information on multiple nodes unless
@@ -39,29 +32,45 @@ their configurations to be reported are identical. Otherwise
 cpu count, memory size, and disk space for nodes will be listed
 with the minimum value followed by a "+" for nodes with the
 same partition and state (e.g., "250+").
+
 .TP
 \fB\-h\fR, \fB\-\-noheader\fR
 Do not print a header on the output.
+
+.TP
+\fB\-\-help\fR
+Print a message describing all \fBsinfo\fR options.
+.TP
+
+\fB\-\-hide\fR
+Do not display information about hidden partitions. By default, partitions 
+that are configured as hidden or are not available to the user's group 
+will not be displayed (i.e. this is the default behavior).
+
 .TP
 \fB\-i <seconds>\fR, \fB\-\-iterate=<seconds>\fR
 Print the state on a periodic basis. 
 Sleep for the indicated number of seconds between reports.
 By default, prints a time stamp with the header.
+
 .TP
 \fB\-l\fR, \fB\-\-long\fR
 Print more detailed information. 
 This is ignored if the \fB\-\-format\fR option is specified.
+
 .TP
 \fB\-n <nodes>\fR, \fB\-\-nodes=<nodes>\fR
 Print information only about the specified node(s). 
 Multiple nodes may be comma separated or expressed using a 
-node range expression. For example "linux[00-07]" would 
+node range expression. For example "linux[00\-07]" would 
 indicate eight nodes, "linux00" through "linux07."
+
 .TP
 \fB\-N\fR, \fB\-\-Node\fR
-Print information in a node-oriented format.
+Print information in a node\-oriented format.
 The default is to print information in a partition\-oriented format.
 This is ignored if the \fB\-\-format\fR option is specified.
+
 .TP
 \fB\-o <output_format>\fR, \fB\-\-format=<output_format>\fR
 Specify the information to be displayed using an \fBsinfo\fR
@@ -82,10 +91,10 @@ when running with various options are
 "%#N %.5D %9P %6t"
 .TP
 .I "\-\-long \-\-Node"
-"%#N %.5D %9P %11T %.4c %.6m %.8d %.6w %8f %R"
+"%#N %.5D %9P %11T %.4c %.8z %.6m %.8d %.6w %8f %R"
 .TP
 .I "\-\-list\-reasons"
-"%35R %N"
+"%50R %N"
 .TP
 .I "\-\-long \-\-list\-reasons"
 "%50R %6t %N"
@@ -109,11 +118,22 @@ the different node states will be placed on separate lines.
 \fB%c\fR 
 Number of CPUs per node
 .TP
+\fB%C\fR
+Number of CPUs by state in the format
+"allocated/idle/other/total". Do not use this with a node
+state option ("%t" or "%T") or the different node states will
+be placed on separate lines.
+.TP
 \fB%d\fR 
 Size of temporary disk space per node in megabytes
 .TP
 \fB%D\fR 
 Number of nodes
+.TP
+\fB%E\fR
+The reason a node is unavailable (down, drained, or draining states).
+This is the same as \fB%R\fR except the entries will be sorted by 
+time rather than the reason string.
 .TP
 \fB%f\fR 
 Features associated with the nodes
@@ -146,7 +166,8 @@ Partition name
 Only user root may initiate jobs, "yes" or "no"
 .TP
 \fB%R\fR 
-The reason a node is unavailable (down, drained, or draining states)
+The reason a node is unavailable (down, drained, draining, 
+fail or failing states)
 .TP
 \fB%s\fR 
 Maximum job size in nodes
@@ -160,32 +181,54 @@ State of nodes, extended form
 \fB%w\fR 
 Scheduling weight of the nodes
 .TP
+\fB%X\fR 
+Number of sockets per node
+.TP
+\fB%Y\fR 
+Number of cores per socket
+.TP
+\fB%Z\fR 
+Number of threads per core
+.TP
+\fB%z\fR 
+Extended processor information: number of sockets, cores, threads (S:C:T) per node
+.TP
 \fB%.<*>\fR 
 right justification of the field
 .TP
 \fB%<Number><*>\fR 
 size of field
 .RE
+
+.TP
+\fB\-p <partition>\fR, \fB\-\-partition=<partition>\fR
+Print information only about the specified partition.  
+
 .TP
 \fB\-r\fR, \fB\-\-responding\fR
 If set only report state information for responding nodes.
+
 .TP
 \fB\-R\fR, \fB\-\-list\-reasons\fR
-List reasons nodes are down or drained. When nodes are in
-these states SLURM supports optional inclusion of a "reason"
-string by an administrator. This option will display the first
-35 characters of the reason field and list of nodes with that
-reason for all nodes that are, by default, down, drained, or
-draining. This option may be used with other node filtering
-options (e.g. \fB\-r\fR, \fB\-d\fR, \fB\-t\fR, \fB\-n\fR),
-however, combinations of these options that result in a list of
-nodes that are not down or drained will not produce any output.
+List reasons nodes are in the down, drained, fail or failing state. 
+When nodes are in these states SLURM supports optional inclusion 
+of a "reason" string by an administrator. 
+This option will display the first 35 characters of the reason 
+field and list of nodes with that reason for all nodes that are, 
+by default, down, drained, draining or failing. 
+This option may be used with other node filtering options 
+(e.g. \fB\-r\fR, \fB\-d\fR, \fB\-t\fR, \fB\-n\fR),
+however, combinations of these options that result in a 
+list of nodes that are not down or drained or failing will 
+not produce any output.
 When used with \fB\-l\fR the output additionally includes
 the current node state.
+
 .TP
 \fB\-s\fR, \fB\-\-summarize\fR
 List only a partition state summary with no node state details.
 This is ignored if the \fB\-\-format\fR option is specified.
+
 .TP
 \fB\-S <sort_list>\fR, \fB\-\-sort=<sort_list>\fR
 Specification of the order in which records should be reported.
@@ -202,22 +245,27 @@ partition by decreasing memory size.  The default value of sort
 is "#P,\-t" (partitions ordered as configured then decreasing
 node state).  If the \fB\-\-Node\fB option is selected, the
 default sort value is "N" (increasing node name).
+
 .TP
 \fB\-t <states>\fR , \fB\-\-states=<states>\fR
 List nodes only having the given state(s).  Multiple states
 may be comma separated and the comparison is case insensitive.
 Possible values include (case insensitive): ALLOC, ALLOCATED,
-COMP, COMPLETING, DOWN, DRAIN, DRAINED, DRNG, DRAINING, IDLE, 
-UNK, and UNKNOWN.  By default nodes in the specified state are
-reported whether they are responding or not.  The \fB\-\-dead\fR 
-and \fB\-\-responding\fR options may be used to filtering nodes by 
-the responding flag.
+COMP, COMPLETING, DOWN, DRAIN, DRAINED, DRNG, DRAINING, FAIL, 
+FAILING, IDLE, UNK, and UNKNOWN.  
+By default nodes in the specified state are reported whether 
+they are responding or not.  
+The \fB\-\-dead\fR and \fB\-\-responding\fR options may be 
+used to filtering nodes by the responding flag.
+
 .TP
-\fB\-p <partition>\fR, \fB\-\-partition=<partition>\fR
-Print information only about the specified partition.  
+\fB\-\-usage\fR
+Print a brief message listing the \fBsinfo\fR options.
+
 .TP
 \fB\-v\fR, \fB\-\-verbose\fR
 Provide detailed event logging through program execution.
+
 .TP
 \fB\-V\fR, \fB\-\-version\fR
 Print version information and exit.
@@ -229,6 +277,18 @@ Partition state: \fBup\fR or \fBdown\fR.
 .TP
 \fBCPUS\fR
 Count of CPUs (processors) on these nodes.
+.TP
+\fBS:C:T\fR
+Count of sockets (S), cores (C), and threads (T) on these nodes.
+.TP
+\fBSOCKETS\fR
+Count of sockets on these nodes.
+.TP
+\fBCORES\fR
+Count of cores on these nodes.
+.TP
+\fBTHREADS\fR
+Count of threads on these nodes.
 .TP
 \fBGROUPS\fR
 Resource allocations in this partition are restricted to the
@@ -273,17 +333,23 @@ restricted to user root, \fByes\fR or \fBno\fR.
 .TP
 \fBSHARE\fR
 Will jobs allocated resources in this partition share those
-resources.  \fBno\fR indicates resources are never shared.
-\fBforce\fR indicates resources are always available to be
-shared.  \fByes\fR indicates resource may be shared or not
+resources.  
+\fBno\fR indicates resources are never shared.
+\fBexclusive\fR indicates whole nodes are dedicated to jobs
+(equivalent to srun \-\-exclusive option, may be used even 
+with shared/cons_res managing individual processors).
+\fBforce\fR indicates resources are always available to be shared.  
+\fByes\fR indicates resource may be shared or not
 per job's resource allocation.
 .TP
 \fBSTATE\fR
-State of the nodes. Possible states include: down, unknown,
-idle, allocated, drained, draining, completing and their
-abbreviated forms: down, unk, idle, alloc, drain, drng, and
-comp respectively.  Note that the suffix "*" identifies nodes
-that are presently not responding.
+State of the nodes. 
+Possible states include: allocated, completing, down, 
+drained, draining, fail, failing, idle, and unknown plus
+their abbreviated forms: alloc, comp, donw, drain, drng, 
+fail, failg, idle, and unk respectively.
+Note that the suffix "*" identifies nodes that are presently 
+not responding.
 .TP
 \fBTMP_DISK\fR
 Size of temporary disk space in megabytes on these nodes.
@@ -295,7 +361,11 @@ If the node state code is followed by "*", this indicates the
 node is presently not responding and will not be allocated
 any new work.  If the node remains non\-responsive, it will
 be placed in the \fBDOWN\fR state (except in the case of
-\fBDRAINED\fR, \fBDRAINING\fR, or \fBCOMPLETING\fR nodes).
+\fBCOMPLETING\fR, \fBDRAINED\fR, \fBDRAINING\fR,
+\fBFAIL\fR, \fBFAILING\fR nodes).
+If the node state code is followed by "~", this indicates
+the node is presently in a power saving mode (typically
+running at reduced frequency).
 .TP 12
 \fBALLOCATED\fR
 The node has been allocated to one or more jobs.
@@ -334,6 +404,18 @@ to additional jobs. The node state will be changed to state
 this state per system administrator request. See the \fBupdate
 node\fR command in the \fBscontrol\fR(1) man page or the
 \fBslurm.conf\fR(5) man page for more information.
+.TP
+\fBFAIL\fR
+The node is expected to fail soon and is unavailable for 
+use per system administrator request.  
+See the \fBupdate node\fR command in the \fBscontrol\fR(1) 
+man page or the \fBslurm.conf\fR(5) man page for more information.
+.TP
+\fBFAILING\fR
+The node is currently executing a job, but is expected to fail 
+soon and is unavailable for use per system administrator request.  
+See the \fBupdate node\fR command in the \fBscontrol\fR(1) 
+man page or the \fBslurm.conf\fR(5) man page for more information.
 .TP
 \fBIDLE\fR
 The node is not allocated to any jobs and is available for use.
@@ -430,12 +512,12 @@ Not Responding                      dev8
 .ec
 
 .SH "COPYING"
-Copyright (C) 2002\-2006 The Regents of the University of California.
+Copyright (C) 2002\-2007 The Regents of the University of California.
 Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
-UCRL-CODE-217948.
+LLNL\-CODE\-402394.
 .LP
 This file is part of SLURM, a resource management program.
-For details, see <http://www.llnl.gov/linux/slurm/>.
+For details, see <https://computing.llnl.gov/linux/slurm/>.
 .LP
 SLURM is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free

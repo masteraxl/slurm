@@ -2,13 +2,11 @@
  *  slurm_ prolog.c - Wait until the specified partition is ready and owned by 
  *	this user. This is executed via SLURM to synchronize the user's job 
  *	execution with slurmctld configuration of partitions.
- *
- *  $Id$
  *****************************************************************************
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -19,7 +17,7 @@
  *  any later version.
  *
  *  In addition, as a special exception, the copyright holders give permission 
- *  to link the code of portions of this program with the OpenSSL library under 
+ *  to link the code of portions of this program with the OpenSSL library under
  *  certain conditions as described in each individual source file, and 
  *  distribute linked combinations including the two. You must obey the GNU 
  *  General Public License in all respects for all of the code used other than 
@@ -56,22 +54,12 @@
 #include "src/common/hostlist.h"
 #include "src/common/node_select.h"
 #include "src/api/node_select_info.h"
+#include "src/plugins/select/bluegene/plugin/bg_boot_time.h"
 
 #define _DEBUG 0
-
-/*
- * Check the bgblock's status every POLL_SLEEP seconds. 
- * Retry for a period of MIN_DELAY + 
- * (INCR_DELAY * POLL_SLEEP * base partition count).
- * For example if MIN_DELAY=300 and INCR_DELAY=20 and POLL_SLEEP=3, 
- * wait up to 1260 seconds.
- * For a 16 base partition bgblock to be ready (300 + (20 * 3 * 16).
- */ 
 #define POLL_SLEEP 3			/* retry interval in seconds  */
-#define MIN_DELAY  300			/* time in seconds */
-#define INCR_DELAY 20			/* time in seconds per BP */
 
-int max_delay = MIN_DELAY;
+int max_delay = BG_FREE_PREVIOUS_BLOCK + BG_MIN_BLOCK_BOOT;
 int cur_delay = 0; 
   
 enum rm_partition_state {RM_PARTITION_FREE, 
@@ -114,7 +102,8 @@ static int _wait_part_ready(uint32_t job_id)
 {
 	int is_ready = 0, i, rc;
 	
-	max_delay = MIN_DELAY + (INCR_DELAY * _get_job_size(job_id));
+	max_delay = BG_FREE_PREVIOUS_BLOCK + BG_MIN_BLOCK_BOOT +
+		   (BG_INCR_BLOCK_BOOT * _get_job_size(job_id));
 
 #if _DEBUG
 	printf("Waiting for job %u to become ready.", job_id);
@@ -187,10 +176,11 @@ static int _get_job_size(uint32_t job_id)
 }
 
 /*
- * Test if any BG blocks are in deallocating state 
+ * Test if any BG blocks are in deallocating state since they are
+ * probably related to this job we will want to sleep longer
  * RET	1:  deallocate in progress
  *	0:  no deallocate in progress
- *	-1: error occurred
+ *     -1: error occurred
  */
 static int _partitions_dealloc()
 {

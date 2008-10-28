@@ -1,12 +1,11 @@
 /*****************************************************************************\
  *  sbcast.c - Broadcast a file to allocated nodes
- *
- *  $Id: sbcast.c 6965 2006-01-04 23:31:07Z jette $
  *****************************************************************************
- *  Copyright (C) 2006 The Regents of the University of California.
+ *  Copyright (C) 2006-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -51,13 +50,13 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 
+#include "src/common/forward.h"
 #include "src/common/hostlist.h"
 #include "src/common/log.h"
 #include "src/common/slurm_protocol_api.h"
 #include "src/common/slurm_protocol_interface.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
-#include "src/common/forward.h"
 #include "src/sbcast/sbcast.h"
 
 /* global variables */
@@ -178,14 +177,15 @@ static ssize_t _get_block(char *buffer, size_t buf_size)
 /* read and broadcast the file */
 static void _bcast_file(void)
 {
-	int buf_size, i;
-	ssize_t size_block, size_read = 0;
+	int buf_size;
+	ssize_t size_read = 0;
 	file_bcast_msg_t bcast_msg;
-	char *buffer[FILE_BLOCKS];
+	char *buffer;
 
-	/* NOTE: packmem() uses 16 bits to express a block size, 
-	 * buf_size must be no larger than 64k - 1 */
-	buf_size = MIN((63 * 1024), f_stat.st_size);
+	if (params.block_size)
+		buf_size = MIN(params.block_size, f_stat.st_size);
+	else
+		buf_size = MIN((512 * 1024), f_stat.st_size);
 
 	bcast_msg.fname		= params.dst_fname;
 	bcast_msg.block_no	= 1;
@@ -194,11 +194,9 @@ static void _bcast_file(void)
 	bcast_msg.modes		= f_stat.st_mode;
 	bcast_msg.uid		= f_stat.st_uid;
 	bcast_msg.gid		= f_stat.st_gid;
-	for (i=0; i<FILE_BLOCKS; i++) {
-		buffer[i]              = xmalloc(buf_size);
-		bcast_msg.block[i]     = buffer[i];
-		bcast_msg.block_len[i] = 0;
-	}
+	buffer			= xmalloc(buf_size);
+	bcast_msg.block		= buffer;
+	bcast_msg.block_len	= 0;
 
 	if (params.preserve) {
 		bcast_msg.atime     = f_stat.st_atime;
@@ -209,26 +207,18 @@ static void _bcast_file(void)
 	}
 
 	while (1) {
-		size_block = 0;
-		for (i=0; i<FILE_BLOCKS; i++) {
-			bcast_msg.block_len[i] = 
-				_get_block(buffer[i], buf_size);
-			debug("block %d, size %u", (bcast_msg.block_no + i),
-				bcast_msg.block_len[i]);
-			size_read += bcast_msg.block_len[i];
-			if (size_read >= f_stat.st_size)
-				bcast_msg.last_block = 1;
-			size_block += bcast_msg.block_len[i];
-			if (params.block_size
-			&&  (size_block >= params.block_size))
-				break;
-		}
+		bcast_msg.block_len = _get_block(buffer, buf_size);
+		debug("block %d, size %u", bcast_msg.block_no,
+			bcast_msg.block_len);
+		size_read += bcast_msg.block_len;
+		if (size_read >= f_stat.st_size)
+			bcast_msg.last_block = 1;
+			
 		send_rpc(&bcast_msg, alloc_resp);
 		if (bcast_msg.last_block)
 			break;	/* end of file */
-		bcast_msg.block_no += FILE_BLOCKS;
+		bcast_msg.block_no++;
 	}
 
-	for (i=0; i<FILE_BLOCKS; i++)
-		xfree(buffer[i]);
+	xfree(buffer);
 }

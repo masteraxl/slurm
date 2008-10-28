@@ -1,4 +1,4 @@
-# Makefile for wiki scheduler plugin
+# Makefile for wiki2 scheduler plugin
 
 AUTOMAKE_OPTIONS = foreign
 
@@ -14,10 +14,18 @@ sched_wiki2_la_SOURCES = \
 	cancel_job.c	\
 	crypto.c	\
 	crypto.h	\
+	event.c		\
 	get_jobs.c	\
 	get_nodes.c	\
+	hostlist.c	\
+	initialize.c	\
 	job_add_task.c	\
+	job_modify.c	\
+	job_notify.c	\
 	job_release_task.c \
+	job_requeue.c	\
+	job_signal.c	\
+	job_will_run.c	\
 	msg.c		\
 	msg.h		\
 	resume_job.c	\

@@ -6,7 +6,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -40,6 +40,19 @@
 #ifndef _HOSTLIST_H
 #define _HOSTLIST_H
 
+#include <unistd.h>		/* load ssize_t definition */
+
+/* max size of internal hostrange buffer */
+#define MAXHOSTRANGELEN 8192
+
+#ifdef HAVE_BG
+#define HOSTLIST_BASE 36
+#else
+#define HOSTLIST_BASE 10
+#endif
+
+extern char *alpha_num;
+
 /* Notes:
  *
  * If WITH_LSD_FATAL_ERROR_FUNC is defined, the linker will expect to
@@ -65,7 +78,10 @@
  * A hostlist is a list of hostnames optimized for a prefixXXXX style 
  * naming convention, where XXXX  is a decimal, numeric suffix.
  */
-typedef struct hostlist * hostlist_t;
+#ifndef   __hostlist_t_defined
+#  define __hostlist_t_defined
+   typedef struct hostlist * hostlist_t;
+#endif
 
 /* A hostset is a special case of a hostlist. It:
  *
@@ -93,16 +109,24 @@ int set_grid(int start, int end, int count);
  *
  * Create a new hostlist from a string representation. 
  *
- * The string representation (str) may contain one or more hostnames or
- * bracketed hostlists separated by either `,' or whitespace. A bracketed 
- * hostlist is denoted by a common prefix followed by a list of numeric 
- * ranges contained within brackets: e.g. "tux[0-5,12,20-25]" 
+ * The string representation may contain one or more hostnames or
+ * bracketed hostlists separated by either `,' or whitespace (e.g. 
+ * "alpha,beta,gamma"). A bracketed hostlist is denoted by a common 
+ * prefix followed by a list of numeric ranges contained within brackets
+ * (e.g. "tux[0-5,12,20-25]"). Note that the numeric ranges can include 
+ * one or more leading zeros to indicate the numeric portion has a 
+ * fixed number of digits (e.g. "linux[0000-1023]"). 
  *
- * To support systems with 3-D topography, a rectangular prism may 
- * be described using two three digit numbers separated by "x": e.g. 
- * "bgl[123x456]". This selects all nodes between 1 and 4 inclusive 
- * in the first dimension, between 2 and 5 in the second, and between 
- * 3 and 6 in the third dimension for a total of 4*4*4=64 nodes
+ * To support the BlueGene system's 3-D topology, a node name prefix
+ * is followed by three digits identifying the node's position in 
+ * the X, Y and Z positions respectively. For example "bgl123" represents
+ * the node or midplane with an X position of 1, Y of 2, and Z of 3.
+ * A rectangular prism may be described using two endpoint locations
+ * separated by "x" (e.g. "bgl[123x456]" selects all nodes with X 
+ * positions between 1 and 4 inclusive, Y between 2 and 5, and Z between 
+ * 3 and 6 for a total of 4*4*4=64 nodes). Two or more rectangular 
+ * prisms may be specified using comma separators within the brackets
+ * (e.g. "bgl[000x133,400x533]").
  *
  * Note: if this module is compiled with WANT_RECKLESS_HOSTRANGE_EXPANSION
  * defined, a much more loose interpretation of host ranges is used. 
@@ -297,7 +321,7 @@ void hostlist_uniq(hostlist_t hl);
  * hostlist_ranged_string() will write a bracketed hostlist representation
  * where possible.
  */
-size_t hostlist_ranged_string(hostlist_t hl, size_t n, char *buf);
+ssize_t hostlist_ranged_string(hostlist_t hl, size_t n, char *buf);
 
 /* hostlist_deranged_string():
  *
@@ -308,7 +332,7 @@ size_t hostlist_ranged_string(hostlist_t hl, size_t n, char *buf);
  * hostlist_deranged_string() will not attempt to write a bracketed
  * hostlist representation. Every hostname will be explicitly written.
  */
-size_t hostlist_deranged_string(hostlist_t hl, size_t n, char *buf);
+ssize_t hostlist_deranged_string(hostlist_t hl, size_t n, char *buf);
 
 
 /* ----[ hostlist utility functions ]---- */
@@ -411,6 +435,12 @@ int hostset_insert(hostset_t set, const char *hosts);
  */
 int hostset_delete(hostset_t set, const char *hosts);
 
+/* hostset_intersects():
+ * Return 1 if any of the hosts specified by "hosts" are within the hostset "set"
+ * Return 0 if all host in "hosts" is not in the hostset "set"
+ */
+int hostset_intersects(hostset_t set, const char *hosts);
+
 /* hostset_within():
  * Return 1 if all hosts specified by "hosts" are within the hostset "set"
  * Retrun 0 if every host in "hosts" is not in the hostset "set"
@@ -422,6 +452,11 @@ int hostset_within(hostset_t set, const char *hosts);
  */
 char * hostset_shift(hostset_t set);
 
+/* hostset_pop():
+ * hostset equivalent to hostlist_pop()
+ */
+char *hostset_pop(hostset_t set);
+
 /* hostset_shift_range():
  * hostset eqivalent to hostlist_shift_range()
  */
@@ -432,11 +467,20 @@ char * hostset_shift_range(hostset_t set);
  */
 int hostset_count(hostset_t set);
 
-/* hostset_index():
- * Return the index of host in hostset
+/* hostset_find():
+ *
+ * Searches hostset set for a host matching hostname 
+ * and returns position in list if found. 
+ *
+ * Returns -1 if host is not found.
  */
-int hostset_index(hostset_t set, const char *host, int jobid);
+int hostset_find(hostset_t set, const char *hostname);
 
 char * hostset_nth(hostset_t set, int n);
+
+/* hostset_ranged_string():
+ * hostset equivelent to hostlist_ranged_string();
+ */
+ssize_t hostset_ranged_string(hostset_t set, size_t n, char *buf);
 
 #endif /* !_HOSTLIST_H */

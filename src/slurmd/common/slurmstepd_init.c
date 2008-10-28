@@ -4,7 +4,7 @@
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -41,31 +41,38 @@ extern void pack_slurmd_conf_lite(slurmd_conf_t *conf, Buf buffer)
 {
 	xassert(conf != NULL);
 	packstr(conf->hostname, buffer);
-	pack32(conf->sockets, buffer);
-	pack32(conf->cores, buffer);
-	pack32(conf->threads, buffer);
+	pack16(conf->sockets, buffer);
+	pack16(conf->cores, buffer);
+	pack16(conf->threads, buffer);
 	packstr(conf->spooldir, buffer);
 	packstr(conf->node_name, buffer);
 	packstr(conf->logfile, buffer);
-	pack16(conf->job_acct_freq, buffer);
+	packstr(conf->task_prolog, buffer);
+	packstr(conf->task_epilog, buffer);
+	pack16(conf->job_acct_gather_freq, buffer);
+	pack16(conf->propagate_prio, buffer);
 	pack32(conf->debug_level, buffer);
 	pack32(conf->daemonize, buffer);
 	pack32((uint32_t)conf->slurm_user_id, buffer);
 	pack16(conf->use_pam, buffer);
+	pack16(conf->task_plugin_param, buffer);
 }
 
 extern int unpack_slurmd_conf_lite_no_alloc(slurmd_conf_t *conf, Buf buffer)
 {
-	uint16_t uint16_tmp;
 	uint32_t uint32_tmp;
-	safe_unpackstr_xmalloc(&conf->hostname, &uint16_tmp, buffer);
-	safe_unpack32(&conf->sockets, buffer);
-	safe_unpack32(&conf->cores, buffer);
-	safe_unpack32(&conf->threads, buffer);
-	safe_unpackstr_xmalloc(&conf->spooldir, &uint16_tmp, buffer);
-	safe_unpackstr_xmalloc(&conf->node_name, &uint16_tmp, buffer);
-	safe_unpackstr_xmalloc(&conf->logfile, &uint16_tmp, buffer);
-	safe_unpack16(&conf->job_acct_freq, buffer);
+
+	safe_unpackstr_xmalloc(&conf->hostname, &uint32_tmp, buffer);
+	safe_unpack16(&conf->sockets, buffer);
+	safe_unpack16(&conf->cores, buffer);
+	safe_unpack16(&conf->threads, buffer);
+	safe_unpackstr_xmalloc(&conf->spooldir,    &uint32_tmp, buffer);
+	safe_unpackstr_xmalloc(&conf->node_name,   &uint32_tmp, buffer);
+	safe_unpackstr_xmalloc(&conf->logfile,     &uint32_tmp, buffer);
+	safe_unpackstr_xmalloc(&conf->task_prolog, &uint32_tmp, buffer);
+	safe_unpackstr_xmalloc(&conf->task_epilog, &uint32_tmp, buffer);
+	safe_unpack16(&conf->job_acct_gather_freq, buffer);
+	safe_unpack16(&conf->propagate_prio, buffer);
 	safe_unpack32(&uint32_tmp, buffer);
 	conf->debug_level = uint32_tmp;
 	safe_unpack32(&uint32_tmp, buffer);
@@ -73,9 +80,16 @@ extern int unpack_slurmd_conf_lite_no_alloc(slurmd_conf_t *conf, Buf buffer)
 	safe_unpack32(&uint32_tmp, buffer);
 	conf->slurm_user_id = (uid_t)uint32_tmp;
 	safe_unpack16(&conf->use_pam, buffer);
+	safe_unpack16(&conf->task_plugin_param, buffer);
 	return SLURM_SUCCESS;
 
 unpack_error:
 	error("unpack_error in unpack_slurmd_conf_lite_no_alloc: %m");
+	xfree(conf->hostname);
+	xfree(conf->spooldir);
+	xfree(conf->node_name);
+	xfree(conf->logfile);
+	xfree(conf->task_prolog);
+	xfree(conf->task_epilog);
 	return SLURM_ERROR;
 }

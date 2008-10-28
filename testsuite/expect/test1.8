@@ -14,7 +14,7 @@
 # Copyright (C) 2002 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-217948.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -63,7 +63,7 @@ exec $bin_chmod 700 $file_in
 # Spawn a shell via srun that uses stdin/out/err and confirm their contents
 #
 set timeout $max_job_delay
-spawn $srun --input=$file_in --output=$file_out --error=$file_err -t1 $bin_bash
+set srun_pid [spawn $srun --input=$file_in --output=$file_out --error=$file_err -t1 $bin_bash]
 expect {
 	-re "Unable to contact" {
 		send_user "\nFAILURE: slurm appears to be down\n"
@@ -71,9 +71,8 @@ expect {
 	}
 	timeout {
 		send_user "\nFAILURE: srun not responding\n"
-		kill_srun
+		slow_kill $srun_pid
 		set exit_code 1
-		exp_continue
 	}
 	eof {
 		wait
@@ -128,7 +127,7 @@ if {[string compare $login_grp_info $job_grp_info] != 0} {
 if {[wait_for_file $file_err] == 0} {
 	spawn $bin_cat $file_err
 	expect {
-		-re "invalid time interval" {
+		-re "$sleep_error_message" {
 			send_user "\nNo worries, this error is expected\n"
 			set got_sleep_err 1
 			exp_continue
@@ -150,7 +149,7 @@ if {$got_sleep_err == 0} {
 #
 # Spawn a program to run for a while with no input, output or error
 #
-spawn $srun --input=none --output=none --error=none -t1 -N1 od -c $srun
+set srun_pid [spawn $srun --input=none --output=none --error=none -t1 -N1 od -c $srun]
 expect {
 	-re "Unable to contact" {
 		send_user "\nFAILURE: slurm appears to be down\n"
@@ -161,16 +160,15 @@ expect {
 		set exit_code 1
 		exp_continue
 	}
-	-re "job exceeded timelimit" {
+	-re "time limit exceeded" {
 		send_user "\nFAILURE: srun failed to complete\n"
 		set exit_code 1
 		exp_continue
 	}
 	timeout {
 		send_user "\nFAILURE: srun not responding\n"
-		kill_srun
+		slow_kill $srun_pid
 		set exit_code 1
-		exp_continue
 	}
 	eof {
 		wait

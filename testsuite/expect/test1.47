@@ -1,16 +1,16 @@
 #!/usr/bin/expect
 ############################################################################
 # Purpose: Test of SLURM functionality
-#          Tests #SLURM entry functionality in a batch script.
+#          Test of job dependencies with singleton parameter.
 #
 # Output:  "TEST: #.#" followed by "SUCCESS" if test was successful, OR
 #          "FAILURE: ..." otherwise with an explanation of the failure, OR
 #          anything else indicates a failure mode that must be investigated.
 ############################################################################
-# Copyright (C) 2005-2006 The Regents of the University of California.
+# Copyright (C) 2008 Lawrence Livermore National Security.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
-# Written by Danny Auble <da@llnl.gov>
-# UCRL-CODE-217948.
+# Written by Morris Jette <jette1@llnl.gov>
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -32,131 +32,73 @@
 source ./globals
 
 set test_id     "1.47"
-set exit_code   0
 set file_in     "test$test_id.input"
-set file_out    "test$test_id.output"
-set job_acct    "TEST_ACCT"
-set job_name    "TEST_NAME"
-set delay       1
+set exit_code   0
+set job_id1     0
+set job_id2     0
+set job_name	"JOB.$test_id"
 
 print_header $test_id
 
-make_bash_script $file_in "
-  #SLURM --job-name=$job_name
-  #SLURM --account=$job_acct
-  $bin_sleep $delay
-"
+#
+# Build input script file
+#
+make_bash_script $file_in "$bin_sleep 15"
 
+#
+# Spawn a srun batch job that just sleeps for a while
+#
 set timeout $max_job_delay
-set job_id 0
-spawn $srun -o $file_out -b $file_in
+set sbatch_pid [spawn $sbatch --output=/dev/null --error=/dev/null --job-name=$job_name -t1 $file_in]
 expect {
-	-re "jobid ($number) submitted" {
-		set job_id $expect_out(1,string)
+	-re "Submitted batch job ($number)" {
+		set job_id1 $expect_out(1,string)
 		exp_continue
 	}
 	timeout {
-		send_user "\nFAILURE: srun not responding\n"
-		kill_srun
+		send_user "\nFAILURE: sbatch not responding\n"
+		slow_kill $sbatch_pid
 		set exit_code 1
-		exp_continue
 	}
 	eof {
 		wait
 	}
 }
-if {$job_id == 0} {
+if {$job_id1 == 0} {
 	send_user "\nFAILURE: batch submit failure\n"
 	exit 1
 }
-set matches 0
-spawn $scontrol show job $job_id
-expect {
-	-re "Name=$job_name" {
-		incr matches
-		exp_continue
-	}
-	-re "Account=$job_acct" {
-		incr matches
-		exp_continue
-	}
-	timeout {
-		send_user "\nFAILURE: scontrol not responding\n"
-		set exit_code 1
-		exp_continue
-	}
-	eof {
-		wait
-	}
-}
-if {$matches != 2} {
-	send_user "\nFAILURE: did not set job name and account from batch script\n"
-	set exit_code 1
-}
 
 #
-# Build input script file
-# NOTE: The initial sleep is so that all of the submissions have time 
-#   to occur before contending with a multitude of job step creations.
-#   This is especially important on very slow systems (e.g. AIX).
+# Submit a dependent job
 #
-make_bash_script $file_in "
-  #SLURM -N1000000k
-  $bin_sleep $delay
-"
-
 set matches 0
-spawn $srun -o $file_out -b $file_in
+set srun_pid [spawn $srun -v --dependency=singleton --job-name=$job_name $scontrol show job $job_id1]
 expect {
-	-re "More .* requested than permitted" {	
-		send_user "This error was expected, no worries\n\n"
-		incr matches
-		exp_continue
-	}	
-	timeout {
-		send_user "\nFAILURE: srun not responding\n"
-		kill_srun
-		set exit_code 1
+	-re "launching ($number).0" {
+		set job_id2 $expect_out(1,string)
 		exp_continue
 	}
-	eof {
-		wait
-	}
-}
-if {$matches != 1} {
-	send_user "\nFAILURE: srun didn't read the correct options from batch file\n"
-	set exit_code 1
-}
-
-make_bash_script $file_in "
-  #SLURM -N650000
-  $bin_sleep $delay
-"
-
-spawn $srun -N1 -o $file_out -b $file_in
-expect {
-	-re "More nodes requested than permitted" {
-		send_user "\nFAILURE: srun read from the batch file options"
-		send_user "over writing the commandline options\n"
-		set exit_code 1
+	-re "JobState=COMPLETED" {
+		set matches 1
 		exp_continue
 	}
 	timeout {
 		send_user "\nFAILURE: srun not responding\n"
-		kill_srun
+		slow_kill $srun_pid
 		set exit_code 1
-		exp_continue
 	}
 	eof {
 		wait
 	}
 }
+if {$matches == 0} {
+	send_user "\nFAILURE: Dependent job not completed\n"
+	set exit_code 1
+}
 
-#
-# Post-processing
-#
 if {$exit_code == 0} {
-	file delete $file_in $file_out
+	exec $bin_rm -f $file_in
 	send_user "\nSUCCESS\n"
 }
 exit $exit_code

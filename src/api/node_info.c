@@ -2,10 +2,11 @@
  *  node_info.c - get/print the node state information of slurm
  *  $Id$
  *****************************************************************************
- *  Copyright (C) 2002-2006 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -16,7 +17,7 @@
  *  any later version.
  *
  *  In addition, as a special exception, the copyright holders give permission 
- *  to link the code of portions of this program with the OpenSSL library under 
+ *  to link the code of portions of this program with the OpenSSL library under
  *  certain conditions as described in each individual source file, and 
  *  distribute linked combinations including the two. You must obey the GNU 
  *  General Public License in all respects for all of the code used other than 
@@ -38,6 +39,10 @@
 
 #ifdef HAVE_CONFIG_H
 #  include "config.h"
+#endif
+
+#ifdef HAVE_SYS_SYSLOG_H
+#  include <sys/syslog.h>
 #endif
 
 #include <errno.h>
@@ -109,8 +114,8 @@ char *
 slurm_sprint_node_table (node_info_t * node_ptr, int one_liner )
 {
 	uint16_t my_state = node_ptr->node_state;
-	char *comp_str = "", *drain_str = "";
-	char tmp_line[100];
+	char *comp_str = "", *drain_str = "", *power_str = "";
+	char tmp_line[512];
 	char *out = NULL;
 
 	if (my_state & NODE_STATE_COMPLETING) {
@@ -121,13 +126,18 @@ slurm_sprint_node_table (node_info_t * node_ptr, int one_liner )
 		my_state &= (~NODE_STATE_DRAIN);
 		drain_str = "+DRAIN";
 	}
+	if (my_state & NODE_STATE_POWER_SAVE) {
+		my_state &= (~NODE_STATE_POWER_SAVE);
+		power_str = "+POWER";
+	}
 
 	/****** Line 1 ******/
 	snprintf(tmp_line, sizeof(tmp_line),
-		"NodeName=%s State=%s%s%s CPUs=%u "
+		"NodeName=%s State=%s%s%s%s Procs=%u AllocProcs=%u "
 		"RealMemory=%u TmpDisk=%u",
 		node_ptr->name, node_state_string(my_state),
-		comp_str, drain_str, node_ptr->cpus,
+		comp_str, drain_str, power_str,
+		node_ptr->cpus, node_ptr->used_cpus,
 		node_ptr->real_memory, node_ptr->tmp_disk);
 	xstrcat(out, tmp_line);
 	if (one_liner)
@@ -137,10 +147,33 @@ slurm_sprint_node_table (node_info_t * node_ptr, int one_liner )
 
 	/****** Line 2 ******/
 	snprintf(tmp_line, sizeof(tmp_line),
-		"Weight=%u Features=%s Reason=%s\n" , 
+		"Sockets=%u CoresPerSocket=%u ThreadsPerCore=%u",
+		node_ptr->sockets, node_ptr->cores, node_ptr->threads);
+	xstrcat(out, tmp_line);
+	if (one_liner)
+		xstrcat(out, " ");
+	else
+		xstrcat(out, "\n   ");
+
+	/****** Line 3 ******/
+	snprintf(tmp_line, sizeof(tmp_line),
+		"Weight=%u Features=%s Reason=%s" ,
 		node_ptr->weight, node_ptr->features,
 		node_ptr->reason);
 	xstrcat(out, tmp_line);
+
+	/****** Line 4 (optional) ******/
+	if (node_ptr->arch || node_ptr->os) {
+		if (one_liner)
+			xstrcat(out, " ");
+		else
+			xstrcat(out, "\n   ");
+		snprintf(tmp_line, sizeof(tmp_line),
+			"Arch=%s OS=%s",
+			node_ptr->arch, node_ptr->os);
+		xstrcat(out, tmp_line);
+	}
+	xstrcat(out, "\n");
 
 	return out;
 }
@@ -163,6 +196,8 @@ extern int slurm_load_node (time_t update_time,
         slurm_msg_t resp_msg;
         node_info_request_msg_t req;
 	
+	slurm_msg_t_init(&req_msg);
+	slurm_msg_t_init(&resp_msg);
         req.last_update  = update_time;
 	req.show_flags   = show_flags;
         req_msg.msg_type = REQUEST_NODE_INFO;

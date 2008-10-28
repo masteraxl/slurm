@@ -1,12 +1,12 @@
 /*****************************************************************************\
- *  part_info.c - Functions related to partition display 
+ *  block_info.c - Functions related to Bluegene block display 
  *  mode of sview.
  *****************************************************************************
  *  Copyright (C) 2004-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
  * 
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -31,7 +31,6 @@
 #include "src/api/node_select_info.h"
 
 #define _DEBUG 0
-DEF_TIMERS;
 
 typedef struct {
 	char *bg_user_name;
@@ -41,305 +40,140 @@ typedef struct {
 	enum connection_type bg_conn_type;
 	enum node_use_type bg_node_use;
 	rm_partition_state_t state;
-	int letter_num;
-	List nodelist;
 	int size;
-	uint16_t quarter;	
-	uint16_t nodecard;	
 	int node_cnt;	
+	int *bp_inx;            /* list index pairs into node_table for *nodes:
+				 * start_range_1, end_range_1,
+				 * start_range_2, .., -1  */
 	bool printed;
-
-} db2_block_info_t;
+	char *color;
+	char *blrtsimage;       /* BlrtsImage for this block */
+	char *linuximage;       /* LinuxImage for this block */
+	char *mloaderimage;     /* mloaderImage for this block */
+	char *ramdiskimage;     /* RamDiskImage for this block */
+} sview_block_info_t;
 
 enum { 
 	SORTID_POS = POS_LOC,
-	SORTID_PARTITION, 
 	SORTID_BLOCK,
-	SORTID_STATE,
-	SORTID_USER,
+	SORTID_BLRTSIMAGE,
 	SORTID_CONN,
-	SORTID_USE,
+	SORTID_LINUXIMAGE,
+	SORTID_MLOADERIMAGE,
 	SORTID_NODES, 
 	SORTID_NODELIST, 
-	SORTID_POINTER,
+	SORTID_PARTITION, 
+	SORTID_RAMDISKIMAGE,
+	SORTID_STATE,
 	SORTID_UPDATED, 
+	SORTID_USE,
+	SORTID_USER,
 	SORTID_CNT
 };
 
 static display_data_t display_data_block[] = {
-	{G_TYPE_INT, SORTID_POS, NULL, FALSE, -1, refresh_block,
-	 create_model_block, admin_edit_block},
-	{G_TYPE_STRING, SORTID_PARTITION, "Partition", 
-	 TRUE, -1, refresh_block,
+	{G_TYPE_INT, SORTID_POS, NULL, FALSE, EDIT_NONE, refresh_block,
 	 create_model_block, admin_edit_block},
 	{G_TYPE_STRING, SORTID_BLOCK, "Bluegene Block", 
-	 TRUE, -1, refresh_block,
+	 TRUE, EDIT_NONE, refresh_block,
 	 create_model_block, admin_edit_block},
-	{G_TYPE_STRING, SORTID_STATE, "State", TRUE, -1, refresh_block,
+	{G_TYPE_STRING, SORTID_STATE, "State", TRUE, EDIT_MODEL, refresh_block,
 	 create_model_block, admin_edit_block},
-	{G_TYPE_STRING, SORTID_USER, "User", TRUE, -1, refresh_block,
+	{G_TYPE_STRING, SORTID_USER, "User", TRUE, EDIT_NONE, refresh_block,
+	 create_model_block, admin_edit_block},
+	{G_TYPE_STRING, SORTID_NODES, "Nodes", TRUE, EDIT_NONE, refresh_block,
 	 create_model_block, admin_edit_block},
 	{G_TYPE_STRING, SORTID_CONN, "Connection Type", 
-	 TRUE, -1, refresh_block,
+	 TRUE, EDIT_NONE, refresh_block,
 	 create_model_block, admin_edit_block},
-	{G_TYPE_STRING, SORTID_USE, "Node Use", TRUE, -1, refresh_block,
+	{G_TYPE_STRING, SORTID_USE, "Node Use", TRUE, EDIT_NONE, refresh_block,
 	 create_model_block, admin_edit_block},
-	{G_TYPE_STRING, SORTID_NODES, "Nodes", TRUE, -1, refresh_block,
+	{G_TYPE_STRING, SORTID_NODELIST, "BP List", TRUE, EDIT_NONE, refresh_block,
 	 create_model_block, admin_edit_block},
-	{G_TYPE_STRING, SORTID_NODELIST, "BP List", TRUE, -1, refresh_block,
+	{G_TYPE_STRING, SORTID_PARTITION, "Partition", 
+	 TRUE, EDIT_NONE, refresh_block,
 	 create_model_block, admin_edit_block},
-	{G_TYPE_POINTER, SORTID_POINTER, NULL, FALSE, -1, refresh_block,
+	{G_TYPE_STRING, SORTID_BLRTSIMAGE, "Blrts Image",
+	 FALSE, EDIT_NONE, refresh_block, create_model_block, admin_edit_block},
+	{G_TYPE_STRING, SORTID_LINUXIMAGE, "linux Image",
+	 FALSE, EDIT_NONE, refresh_block, create_model_block, admin_edit_block},
+	{G_TYPE_STRING, SORTID_MLOADERIMAGE, "Mloader Image",
+	 FALSE, EDIT_NONE, refresh_block, create_model_block, admin_edit_block},
+	{G_TYPE_STRING, SORTID_RAMDISKIMAGE, "Ramdisk Image",
+	 FALSE, EDIT_NONE, refresh_block, create_model_block, admin_edit_block},
+	{G_TYPE_INT, SORTID_UPDATED, NULL, FALSE, EDIT_NONE, refresh_block,
 	 create_model_block, admin_edit_block},
-	{G_TYPE_INT, SORTID_UPDATED, NULL, FALSE, -1, refresh_block,
-	 create_model_block, admin_edit_block},
-	{G_TYPE_NONE, -1, NULL, FALSE, -1}
+	{G_TYPE_NONE, -1, NULL, FALSE, EDIT_NONE}
 };
 
 static display_data_t options_data_block[] = {
-	{G_TYPE_INT, SORTID_POS, NULL, FALSE, -1},
+	{G_TYPE_INT, SORTID_POS, NULL, FALSE, EDIT_NONE},
+	{G_TYPE_STRING, INFO_PAGE, "Full Info", TRUE, BLOCK_PAGE},
+	{G_TYPE_STRING, BLOCK_PAGE, "Put block in error state",
+	 TRUE, ADMIN_PAGE},
+	{G_TYPE_STRING, BLOCK_PAGE, "Put block in free state",
+	 TRUE, ADMIN_PAGE},
 	{G_TYPE_STRING, JOB_PAGE, "Jobs", TRUE, BLOCK_PAGE},
 	{G_TYPE_STRING, PART_PAGE, "Partition", TRUE, BLOCK_PAGE},
 	{G_TYPE_STRING, NODE_PAGE, "Base Partitions", TRUE, BLOCK_PAGE},
-	{G_TYPE_STRING, SUBMIT_PAGE, "Job Submit", TRUE, BLOCK_PAGE},
-	{G_TYPE_NONE, -1, NULL, FALSE, -1}
+	{G_TYPE_STRING, SUBMIT_PAGE, "Job Submit", FALSE, BLOCK_PAGE},
+	{G_TYPE_NONE, -1, NULL, FALSE, EDIT_NONE}
 };
 
 static display_data_t *local_display_data = NULL;
 
 static char* _convert_conn_type(enum connection_type conn_type);
 static char* _convert_node_use(enum node_use_type node_use);
-static int _marknodes(db2_block_info_t *block_ptr, int count);
-static char *_part_state_str(rm_partition_state_t state);
-static void _block_list_del(void *object);
-static void _nodelist_del(void *object);
-static int _in_slurm_partition(List slurm_nodes, List bg_nodes);
-static int _make_nodelist(char *nodes, List nodelist);
-static void _append_block_record(db2_block_info_t *block_ptr,
-				GtkTreeStore *treestore, GtkTreeIter *iter, 
-				int line);
-
-
-static int _marknodes(db2_block_info_t *block_ptr, int count)
-{
-#ifdef HAVE_BG
-	int j=0;
-	int start[BA_SYSTEM_DIMENSIONS];
-	int end[BA_SYSTEM_DIMENSIONS];
-	int number = 0;
-	
-	block_ptr->letter_num = count;
-	while (block_ptr->nodes[j] != '\0') {
-		if ((block_ptr->nodes[j] == '['
-		     || block_ptr->nodes[j] == ',')
-		    && (block_ptr->nodes[j+8] == ']' 
-			|| block_ptr->nodes[j+8] == ',')
-		    && (block_ptr->nodes[j+4] == 'x'
-			|| block_ptr->nodes[j+4] == '-')) {
-			j++;
-			number = atoi(block_ptr->nodes + j);
-			start[X] = number / 100;
-			start[Y] = (number % 100) / 10;
-			start[Z] = (number % 10);
-			j += 4;
-			number = atoi(block_ptr->nodes + j);
-			end[X] = number / 100;
-			end[Y] = (number % 100) / 10;
-			end[Z] = (number % 10);
-			j += 3;
-			
-			/* if(block_ptr->state != RM_PARTITION_FREE)  */
-/* 				block_ptr->size += set_grid_bg(start, */
-/* 							       end, */
-/* 							       count, */
-/* 							       1); */
-/* 			else */
-/* 				block_ptr->size += set_grid_bg(start,  */
-/* 							       end,  */
-/* 							       count,  */
-/* 							       0); */
-			if(block_ptr->nodes[j] != ',')
-				break;
-			j--;
-		} else if((block_ptr->nodes[j] < 58 
-			   && block_ptr->nodes[j] > 47)) {
-					
-			number = atoi(block_ptr->nodes + j);
-			start[X] = number / 100;
-			start[Y] = (number % 100) / 10;
-			start[Z] = (number % 10);
-			j+=3;
-			/* block_ptr->size += set_grid_bg(start,  */
-/* 							start,  */
-/* 							count,  */
-/* 							0); */
-			if(block_ptr->nodes[j] != ',')
-				break;
-		}
-		j++;
-	}
-#endif
-	return SLURM_SUCCESS;
-}
-
-static char *_part_state_str(rm_partition_state_t state)
-{
-	static char tmp[16];
-
-#ifdef HAVE_BG
-	switch (state) {
-		case RM_PARTITION_BUSY: 
-			return "BUSY";
-		case RM_PARTITION_CONFIGURING:
-			return "CONFIG";
-		case RM_PARTITION_DEALLOCATING:
-			return "DEALLOC";
-		case RM_PARTITION_ERROR:
-			return "ERROR";
-		case RM_PARTITION_FREE:
-			return "FREE";
-		case RM_PARTITION_NAV:
-			return "NAV";
-		case RM_PARTITION_READY:
-			return "READY";
-	}
-#endif
-
-	snprintf(tmp, sizeof(tmp), "%d", state);
-	return tmp;
-}
+static int _in_slurm_partition(int *part_inx, int *block_inx);
+static void _append_block_record(sview_block_info_t *block_ptr,
+				 GtkTreeStore *treestore, GtkTreeIter *iter, 
+				 int line);
 
 static void _block_list_del(void *object)
 {
-	db2_block_info_t *block_ptr = (db2_block_info_t *)object;
+	sview_block_info_t *block_ptr = (sview_block_info_t *)object;
 
 	if (block_ptr) {
 		xfree(block_ptr->bg_user_name);
 		xfree(block_ptr->bg_block_name);
 		xfree(block_ptr->slurm_part_name);
 		xfree(block_ptr->nodes);
-		if(block_ptr->nodelist)
-			list_destroy(block_ptr->nodelist);
-		
+		xfree(block_ptr->blrtsimage);
+		xfree(block_ptr->linuximage);
+		xfree(block_ptr->mloaderimage);
+		xfree(block_ptr->ramdiskimage);
+		/* don't xfree(block_ptr->bp_inx);
+		   it isn't copied like the chars and is freed in the api
+		 */
 		xfree(block_ptr);
 		
 	}
 }
 
-static void _nodelist_del(void *object)
+static int _in_slurm_partition(int *part_inx, int *bp_inx)
 {
-	int *coord = (int *)object;
-	xfree(coord);
-	return;
-}
-
-static int _in_slurm_partition(List slurm_nodes, List bg_nodes)
-{
-	ListIterator slurm_itr;
-	ListIterator bg_itr;
-	int *coord = NULL;
-	int *slurm_coord = NULL;
 	int found = 0;
-	
-	bg_itr = list_iterator_create(bg_nodes);
-	slurm_itr = list_iterator_create(slurm_nodes);
-	while ((coord = list_next(bg_itr)) != NULL) {
-		list_iterator_reset(slurm_itr);
+	int i=0, j=0;
+		
+	while(bp_inx[i] >= 0) {
+		j = 0;
 		found = 0;
-		while ((slurm_coord = list_next(slurm_itr)) != NULL) {
-			if((coord[X] == slurm_coord[X])
-			   && (coord[Y] == slurm_coord[Y])
-			   && (coord[Z] == slurm_coord[Z])) {
-				found=1;
+		while(part_inx[j] >= 0) {
+			if((bp_inx[i] >= part_inx[j])
+			   && bp_inx[i+1] <= part_inx[j+1]) {
+				found = 1;
 				break;
-			}			
-		}
-		if(!found) {
-			break;
-		}
-	}
-	list_iterator_destroy(slurm_itr);
-	list_iterator_destroy(bg_itr);
-			
-	if(found)
-		return 1;
-	else
-		return 0;
-	
-}
-
-static int _addto_nodelist(List nodelist, int *start, int *end)
-{
-	int *coord = NULL;
-	int x,y,z;
-	
-//	assert(end[X] < DIM_SIZE[X]);
-	assert(start[X] >= 0);
-	//assert(end[Y] < DIM_SIZE[Y]);
-	assert(start[Y] >= 0);
-	//assert(end[Z] < DIM_SIZE[Z]);
-	assert(start[Z] >= 0);
-	
-	for (x = start[X]; x <= end[X]; x++) {
-		for (y = start[Y]; y <= end[Y]; y++) {
-			for (z = start[Z]; z <= end[Z]; z++) {
-				coord = xmalloc(sizeof(int)*3);
-				coord[X] = x;
-				coord[Y] = y;
-				coord[Z] = z;
-				list_append(nodelist, coord);
 			}
+			j += 2;
 		}
+		if(!found)
+			return 0;
+		i += 2;
 	}
+	
 	return 1;
 }
 
-static int _make_nodelist(char *nodes, List nodelist)
-{
-	int j = 0;
-	int number;
-	int start[BA_SYSTEM_DIMENSIONS];
-	int end[BA_SYSTEM_DIMENSIONS];
-	
-	if(!nodelist)
-		nodelist = list_create(_nodelist_del);
-	while (nodes[j] != '\0') {
-		if ((nodes[j] == '['
-		     || nodes[j] == ',')
-		    && (nodes[j+8] == ']' 
-			|| nodes[j+8] == ',')
-		    && (nodes[j+4] == 'x'
-			|| nodes[j+4] == '-')) {
-			j++;
-			number = atoi(nodes + j);
-			start[X] = number / 100;
-			start[Y] = (number % 100) / 10;
-			start[Z] = (number % 10);
-			j += 4;
-			number = atoi(nodes + j);
-			end[X] = number / 100;
-			end[Y] = (number % 100) / 10;
-			end[Z] = (number % 10);
-			j += 3;
-			_addto_nodelist(nodelist, start, end);
-			if(nodes[j] != ',')
-				break;
-			j--;
-		} else if((nodes[j] < 58 
-			   && nodes[j] > 47)) {
-					
-			number = atoi(nodes + j);
-			start[X] = number / 100;
-			start[Y] = (number % 100) / 10;
-			start[Z] = (number % 10);
-			j+=3;
-			_addto_nodelist(nodelist, start, start);
-			if(nodes[j] != ',')
-				break;
-		}
-		j++;
-	}
-	return 1;
-}
 
 static char* _convert_conn_type(enum connection_type conn_type)
 {
@@ -369,20 +203,81 @@ static char* _convert_node_use(enum node_use_type node_use)
 	return "?";
 }
 
-static void _update_block_record(db2_block_info_t *block_ptr, 
+static void _layout_block_record(GtkTreeView *treeview,
+				 sview_block_info_t *block_ptr, 
+				 int update)
+{
+	char tmp_cnt[8];
+	GtkTreeIter iter;
+	GtkTreeStore *treestore = 
+		GTK_TREE_STORE(gtk_tree_view_get_model(treeview));
+	
+	add_display_treestore_line(update, treestore, &iter, 
+				   find_col_name(display_data_block,
+						 SORTID_BLOCK),
+				   block_ptr->bg_block_name);
+	add_display_treestore_line(update, treestore, &iter, 
+				   find_col_name(display_data_block,
+						 SORTID_PARTITION),
+				   block_ptr->slurm_part_name);
+	add_display_treestore_line(update, treestore, &iter, 
+				   find_col_name(display_data_block, 
+						 SORTID_STATE),
+				   bg_block_state_string(block_ptr->state));
+	add_display_treestore_line(update, treestore, &iter, 
+				   find_col_name(display_data_block,
+						 SORTID_USER),
+				   block_ptr->bg_user_name);
+	add_display_treestore_line(update, treestore, &iter, 
+				   find_col_name(display_data_block,
+						 SORTID_CONN),
+				   _convert_conn_type(
+					   block_ptr->bg_conn_type));
+	add_display_treestore_line(update, treestore, &iter, 
+				   find_col_name(display_data_block,
+						 SORTID_USE),
+				   _convert_node_use(block_ptr->bg_node_use));
+	
+	convert_num_unit((float)block_ptr->node_cnt, tmp_cnt, sizeof(tmp_cnt),
+			 UNIT_NONE);
+	add_display_treestore_line(update, treestore, &iter, 
+				   find_col_name(display_data_block,
+						 SORTID_NODES),
+				   tmp_cnt);
+		
+	add_display_treestore_line(update, treestore, &iter, 
+				   find_col_name(display_data_block,
+						 SORTID_NODELIST),
+				   block_ptr->nodes);
+	add_display_treestore_line(update, treestore, &iter, 
+				   find_col_name(display_data_block,
+						 SORTID_BLRTSIMAGE),
+				   block_ptr->blrtsimage);
+	add_display_treestore_line(update, treestore, &iter,
+				   find_col_name(display_data_block,
+						 SORTID_LINUXIMAGE),
+				   block_ptr->linuximage);
+	add_display_treestore_line(update, treestore, &iter,
+				   find_col_name(display_data_block,
+						 SORTID_MLOADERIMAGE),
+				   block_ptr->mloaderimage);
+	add_display_treestore_line(update, treestore, &iter,
+				   find_col_name(display_data_block,
+						 SORTID_RAMDISKIMAGE),
+				   block_ptr->ramdiskimage);
+}
+
+static void _update_block_record(sview_block_info_t *block_ptr, 
 				 GtkTreeStore *treestore, GtkTreeIter *iter)
 {
-	char *nodes = NULL;
-	char tmp_cnt[7];
-	char tmp_nodes[30];
+	char tmp_cnt[8];
 	
-	gtk_tree_store_set(treestore, iter, SORTID_POINTER, block_ptr, -1);
 	gtk_tree_store_set(treestore, iter, SORTID_BLOCK, 
 			   block_ptr->bg_block_name, -1);
 	gtk_tree_store_set(treestore, iter, SORTID_PARTITION, 
 			   block_ptr->slurm_part_name, -1);
 	gtk_tree_store_set(treestore, iter, SORTID_STATE, 
-			   _part_state_str(block_ptr->state), -1);
+			   bg_block_state_string(block_ptr->state), -1);
 	gtk_tree_store_set(treestore, iter, SORTID_USER, 
 			   block_ptr->bg_user_name, -1);
 	gtk_tree_store_set(treestore, iter, SORTID_CONN, 
@@ -390,28 +285,28 @@ static void _update_block_record(db2_block_info_t *block_ptr,
 	gtk_tree_store_set(treestore, iter, SORTID_USE, 
 			   _convert_node_use(block_ptr->bg_node_use), -1);
 	
-	convert_num_unit((float)block_ptr->node_cnt, tmp_cnt, UNIT_NONE);
+	convert_num_unit((float)block_ptr->node_cnt, tmp_cnt, sizeof(tmp_cnt),
+			 UNIT_NONE);
 	gtk_tree_store_set(treestore, iter, SORTID_NODES, tmp_cnt, -1);
 
-	nodes = block_ptr->nodes;			
-	if(block_ptr && (block_ptr->quarter != (uint16_t) NO_VAL)) {
-		if(block_ptr->nodecard != (uint16_t) NO_VAL)
-			sprintf(tmp_nodes, "%s.%d.%d", nodes,
-				block_ptr->quarter,
-				block_ptr->nodecard);
-		else
-			sprintf(tmp_nodes, "%s.%d", nodes,
-				block_ptr->quarter);
-		nodes = tmp_nodes;
-	} 
-	gtk_tree_store_set(treestore, iter, SORTID_NODELIST, nodes, -1);
+	gtk_tree_store_set(treestore, iter, SORTID_NODELIST,
+			   block_ptr->nodes, -1);
+
+	gtk_tree_store_set(treestore, iter, SORTID_BLRTSIMAGE,
+			   block_ptr->blrtsimage, -1);
+	gtk_tree_store_set(treestore, iter, SORTID_LINUXIMAGE,
+			   block_ptr->linuximage, -1);
+	gtk_tree_store_set(treestore, iter, SORTID_MLOADERIMAGE,
+			   block_ptr->mloaderimage, -1);
+	gtk_tree_store_set(treestore, iter, SORTID_RAMDISKIMAGE,
+			   block_ptr->ramdiskimage, -1);
 
 	gtk_tree_store_set(treestore, iter, SORTID_UPDATED, 1, -1);
 	
 	return;
 }
 	
-static void _append_block_record(db2_block_info_t *block_ptr,
+static void _append_block_record(sview_block_info_t *block_ptr,
 				 GtkTreeStore *treestore, GtkTreeIter *iter,
 				 int line)
 {
@@ -421,18 +316,15 @@ static void _append_block_record(db2_block_info_t *block_ptr,
 }
 
 static void _update_info_block(List block_list, 
-			       GtkTreeView *tree_view,
-			       specific_info_t *spec_info)
+			       GtkTreeView *tree_view)
 {
 	ListIterator itr;
-	db2_block_info_t *block_ptr = NULL;
+	sview_block_info_t *block_ptr = NULL;
 	GtkTreePath *path = gtk_tree_path_new_first();
 	GtkTreeModel *model = gtk_tree_view_get_model(tree_view);
 	GtkTreeIter iter;
 	char *name = NULL;
-	char *host = NULL, *host2 = NULL;
-	hostlist_t hostlist = NULL;
-	int found = 0;
+	char *host = NULL;
 	int line = 0;
 
 	if (!block_list) {
@@ -456,11 +348,11 @@ static void _update_info_block(List block_list,
  	/* Report the BG Blocks */
 	
 	itr = list_iterator_create(block_list);
-	while ((block_ptr = (db2_block_info_t*) list_next(itr))) {
+	while ((block_ptr = (sview_block_info_t*) list_next(itr))) {
 		if(block_ptr->node_cnt == 0)
 			block_ptr->node_cnt = block_ptr->size;
 		if(!block_ptr->slurm_part_name)
-			block_ptr->slurm_part_name = "no part";
+			block_ptr->slurm_part_name = xstrdup("no part");
 		
 		/* get the iter, or find out the list is empty goto add */
 		if (!gtk_tree_model_get_iter(model, &iter, path)) {
@@ -491,55 +383,6 @@ static void _update_info_block(List block_list,
 			}
 		}
 	adding:
-		if(spec_info) {
-			switch(spec_info->type) {
-			case PART_PAGE:
-				if(strcmp(block_ptr->slurm_part_name, 
-					  (char *)spec_info->data)) 
-					continue;
-				break;
-			case NODE_PAGE:
-				if(!block_ptr->nodes)
-					continue;
-
-				hostlist = hostlist_create(
-					(char *)spec_info->data);
-				host = hostlist_shift(hostlist);
-				hostlist_destroy(hostlist);
-				if(!host) 
-					continue;
-
-				hostlist = hostlist_create(block_ptr->nodes);
-				found = 0;
-				while((host2 = hostlist_shift(hostlist))) { 
-					if(!strcmp(host, host2)) {
-						free(host2);
-						found = 1;
-						break; 
-					}
-					free(host2);
-				}
-				hostlist_destroy(hostlist);
-				if(!found)
-					continue;
-				break;
-			case BLOCK_PAGE:
-			case JOB_PAGE:
-				if(strcmp(block_ptr->bg_block_name, 
-					  (char *)spec_info->data)) 
-					continue;
-				break;
-			default:
-				g_print("Unkown type %d\n", spec_info->type);
-				continue;
-			}
-		}
-
-
-		/* this is the letter for later 
-		   part.root_only = 
-		   (int) letters[block_ptr->letter_num%62];
-		*/
 		_append_block_record(block_ptr, GTK_TREE_STORE(model), 
 				     &iter, line);
 	found:
@@ -559,13 +402,11 @@ static List _create_block_list(partition_info_msg_t *part_info_ptr,
 			       node_select_info_msg_t *node_select_ptr,
 			       int changed)
 {
-	int i, j, last_count = -1;
+	int i, j;
 	static List block_list = NULL;
-	ListIterator itr;
-	List nodelist = NULL;
 	partition_info_t part;
-	db2_block_info_t *block_ptr = NULL;
-	db2_block_info_t *found_block = NULL;
+	sview_block_info_t *block_ptr = NULL;
+	char tmp_nodes[50];
 	
 	if(!changed && block_list) {
 		return block_list;
@@ -580,129 +421,138 @@ static List _create_block_list(partition_info_msg_t *part_info_ptr,
 		return NULL;
 	}
 	for (i=0; i<node_select_ptr->record_count; i++) {
-		block_ptr = xmalloc(sizeof(db2_block_info_t));
+		block_ptr = xmalloc(sizeof(sview_block_info_t));
 			
 		block_ptr->bg_block_name 
 			= xstrdup(node_select_ptr->
 				  bg_info_array[i].bg_block_id);
 		block_ptr->nodes 
 			= xstrdup(node_select_ptr->bg_info_array[i].nodes);
-		block_ptr->nodelist = list_create(_nodelist_del);
-		_make_nodelist(block_ptr->nodes,block_ptr->nodelist);
-		
+		if(node_select_ptr->bg_info_array[i].ionodes) {
+			snprintf(tmp_nodes, sizeof(tmp_nodes),
+				 "%s[%s]",
+				 block_ptr->nodes,
+				 node_select_ptr->bg_info_array[i].ionodes);
+			xfree(block_ptr->nodes);
+			block_ptr->nodes = xstrdup(tmp_nodes);
+		}
+				
 		block_ptr->bg_user_name 
 			= xstrdup(node_select_ptr->
 				  bg_info_array[i].owner_name);
+		block_ptr->blrtsimage = xstrdup(
+			node_select_ptr->bg_info_array[i].blrtsimage);
+		block_ptr->linuximage = xstrdup(
+			node_select_ptr->bg_info_array[i].linuximage);
+		block_ptr->mloaderimage = xstrdup(
+			node_select_ptr->bg_info_array[i].mloaderimage);
+		block_ptr->ramdiskimage = xstrdup(
+			node_select_ptr->bg_info_array[i].ramdiskimage);
+		
 		block_ptr->state 
 			= node_select_ptr->bg_info_array[i].state;
 		block_ptr->bg_conn_type 
 			= node_select_ptr->bg_info_array[i].conn_type;
 		block_ptr->bg_node_use 
 			= node_select_ptr->bg_info_array[i].node_use;
-		block_ptr->quarter 
-			= node_select_ptr->bg_info_array[i].quarter;
-		block_ptr->nodecard 
-			= node_select_ptr->bg_info_array[i].nodecard;
+
 		block_ptr->node_cnt 
 			= node_select_ptr->bg_info_array[i].node_cnt;
-	       
-		itr = list_iterator_create(block_list);
-		while ((found_block = (db2_block_info_t*)list_next(itr)) 
-		       != NULL) {
-			if(!strcmp(block_ptr->nodes, found_block->nodes)) {
-				block_ptr->letter_num = 
-					found_block->letter_num;
+		block_ptr->bp_inx 
+			= node_select_ptr->bg_info_array[i].bp_inx;
+		for(j = 0; j < part_info_ptr->record_count; j++) {
+			part = part_info_ptr->partition_array[j];
+			if(_in_slurm_partition(part.node_inx,
+					       block_ptr->bp_inx)) {
+				block_ptr->slurm_part_name 
+					= xstrdup(part.name);
 				break;
 			}
 		}
-		list_iterator_destroy(itr);
-
-		if(!found_block) {
-			last_count++;
-			_marknodes(block_ptr, last_count);
-		}
-		
 		if(block_ptr->bg_conn_type == SELECT_SMALL)
 			block_ptr->size = 0;
 
 		list_append(block_list, block_ptr);
 	}
-	for (i = 0; i < part_info_ptr->record_count; i++) {
-		j = 0;
-		part = part_info_ptr->partition_array[i];
-		
-		if (!part.nodes || (part.nodes[0] == '\0'))
-			continue;	/* empty partition */
-		nodelist = list_create(_nodelist_del);
-		_make_nodelist(part.nodes, nodelist);	
-		
-		itr = list_iterator_create(block_list);
-		while ((block_ptr = (db2_block_info_t*) list_next(itr))) {
-			if(_in_slurm_partition(nodelist,
-					       block_ptr->nodelist)) {
-				block_ptr->slurm_part_name 
-					= xstrdup(part.name);
-			}
-		}
-		list_iterator_destroy(itr);
-		list_destroy(nodelist);
-	}
-
+	
 	return block_list;
 }
+
 void _display_info_block(List block_list,
 			 popup_info_t *popup_win)
 {
 	specific_info_t *spec_info = popup_win->spec_info;
-	/* char *name = (char *)spec_info->data; */
-/* 	int i, found = 0; */
-/* 	db2_block_info_t *block_ptr = NULL; */
+	char *name = (char *)spec_info->search_info->gchar_data;
+	int i = -1, j = 0, found = 0;
+	sview_block_info_t *block_ptr = NULL;
 	char *info = NULL;
-	char *not_found = NULL;
-	GtkWidget *label = NULL;
+	int update = 0;
+	GtkTreeView *treeview = NULL;
+	ListIterator itr = NULL;
 	
-	if(!spec_info->data) {
+	if(!spec_info->search_info->gchar_data) {
 		info = xstrdup("No pointer given!");
 		goto finished;
 	}
 
-	if(spec_info->display_widget) {
-		not_found = 
-			xstrdup(GTK_LABEL(spec_info->display_widget)->text);
-		gtk_widget_destroy(spec_info->display_widget);
-		spec_info->display_widget = NULL;
+need_refresh:
+	if(!spec_info->display_widget) {
+		treeview = create_treeview_2cols_attach_to_table(
+			popup_win->table);
+		spec_info->display_widget = 
+			gtk_widget_ref(GTK_WIDGET(treeview));
+	} else {
+		treeview = GTK_TREE_VIEW(spec_info->display_widget);
+		update = 1;
 	}
 	/* this is here for if later we have more stats on a bluegene
 	   block */
-	/* itr = list_iterator_create(block_list); */
-/* 	while ((block_ptr = (db2_block_info_t*) list_next(itr))) { */
-/* 		if(!strcmp(block_ptr->bg_block_name, name)) { */
-/* 			if(!(info = slurm_sprint_block_info(&block_ptr, 0))) { */
-/* 				info = xmalloc(100); */
-/* 				sprintf(info,  */
-/* 					"Problem getting block " */
-/* 					"info for %s",  */
-/* 					block_ptr->bg_block_name); */
-/* 			} */
-/* 			found = 1; */
-/* 			break; */
-/* 		} */
-/* 	} */
-/* 	if(!found) { */
-/* 		char *temp = "BLOCK DOESN'T EXSIST\n"; */
-/* 		if(!not_found || strncmp(temp, not_found, strlen(temp)))  */
-/* 			info = xstrdup(temp); */
-/* 		xstrcat(info, not_found); */
-/* 	} */
-	info = xstrdup("No extra info avaliable.");
-finished:
-	label = gtk_label_new(info);
-	xfree(info);
-	xfree(not_found);
-	gtk_table_attach_defaults(popup_win->table, label, 0, 1, 0, 1); 
-	gtk_widget_show(label);	
-	spec_info->display_widget = gtk_widget_ref(GTK_WIDGET(label));
+	itr = list_iterator_create(block_list);
+	while ((block_ptr = (sview_block_info_t*) list_next(itr))) {
+		i++;
+		if(!strcmp(block_ptr->bg_block_name, name)
+		   || !strcmp(block_ptr->nodes, name)) {
+			j = 0;
+			while(block_ptr->bp_inx[j] >= 0) {
+				change_grid_color(
+					popup_win->grid_button_list,
+					block_ptr->bp_inx[j],
+					block_ptr->bp_inx[j+1], i);
+				j += 2;
+			}
+			_layout_block_record(treeview, block_ptr, update);
+			found = 1;
+			break;
+		}
+	}
+	list_iterator_destroy(itr);
 	
+	if(!found) {
+		if(!popup_win->not_found) { 
+			char *temp = "BLOCK DOESN'T EXSIST\n";
+			GtkTreeIter iter;
+			GtkTreeModel *model = NULL;
+	
+			/* only time this will be run so no update */
+			model = gtk_tree_view_get_model(treeview);
+			add_display_treestore_line(0, 
+						   GTK_TREE_STORE(model), 
+						   &iter,
+						   temp, "");
+		}
+		popup_win->not_found = true;
+	} else {
+		if(popup_win->not_found) { 
+			popup_win->not_found = false;
+			gtk_widget_destroy(spec_info->display_widget);
+			
+			goto need_refresh;
+		}
+	}
+	gtk_widget_show(spec_info->display_widget);
+	
+finished:
+
 	return;
 }
 	
@@ -719,39 +569,136 @@ extern void refresh_block(GtkAction *action, gpointer user_data)
 extern int get_new_info_node_select(node_select_info_msg_t **node_select_ptr,
 				    int force)
 {
+	int error_code = SLURM_NO_CHANGE_IN_DATA;
+#ifdef HAVE_BG
 	static node_select_info_msg_t *bg_info_ptr = NULL;
 	static node_select_info_msg_t *new_bg_ptr = NULL;
-	int error_code = SLURM_SUCCESS;
 	time_t now = time(NULL);
 	static time_t last;
+	static bool changed = 0;
 		
 	if(!force && ((now - last) < global_sleep_time)) {
 		*node_select_ptr = bg_info_ptr;
+		if(changed) 
+			return SLURM_SUCCESS;
 		return error_code;
 	}
 	last = now;
 	if (bg_info_ptr) {
 		error_code = slurm_load_node_select(bg_info_ptr->last_update, 
 						    &new_bg_ptr);
-		if (error_code == SLURM_SUCCESS)
+		if (error_code == SLURM_SUCCESS) {
 			select_g_free_node_info(&bg_info_ptr);
-		else if (slurm_get_errno() == SLURM_NO_CHANGE_IN_DATA) {
+			changed = 1;
+		} else if (slurm_get_errno() == SLURM_NO_CHANGE_IN_DATA) {
 			error_code = SLURM_NO_CHANGE_IN_DATA;
 			new_bg_ptr = bg_info_ptr;
+			changed = 0;
 		}
 	} else {
 		error_code = slurm_load_node_select((time_t) NULL, 
 						    &new_bg_ptr);
+		changed = 1;
 	}
 
 	bg_info_ptr = new_bg_ptr;
 	*node_select_ptr = new_bg_ptr;
+#endif
 	return error_code;
+}
+
+extern int update_state_block(GtkDialog *dialog,
+			      const char *blockid, const char *type)
+{
+	int i = 0;
+	int rc = SLURM_SUCCESS;
+	char tmp_char[100];
+	update_part_msg_t part_msg;
+	GtkWidget *label = NULL;
+	int no_dialog = 0;
+
+	if(!dialog) {
+		dialog = GTK_DIALOG(
+			gtk_dialog_new_with_buttons(
+				type,
+				GTK_WINDOW(main_window),
+				GTK_DIALOG_MODAL
+				| GTK_DIALOG_DESTROY_WITH_PARENT,
+				NULL));	
+		no_dialog = 1;
+	}
+	slurm_init_part_desc_msg(&part_msg);
+	/* means this is for bluegene */
+	part_msg.hidden = (uint16_t)INFINITE;
+	part_msg.name = (char *)blockid;
+	
+	label = gtk_dialog_add_button(dialog,
+				      GTK_STOCK_YES, GTK_RESPONSE_OK);
+	gtk_window_set_default(GTK_WINDOW(dialog), label);
+	gtk_dialog_add_button(dialog,
+			      GTK_STOCK_CANCEL, GTK_RESPONSE_CANCEL);
+	
+	if(!strcasecmp("Error", type)
+	   || !strcasecmp("Put block in error state", type)) {
+		snprintf(tmp_char, sizeof(tmp_char), 
+			 "Are you sure you want to put block %s "
+			 "in an error state?",
+			 blockid);
+		part_msg.state_up = 0;
+	} else {
+		snprintf(tmp_char, sizeof(tmp_char), 
+			 "Are you sure you want to put block %s "
+			 "in a free state?",
+			 blockid);
+		part_msg.state_up = 1;
+	}
+	
+	label = gtk_label_new(tmp_char);
+			
+	gtk_box_pack_start(GTK_BOX(dialog->vbox), label, FALSE, FALSE, 0);
+
+	gtk_widget_show_all(GTK_WIDGET(dialog));
+	i = gtk_dialog_run(dialog);
+	if (i == GTK_RESPONSE_OK) {
+		if(slurm_update_partition(&part_msg) == SLURM_SUCCESS) {
+			snprintf(tmp_char, sizeof(tmp_char), 
+				 "Block %s updated successfully",
+				blockid);
+		} else {
+			snprintf(tmp_char, sizeof(tmp_char), 
+				 "Problem updating block %s.",
+				 blockid);
+		}
+		display_edit_note(tmp_char);
+	}
+
+	if(no_dialog)
+		gtk_widget_destroy(GTK_WIDGET(dialog));
+	return rc;
 }
 
 extern GtkListStore *create_model_block(int type)
 {
 	GtkListStore *model = NULL;
+	GtkTreeIter iter;
+	switch(type) {
+	case SORTID_STATE:
+		model = gtk_list_store_new(2, G_TYPE_STRING,
+					   G_TYPE_INT);
+		gtk_list_store_append(model, &iter);
+		gtk_list_store_set(model, &iter,
+				   0, "Error",
+				   1, SORTID_STATE,
+				   -1);	
+		gtk_list_store_append(model, &iter);
+		gtk_list_store_set(model, &iter,
+				   0, "Free",
+				   1, SORTID_STATE,
+				   -1);	
+		break;
+	default:
+		break;
+	}
 	
 	return model;
 }
@@ -761,7 +708,34 @@ extern void admin_edit_block(GtkCellRendererText *cell,
 			     const char *new_text,
 			     gpointer data)
 {
-	g_print("Something block related altered\n");
+	GtkTreeStore *treestore = GTK_TREE_STORE(data);
+	GtkTreePath *path = gtk_tree_path_new_from_string(path_string);
+	GtkTreeIter iter;
+	int column = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(cell), 
+						       "column"));
+	
+	char *blockid = NULL;
+	char *old_text = NULL;
+	if(!new_text || !strcmp(new_text, ""))
+		goto no_input;
+
+	gtk_tree_model_get_iter(GTK_TREE_MODEL(treestore), &iter, path);
+	gtk_tree_model_get(GTK_TREE_MODEL(treestore), &iter, 
+			   SORTID_BLOCK, &blockid, 
+			   column, &old_text,
+			   -1);
+	switch(column) {
+	case SORTID_STATE:
+		update_state_block(NULL, blockid, new_text);
+		break;
+	default:
+		break;
+	}
+
+	g_free(blockid);
+	g_free(old_text);
+no_input:
+	gtk_tree_path_free(path);
 	g_static_mutex_unlock(&sview_mutex);
 }
 
@@ -778,6 +752,9 @@ extern void get_info_block(GtkTable *table, display_data_t *display_data)
 	static GtkWidget *display_widget = NULL;
 	List block_list = NULL;
 	int changed = 1;
+	int i=0, j=0;
+	ListIterator itr = NULL;
+	sview_block_info_t *sview_block_info_ptr = NULL;
 
 	if(display_data)
 		local_display_data = display_data;
@@ -793,10 +770,8 @@ extern void get_info_block(GtkTable *table, display_data_t *display_data)
 	
 	if((part_error_code = get_new_info_part(&part_info_ptr, force_refresh))
 	   == SLURM_NO_CHANGE_IN_DATA) { 
-		goto get_node_select;
-	}
 		
-	if (part_error_code != SLURM_SUCCESS) {
+	} else if (part_error_code != SLURM_SUCCESS) {
 		if(view == ERROR_VIEW)
 			goto end_it;
 		view = ERROR_VIEW;
@@ -813,7 +788,6 @@ extern void get_info_block(GtkTable *table, display_data_t *display_data)
 		goto end_it;
 	}
 
-get_node_select:
 	if((block_error_code = get_new_info_node_select(&node_select_ptr, 
 							force_refresh))
 	   == SLURM_NO_CHANGE_IN_DATA) { 
@@ -821,10 +795,7 @@ get_node_select:
 		   || (part_error_code != SLURM_NO_CHANGE_IN_DATA))
 			goto display_it;
 		changed = 0;
-		goto display_it;
-	}
-
-	if (block_error_code != SLURM_SUCCESS) {
+	} else if (block_error_code != SLURM_SUCCESS) {
 		if(view == ERROR_VIEW)
 			goto end_it;
 		view = ERROR_VIEW;
@@ -842,11 +813,29 @@ get_node_select:
 	}
 		
 display_it:
-	
+
 	block_list = _create_block_list(part_info_ptr, node_select_ptr,
 					changed);
 	if(!block_list)
 		return;
+	i=0;
+	/* set up the grid */
+	itr = list_iterator_create(block_list);
+	while ((sview_block_info_ptr = list_next(itr))) {
+		j=0;
+		while(sview_block_info_ptr->bp_inx[j] >= 0) {
+			sview_block_info_ptr->color =
+				change_grid_color(grid_button_list,
+						  sview_block_info_ptr->
+						  bp_inx[j],
+						  sview_block_info_ptr->
+						  bp_inx[j+1],
+						  i);
+			j += 2;
+		}
+		i++;
+	}
+	list_iterator_destroy(itr);
 
 	if(view == ERROR_VIEW && display_widget) {
 		gtk_widget_destroy(display_widget);
@@ -864,7 +853,7 @@ display_it:
 		create_treestore(tree_view, display_data_block, SORTID_CNT);
 	}
 	view = INFO_VIEW;
-	_update_info_block(block_list, GTK_TREE_VIEW(display_widget), NULL);
+	_update_info_block(block_list, GTK_TREE_VIEW(display_widget));
 end_it:
 	toggled = FALSE;
 	force_refresh = FALSE;
@@ -879,12 +868,20 @@ extern void specific_info_block(popup_info_t *popup_win)
 	static partition_info_msg_t *part_info_ptr = NULL;
 	static node_select_info_msg_t *node_select_ptr = NULL;
 	specific_info_t *spec_info = popup_win->spec_info;
+	sview_search_info_t *search_info = spec_info->search_info;
 	char error_char[100];
 	GtkWidget *label = NULL;
 	GtkTreeView *tree_view = NULL;
 	List block_list = NULL;
+	List send_block_list = NULL;
 	int changed = 1;
-
+	sview_block_info_t *block_ptr = NULL;
+	int j=0, i=-1;
+	char *host = NULL, *host2 = NULL;
+	hostlist_t hostlist = NULL;
+	int found = 0;
+	ListIterator itr = NULL;
+	
 	if(!spec_info->display_widget) {
 		setup_popup_info(popup_win, display_data_block, SORTID_CNT);
 	}
@@ -898,10 +895,8 @@ extern void specific_info_block(popup_info_t *popup_win)
 	if((part_error_code = get_new_info_part(&part_info_ptr, 
 						popup_win->force_refresh))
 	   == SLURM_NO_CHANGE_IN_DATA) { 
-		goto get_node_select;
-	}
-	
-	if (part_error_code != SLURM_SUCCESS) {
+		
+	} else if (part_error_code != SLURM_SUCCESS) {
 		if(spec_info->view == ERROR_VIEW)
 			goto end_it;
 		spec_info->view = ERROR_VIEW;
@@ -918,7 +913,6 @@ extern void specific_info_block(popup_info_t *popup_win)
 		goto end_it;
 	}
 
-get_node_select:
 	if((block_error_code = 
 	    get_new_info_node_select(&node_select_ptr,
 				     popup_win->force_refresh))
@@ -929,10 +923,8 @@ get_node_select:
 			goto display_it;
 		}
 		changed = 0;
-		goto display_it;
-	}
-	
-	if (block_error_code != SLURM_SUCCESS) {
+		
+	} else if (block_error_code != SLURM_SUCCESS) {
 		if(spec_info->view == ERROR_VIEW)
 			goto end_it;
 		spec_info->view = ERROR_VIEW;
@@ -974,14 +966,107 @@ display_it:
 				 popup_win->display_data, SORTID_CNT);
 	}
 
+	if(!popup_win->grid_button_list) {
+		popup_win->grid_button_list = copy_main_button_list();
+		put_buttons_in_table(popup_win->grid_table,
+				     popup_win->grid_button_list);
+	}
 	spec_info->view = INFO_VIEW;
 	if(spec_info->type == INFO_PAGE) {
 		_display_info_block(block_list, popup_win);
-	} else {
-		_update_info_block(block_list, 
-				   GTK_TREE_VIEW(spec_info->display_widget), 
-				   spec_info);
+		goto end_it;
 	}
+
+	/* just linking to another list, don't free the inside, just
+	   the list */
+	send_block_list = list_create(NULL);	
+	itr = list_iterator_create(block_list);
+	i = -1;
+	while ((block_ptr = list_next(itr))) {
+		i++;
+		switch(spec_info->type) {
+		case PART_PAGE:
+			if(strcmp(block_ptr->slurm_part_name, 
+				  search_info->gchar_data)) 
+				continue;
+			break;
+		case NODE_PAGE:
+			if(!block_ptr->nodes)
+				continue;
+			
+			hostlist = hostlist_create(search_info->gchar_data);
+			host = hostlist_shift(hostlist);
+			hostlist_destroy(hostlist);
+			if(!host) 
+				continue;
+
+			hostlist = hostlist_create(block_ptr->nodes);
+			found = 0;
+			while((host2 = hostlist_shift(hostlist))) { 
+				if(!strcmp(host, host2)) {
+					free(host2);
+					found = 1;
+					break; 
+				}
+				free(host2);
+			}
+			hostlist_destroy(hostlist);
+			if(!found)
+				continue;
+			break;
+		case BLOCK_PAGE:
+			switch(search_info->search_type) {
+			case SEARCH_BLOCK_NAME:
+				if(!search_info->gchar_data)
+					continue;
+				
+				if(strcmp(block_ptr->bg_block_name, 
+					  search_info->gchar_data)) 
+					continue;
+				break;
+			case SEARCH_BLOCK_SIZE:
+				if(search_info->int_data == NO_VAL)
+					continue;
+				if(block_ptr->node_cnt
+				   != search_info->int_data)
+					continue;
+				break;
+			case SEARCH_BLOCK_STATE:
+				if(search_info->int_data == NO_VAL)
+					continue;
+				if(block_ptr->state != search_info->int_data)
+					continue;
+				
+				break;
+			default:
+				continue;
+				break;
+			}
+			break;
+		case JOB_PAGE:
+			if(strcmp(block_ptr->bg_block_name, 
+				  search_info->gchar_data)) 
+				continue;
+			break;
+		default:
+			g_print("Unknown type %d\n", spec_info->type);
+			continue;
+		}
+		list_push(send_block_list, block_ptr);
+		j=0;
+		while(block_ptr->bp_inx[j] >= 0) {
+			change_grid_color(
+				popup_win->grid_button_list,
+				block_ptr->bp_inx[j],
+				block_ptr->bp_inx[j+1], i);
+			j += 2;
+		}
+	}
+	list_iterator_destroy(itr);
+	 
+	_update_info_block(send_block_list, 
+			   GTK_TREE_VIEW(spec_info->display_widget));
+	list_destroy(send_block_list);
 end_it:
 	popup_win->toggled = 0;
 	popup_win->force_refresh = 0;
@@ -996,7 +1081,7 @@ extern void set_menus_block(void *arg, GtkTreePath *path,
 	popup_info_t *popup_win = (popup_info_t *)arg;
 	switch(type) {
 	case TAB_CLICKED:
-		make_fields_menu(menu, display_data_block);
+		make_fields_menu(menu, display_data_block, SORTID_CNT);
 		break;
 	case ROW_CLICKED:
 		make_options_menu(tree_view, path, menu, options_data_block);
@@ -1048,33 +1133,40 @@ extern void popup_all_block(GtkTreeModel *model, GtkTreeIter *iter, int id)
 	}
 	list_iterator_destroy(itr);
 	
-	if(!popup_win) 
-		popup_win = create_popup_info(BLOCK_PAGE, id, title);
-	
+	if(!popup_win) {
+		if(id == INFO_PAGE)
+			popup_win = create_popup_info(id, BLOCK_PAGE, title);
+		else
+			popup_win = create_popup_info(BLOCK_PAGE, id, title);
+	} else {
+		g_free(name);
+		gtk_window_present(GTK_WINDOW(popup_win->popup));
+		return;
+	}
 	switch(id) {
 	case JOB_PAGE:
-		popup_win->spec_info->data = name;
+		popup_win->spec_info->search_info->gchar_data = name;
 		break;
 	case PART_PAGE:
 		g_free(name);
 		gtk_tree_model_get(model, iter, SORTID_PARTITION, &name, -1);
-		popup_win->spec_info->data = name;
+		popup_win->spec_info->search_info->gchar_data = name;
 		break;
 	case NODE_PAGE: 
 		g_free(name);
 		gtk_tree_model_get(model, iter, SORTID_NODELIST, &name, -1);
-		/* strip off the quarter and nodecard part */
+		/* strip off the ionodes part */
 		while(name[i]) {
-			if(name[i] == '.') {
+			if(name[i] == '[') {
 				name[i] = '\0';
 				break;
 			}
 			i++;
 		}
-		popup_win->spec_info->data = name;
+		popup_win->spec_info->search_info->gchar_data = name;
 		break;
 	case INFO_PAGE:
-		popup_win->spec_info->data = name;
+		popup_win->spec_info->search_info->gchar_data = name;
 		break;
 	default:
 		g_print("block got %d\n", id);
@@ -1088,3 +1180,24 @@ extern void popup_all_block(GtkTreeModel *model, GtkTreeIter *iter, int id)
 		return;
 	}
 }
+
+extern void admin_block(GtkTreeModel *model, GtkTreeIter *iter, char *type)
+{
+	char *blockid = NULL;
+	GtkWidget *popup = gtk_dialog_new_with_buttons(
+		type,
+		GTK_WINDOW(main_window),
+		GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+		NULL);
+	gtk_window_set_transient_for(GTK_WINDOW(popup), NULL);
+
+	gtk_tree_model_get(model, iter, SORTID_BLOCK, &blockid, -1);
+	
+	update_state_block(GTK_DIALOG(popup), blockid, type);
+	
+	g_free(blockid);
+	gtk_widget_destroy(popup);
+	
+	return;
+}
+

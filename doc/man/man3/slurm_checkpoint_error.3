@@ -129,19 +129,19 @@ Request a checkpoint for the identified job step.
 Continue its execution upon completion of the checkpoint.
 .LP
 \fBslurm_checkpoint_disable\fR
-Make the identified job step non-checkpointable. 
+Make the identified job step non\-checkpointable. 
 This can be issued as needed to prevent checkpointing while 
 a job step is in a critical section or for other reasons.
 .LP
 \fBslurm_checkpoint_enable\fR
-Make the indentified job step checkpointable.
+Make the identified job step checkpointable.
 .LP
 \fBslurm_checkpoint_error\fR
 Get error information about the last checkpoint operation for a given job step.
 .LP
 \fBslurm_checkpoint_restart\fR
 Request that a previously checkpointed job resume execution.
-It may continue execution on differrent nodes than were 
+It may continue execution on different nodes than were 
 originally used.
 Execution may be delayed if resources are not immediately 
 available.
@@ -154,7 +154,7 @@ Terminate its execution upon completion of the checkpoint.
 .SH "RETURN VALUE"
 .LP
 Zero is returned upon success. 
-On error, -1 is returned, and the Slurm error code is set appropriately.
+On error, \-1 is returned, and the Slurm error code is set appropriately.
 .SH "ERRORS"
 .LP
 \fBESLURM_INVALID_JOB_ID\fR the requested job or job step id does not exist. 
@@ -211,13 +211,18 @@ int main (int argc, char *argv[])
 .br 
 }
 
+.SH "NOTE"
+These functions are included in the libslurm library, 
+which must be linked to your process for use
+(e.g. "cc \-lslurm myprog.c").
+
 .SH "COPYING"
 Copyright (C) 2004 The Regents of the University of California.
 Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
-UCRL-CODE-217948.
+LLNL\-CODE\-402394.
 .LP
 This file is part of SLURM, a resource management program.
-For details, see <http://www.llnl.gov/linux/slurm/>.
+For details, see <https://computing.llnl.gov/linux/slurm/>.
 .LP
 SLURM is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free

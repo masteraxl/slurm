@@ -1,9 +1,10 @@
 /*****************************************************************************\
  *  spank.h - Stackable Plug-in Architecture for Node job Kontrol
  *****************************************************************************
- *  Copyright (C) 2002-2006 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -61,6 +62,8 @@ typedef int (spank_f) (spank_t spank, int ac, char *argv[]);
  *
  *   slurmd -> slurmstepd
  *               `-> init ()
+ *                -> process spank options
+ *                -> init_post_opt ()
  *               + drop privileges (initgroups(), seteuid(), chdir()) 
  *               `-> user_init ()  
  *               + for each task
@@ -77,9 +80,13 @@ typedef int (spank_f) (spank_t spank, int ac, char *argv[]);
  *               |          `-> task_exit ()
  *               `-> fini ()
  *
+ *   In srun only the init() and local_user_init() callbacks are used.
+ *
  */
 
 extern spank_f slurm_spank_init;
+extern spank_f slurm_spank_init_post_opt;
+extern spank_f slurm_spank_local_user_init;
 extern spank_f slurm_spank_user_init;
 extern spank_f slurm_spank_task_init;
 extern spank_f slurm_spank_task_post_fork;
@@ -124,7 +131,13 @@ enum spank_item {
     S_JOB_PID_TO_LOCAL_ID,   /* local task id from pid (pid_t, uint32_t *)    */
     S_JOB_LOCAL_TO_GLOBAL_ID,/* local id to global id  (uint32_t, uint32_t *) */
     S_JOB_GLOBAL_TO_LOCAL_ID,/* global id to local id  (uint32_t, uint32_t *) */
-    S_JOB_SUPPLEMENTARY_GIDS /* Array of suppl. gids (gid_t **, int *)        */
+    S_JOB_SUPPLEMENTARY_GIDS,/* Array of suppl. gids (gid_t **, int *)        */
+    S_SLURM_VERSION,         /* Current slurm version (char **)               */
+    S_SLURM_VERSION_MAJOR,   /* Current slurm version major release (char **) */
+    S_SLURM_VERSION_MINOR,   /* Current slurm version minor release (char **) */
+    S_SLURM_VERSION_MICRO,   /* Current slurm version micro release (char **) */
+    S_STEP_CPUS_PER_TASK     /* CPUs allocated per task (=1 if --overcommit
+                              * option is used, uint32_t *)                   */
 };
 
 typedef enum spank_item spank_item_t;
@@ -170,6 +183,8 @@ struct spank_option {
 
 /*
  *  Plugin may declare spank_options option table:
+ *   [Note: options may also be declared with spank_option_register(),
+ *    defined below.]
  */
 extern struct spank_option spank_options [];
 
@@ -189,6 +204,17 @@ extern struct spank_option spank_options [];
 BEGIN_C_DECLS
 
 /*
+ *  Determine whether a given spank plugin symbol is supported
+ *   in this version of SPANK interface.
+ *
+ *  Returns:
+ *  = 1   The symbol is supported
+ *  = 0   The symbol is not supported
+ *  = -1  Invalid argument
+ */
+int spank_symbol_supported (const char *symbol);
+
+/*
  *  Determine whether plugin is loaded "local" or "remote."
  * 
  *  Returns:
@@ -198,17 +224,30 @@ BEGIN_C_DECLS
  */
 int spank_remote (spank_t spank);
 
+/*
+ *  Register a plugin-provided option dynamically. This function
+ *   is only valid when called from slurm_spank_init(), and must
+ *   be called in both remote (slurmd) and local (srun) contexts.
+ *   May be called multiple times to register many options.
+ *
+ *  Returns ESPANK_SUCCESS on successful registration of the option
+ *   or ESPANK_BAD_ARG if not called from slurm_spank_init().
+ */
+spank_err_t spank_option_register (spank_t spank, struct spank_option *opt);
+
 
 /*  Get the value for the current job or task item specified, 
  *   storing the result in the subsequent pointer argument(s).
  *   Refer to the spank_item_t comments for argument types.
- *   For S_JOB_ARGV and S_JOB_ENV items the result returned to
- *   the caller should not be freed or modified.
+ *   For S_JOB_ARGV, S_JOB_ENV, and S_SLURM_VERSION* items 
+ *   the result returned to the caller should not be freed or
+ *   modified.
  *   
  *  Returns ESPANK_SUCCESS on success, ESPANK_NOTASK if an S_TASK*
  *   item is requested from outside a task context, ESPANK_BAD_ARG
- *   if invalid args are passed to spank_get_item, and 
- *   ESPANK_NOT_REMOTE if not called from slurmd context.
+ *   if invalid args are passed to spank_get_item or spank_get_item
+ *   is called from an invalid context, and ESPANK_NOT_REMOTE 
+ *   if not called from slurmd context or spank_user_local_init.
  */
 spank_err_t spank_get_item (spank_t spank, spank_item_t item, ...);
 

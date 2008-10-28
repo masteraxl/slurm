@@ -19,17 +19,21 @@ def main(argv=None):
         argv = sys.argv
 
     parser = OptionParser()
-    parser.add_option("-c", "--config", type="string", dest="conf",
-                      help="specify location of slurm.conf", metavar="FILE")
+    parser.add_option("-c", "--sysconfdir", type="string", dest="sysconfdir",
+                      help="location of directory containing config files", 
+                      metavar="DIR")
     parser.add_option("-p", "--prefix", type="string", dest="prefix",
                       help="slurm install directory prefix", metavar="DIR")
     (options, args) = parser.parse_args(args=argv)
     if options.prefix is None:
         options.prefix = '/usr/local'
         print 'Assuming installation prefix is "%s"' % (options.prefix)
-    if options.conf is None:
-        options.conf = options.prefix + '/etc/slurm.conf'
+    if options.sysconfdir is None:
+        options.sysconfdir = options.prefix + '/etc'
+	options.conf = options.sysconfdir + '/slurm.conf'
         print 'Assuming slurm conf file is "%s"' % (options.conf)
+    else:
+        options.conf = options.sysconfdir + '/slurm.conf'
 
     # Parse the slurm.conf file
     try:
@@ -50,21 +54,38 @@ def main(argv=None):
     #
     print
     print "NOTE: slurm_epilog and slurm_prolog only exist on BlueGene systems"
+    print "NOTE: federation.conf only exists on AIX systems"
+    print "NOTE: sview, slurmdbd and slurmdbd.conf exists only on selected systems"
     print "NOTE: JobCredentialPrivateKey, SlurmctldLogFile, and StateSaveLocation only on control host"
     print "NOTE: SlurmdLogFile and SlurmdSpoolDir only exist on compute servers" 
     print
     print "Ensuring the following are not world writable:"
     files = []
+    files.append(options.sysconfdir)
     files.append(options.conf)
-    files.append(options.prefix+'/bin/srun')
+    files.append(options.sysconfdir+'/bluegene.conf')
+    files.append(options.sysconfdir+'/federation.conf')
+    files.append(options.sysconfdir+'/slurm.conf')
+    files.append(options.sysconfdir+'/slurmdbd.conf')
+    files.append(options.sysconfdir+'/wiki.conf')
+    files.append(options.prefix+'/bin/mpiexec')
     files.append(options.prefix+'/bin/sacct')
-    files.append(options.prefix+'/bin/sinfo')
-    files.append(options.prefix+'/bin/squeue')
-    files.append(options.prefix+'/bin/scontrol')
+    files.append(options.prefix+'/bin/sacctmgr')
+    files.append(options.prefix+'/bin/salloc')
+    files.append(options.prefix+'/bin/sattach')
+    files.append(options.prefix+'/bin/sbatch')
+    files.append(options.prefix+'/bin/sbcast')
     files.append(options.prefix+'/bin/scancel')
+    files.append(options.prefix+'/bin/scontrol')
+    files.append(options.prefix+'/bin/sinfo')
     files.append(options.prefix+'/bin/smap')
+    files.append(options.prefix+'/bin/squeue')
+    files.append(options.prefix+'/bin/srun')
+    files.append(options.prefix+'/bin/strigger')
+    files.append(options.prefix+'/bin/sview')
     files.append(options.prefix+'/sbin/slurmctld')
     files.append(options.prefix+'/sbin/slurmd')
+    files.append(options.prefix+'/sbin/slurmdbd')
     files.append(options.prefix+'/sbin/slurmstepd')
     files.append(options.prefix+'/sbin/slurm_epilog')
     files.append(options.prefix+'/sbin/slurm_prolog')
@@ -93,6 +114,8 @@ def main(argv=None):
     print "Ensuring the following are not world readable:"
     files = []
     append_file(files, confpairs, 'JobCredentialPrivateKey')
+    files.append(options.sysconfdir+'/slurmdbd.conf')
+    files.append(options.sysconfdir+'/wiki.conf')
 
     for fname in files:
         rc = verify_perms(fname, S_IROTH, pwname)

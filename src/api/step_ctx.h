@@ -1,13 +1,13 @@
 /*****************************************************************************\
  *  step_ctx.h - step context declarations
  *
- *  $Id: spawn.c 8334 2006-06-07 20:36:04Z morrone $
+ *  $Id$
  *****************************************************************************
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>,
  *  Christopher J. Morrone <morrone2@llnl.gov>
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -47,19 +47,14 @@ struct slurm_step_ctx_struct {
 
 	uint32_t job_id;	/* assigned job id */
 	uint32_t user_id;	/* user the job runs as */
-	
+
 	job_step_create_request_msg_t *step_req;
 	job_step_create_response_msg_t *step_resp;
 
-	char *cwd;		/* working directory */
-	uint32_t argc;		/* count of arguments */
-	char **argv;		/* argument list */
-	uint16_t env_set;	/* flag if user set env */
-	uint32_t envc;		/* count of env vars */
-	char **env;		/* environment variables */
-
-	/* Used by slurm_step_launch(), but not slurm_spawn() */
+	/* Used by slurm_step_launch() */
 	struct step_launch_state *launch_state;
+	uint16_t verbose_level; /* for extra logging decisions in step
+				 * launch api */
 };
 
 #endif /* _STEP_CTX_H */

@@ -6,16 +6,16 @@ CLEANFILES = core.*
 INCLUDES = -I$(top_srcdir) $(BG_INCLUDES)
 
 #to build the executable
-# noinst_PROGRAMS = partition_allocator
+# noinst_PROGRAMS = block_allocator
 
-# partition_allocator_SOURCES = block_allocator.c api_linker.c \
-#	block_allocator.h
+# block_allocator_SOURCES = block_allocator.c bridge_linker.c \
+# 	block_allocator.h bridge_linker.h
 
-# partition_allocator_LDADD = \
-# 	$(top_builddir)/src/common/libcommon.la -lpthread \
+# block_allocator_LDADD = \
 # 	$(top_builddir)/src/api/libslurm.la
 
-# partition_allocator_LDFLAGS = -export-dynamic -lm $(CMD_LDFLAGS)
+
+# block_allocator_LDFLAGS = -export-dynamic -lm $(CMD_LDFLAGS)
 
 # CPPFLAGS = -DBUILD_EXE
 
@@ -25,12 +25,6 @@ noinst_LTLIBRARIES = libbluegene_block_allocator.la
 libbluegene_block_allocator_la_SOURCES =    \
 	block_allocator.c bridge_linker.c block_allocator.h bridge_linker.h
 
-libbluegene_block_allocator_la_LIBADD  =  \
-	$(top_builddir)/src/common/libcommon.la -lpthread \
-	$(top_builddir)/src/api/libslurm.la
-
 libbluegene_block_allocator_la_LDFLAGS        = \
 	$(LIB_LDFLAGS) -lm    
 
-libbluegene_block_allocator_la_DEPENDENCIES  = \
-	$(top_builddir)/src/common/libcommon.la 

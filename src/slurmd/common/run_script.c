@@ -4,7 +4,7 @@
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Christopher Morrone <morrone2@llnl.gov>
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -52,18 +52,17 @@
 
 
 /*
- * Run a prolog or epilog script
- * name IN: class of program (prolog, epilog, etc.), 
- *	if prefix is "user" then also set uid
+ * Run a prolog or epilog script (does NOT drop privileges)
+ * name IN: class of program (prolog, epilog, etc.),
  * path IN: pathname of program to run
- * jobid, uid IN: info on associated job
+ * jobid IN: info on associated job
  * max_wait IN: maximum time to wait in seconds, -1 for no limit
- * env IN: environment variables to use on exec, sets minimal environment
+ * env IN: environment variables to use on exec, sets minimal environment 
  *	if NULL
- * RET 0 on success, -1 on failure. 
+ * RET 0 on success, -1 on failure.
  */
 int
-run_script(const char *name, const char *path, uint32_t jobid, uid_t uid, 
+run_script(const char *name, const char *path, uint32_t jobid,
 	   int max_wait, char **env)
 {
 	int status, rc, opt;
@@ -73,7 +72,11 @@ run_script(const char *name, const char *path, uint32_t jobid, uid_t uid,
 	if (path == NULL || path[0] == '\0')
 		return 0;
 
-	debug("[job %u] attempting to run %s [%s]", jobid, name, path);
+	if (jobid) {
+		debug("[job %u] attempting to run %s [%s]", 
+			jobid, name, path);
+	} else
+		debug("attempting to run %s [%s]", name, path);
 
 	if (access(path, R_OK | X_OK) < 0) {
 		debug("Not running %s [%s]: %m", name, path);
@@ -90,8 +93,6 @@ run_script(const char *name, const char *path, uint32_t jobid, uid_t uid,
 		argv[0] = (char *)xstrdup(path);
 		argv[1] = NULL;
 
-		if (strncmp(name, "user", 4) == 0)
-			setuid(uid);
 #ifdef SETPGRP_TWO_ARGS
 		setpgrp(0, 0);
 #else

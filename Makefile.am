@@ -1,7 +1,7 @@
 
 AUTOMAKE_OPTIONS = foreign
 ACLOCAL_AMFLAGS = -I auxdir
-SUBDIRS    = auxdir src testsuite doc 
+SUBDIRS    = auxdir src testsuite doc
 
 EXTRA_DIST =			\
 	etc/bluegene.conf.example \
@@ -9,7 +9,7 @@ EXTRA_DIST =			\
 	etc/slurm.conf.example	\
 	etc/slurm.epilog.clean	\
 	etc/init.d.slurm	\
-	etc/ptrace.patch	\
+	etc/init.d.slurmdbd	\
 	autogen.sh		\
 	slurm.spec		\
 	README			\
@@ -49,3 +49,12 @@ mrproper: distclean-local clean
 	-find $(top_srcdir)/src -name "Makefile" -exec rm {} \;
 	-find $(top_srcdir) -depth -name ".deps" -exec rm -rf {} \;
 
+contrib:
+	@cd contribs && \
+	$(MAKE) && \
+	cd ..;
+
+install-contrib:
+	@cd contribs && \
+	$(MAKE) DESTDIR=$(DESTDIR) install && \
+	cd ..;

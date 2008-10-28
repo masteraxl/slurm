@@ -4,7 +4,7 @@
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Christopher Morrone <morrone2@llnl.gov>
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -43,17 +43,16 @@
 #include <inttypes.h>
 
 /*
- * Run a prolog or epilog script
+ * Run a prolog or epilog script (does NOT drop privileges)
  * name IN: class of program (prolog, epilog, etc.),
- *	if prefix is "user" then also set uid
  * path IN: pathname of program to run
- * jobid, uidIN: info on associated job
+ * jobid IN: info on associated job
  * max_wait IN: maximum time to wait in seconds, -1 for no limit
  * env IN: environment variables to use on exec, sets minimal environment 
  *	if NULL
  * RET 0 on success, -1 on failure.
  */
 int run_script(const char *name, const char *path, uint32_t jobid, 
-	       uid_t uid, int max_wait, char **env);
+	       int max_wait, char **env);
 
 #endif /* _RUN_SCRIPT_H */

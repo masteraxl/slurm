@@ -1,11 +1,11 @@
 /*****************************************************************************\
  *  sort.c - sinfo sorting functions
  *****************************************************************************
- *  Copyright (C) 2002 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Joey Ekstrom <ekstrom1@llnl.gov>, 
  *             Morris Jette <jette1@llnl.gov>, et. al.
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -49,6 +49,10 @@ static bool part_order;		/* order same as in part table */
 
 static int _sort_by_avail(void *void1, void *void2);
 static int _sort_by_cpus(void *void1, void *void2);
+static int _sort_by_sct(void *void1, void *void2);
+static int _sort_by_sockets(void *void1, void *void2);
+static int _sort_by_cores(void *void1, void *void2);
+static int _sort_by_threads(void *void1, void *void2);
 static int _sort_by_disk(void *void1, void *void2);
 static int _sort_by_features(void *void1, void *void2);
 static int _sort_by_groups(void *void1, void *void2);
@@ -59,7 +63,9 @@ static int _sort_by_node_list(void *void1, void *void2);
 static int _sort_by_nodes_ai(void *void1, void *void2);
 static int _sort_by_nodes(void *void1, void *void2);
 static int _sort_by_partition(void *void1, void *void2);
+static int _sort_by_priority(void *void1, void *void2);
 static int _sort_by_reason(void *void1, void *void2);
+static int _sort_by_reason_time(void *void1, void *void2);
 static int _sort_by_root(void *void1, void *void2);
 static int _sort_by_share(void *void1, void *void2);
 static int _sort_by_state(void *void1, void *void2);
@@ -101,6 +107,8 @@ void sort_sinfo_list(List sinfo_list)
 				list_sort(sinfo_list, _sort_by_disk);
 		else if (params.sort[i] == 'D')
 				list_sort(sinfo_list, _sort_by_nodes);
+		else if (params.sort[i] == 'E')
+				list_sort(sinfo_list, _sort_by_reason_time);
 		else if (params.sort[i] == 'f')
 				list_sort(sinfo_list, _sort_by_features);
 		else if (params.sort[i] == 'F')
@@ -115,6 +123,8 @@ void sort_sinfo_list(List sinfo_list)
 				list_sort(sinfo_list, _sort_by_memory);
 		else if (params.sort[i] == 'N')
 				list_sort(sinfo_list, _sort_by_node_list);
+		else if (params.sort[i] == 'p')
+				list_sort(sinfo_list, _sort_by_priority);
 		else if (params.sort[i] == 'P')
 				list_sort(sinfo_list, _sort_by_partition);
 		else if (params.sort[i] == 'r')
@@ -129,6 +139,14 @@ void sort_sinfo_list(List sinfo_list)
 				list_sort(sinfo_list, _sort_by_state);
 		else if (params.sort[i] == 'w')
 				list_sort(sinfo_list, _sort_by_weight);
+		else if (params.sort[i] == 'X')
+				list_sort(sinfo_list, _sort_by_sockets);
+		else if (params.sort[i] == 'Y')
+				list_sort(sinfo_list, _sort_by_cores);
+		else if (params.sort[i] == 'Z')
+				list_sort(sinfo_list, _sort_by_threads);
+		else if (params.sort[i] == 'z')
+				list_sort(sinfo_list, _sort_by_sct);
 	}
 }
 
@@ -160,6 +178,68 @@ static int _sort_by_cpus(void *void1, void *void2)
 	sinfo_data_t *sinfo2 = (sinfo_data_t *) void2;
 
 	diff = sinfo1->min_cpus - sinfo2->min_cpus;
+
+	if (reverse_order)
+		diff = -diff;
+	return diff;
+}
+
+static int _sort_by_sct(void *void1, void *void2)
+{
+	int diffs, diffc, difft;
+	sinfo_data_t *sinfo1 = (sinfo_data_t *) void1;
+	sinfo_data_t *sinfo2 = (sinfo_data_t *) void2;
+
+	diffs = sinfo1->min_sockets - sinfo2->min_sockets;
+	diffc = sinfo1->min_cores - sinfo2->min_cores;
+	difft = sinfo1->min_threads - sinfo2->min_threads;
+
+	if (reverse_order) {
+		diffs = -diffs;
+		diffc = -diffc;
+		difft = -difft;
+	}
+	if (diffs)
+		return diffs;
+	else if (diffc)
+		return diffc;
+	else
+		return difft;
+}
+
+static int _sort_by_sockets(void *void1, void *void2)
+{
+	int diff;
+	sinfo_data_t *sinfo1 = (sinfo_data_t *) void1;
+	sinfo_data_t *sinfo2 = (sinfo_data_t *) void2;
+
+	diff = sinfo1->min_sockets - sinfo2->min_sockets;
+
+	if (reverse_order)
+		diff = -diff;
+	return diff;
+}
+
+static int _sort_by_cores(void *void1, void *void2)
+{
+	int diff;
+	sinfo_data_t *sinfo1 = (sinfo_data_t *) void1;
+	sinfo_data_t *sinfo2 = (sinfo_data_t *) void2;
+
+	diff = sinfo1->min_cores - sinfo2->min_cores;
+
+	if (reverse_order)
+		diff = -diff;
+	return diff;
+}
+
+static int _sort_by_threads(void *void1, void *void2)
+{
+	int diff;
+	sinfo_data_t *sinfo1 = (sinfo_data_t *) void1;
+	sinfo_data_t *sinfo2 = (sinfo_data_t *) void2;
+
+	diff = sinfo1->min_threads - sinfo2->min_threads;
 
 	if (reverse_order)
 		diff = -diff;
@@ -344,7 +424,7 @@ static int _sort_by_nodes(void *void1, void *void2)
 	sinfo_data_t *sinfo1 = (sinfo_data_t *) void1;
 	sinfo_data_t *sinfo2 = (sinfo_data_t *) void2;
 
-	diff = sinfo1->nodes_tot - sinfo2->nodes_tot;
+	diff = sinfo1->nodes_total - sinfo2->nodes_total;
 
 	if (reverse_order)
 		diff = -diff;
@@ -391,6 +471,39 @@ static int _sort_by_reason(void *void1, void *void2)
 	return diff;
 }
 
+/* Sort by the time associated with the reason (if any).
+ * If no time, sort by the "reason" string.
+ * "reason" is of the format "<reason[<user>@MM/DD-HH:MM_SS]" 
+ * or (ISO8601)              "<reason[<user>@YYYY-MM-DDTHH:MM:SS]"
+ * In either case a simple string compare sort order the records. */
+static int _sort_by_reason_time(void *void1, void *void2)
+{
+	int diff;
+	sinfo_data_t *sinfo1 = (sinfo_data_t *) void1;
+	sinfo_data_t *sinfo2 = (sinfo_data_t *) void2;
+	char *tmp, *val1 = "", *val2 = "";
+
+	if (sinfo1->reason) {
+		tmp = strrchr(sinfo1->reason, '@');
+		if (tmp)
+			val1 = tmp + 1;
+		else
+			val1 = sinfo1->reason;
+	}
+	if (sinfo2->reason) {
+		tmp = strrchr(sinfo2->reason, '@');
+		if (tmp)
+			val2 = tmp + 1;
+		else
+			val2 = sinfo2->reason;
+	}
+	diff = strcmp(val1, val2);
+
+	if (reverse_order)
+		diff = -diff;
+	return diff;
+}
+
 static int _sort_by_root(void *void1, void *void2)
 {
 	int diff;
@@ -417,9 +530,27 @@ static int _sort_by_share(void *void1, void *void2)
 	int val1 = 0, val2 = 0;
 
 	if (sinfo1->part_info)
-		val1 = sinfo1->part_info->shared;
+		val1 = sinfo1->part_info->max_share;
 	if (sinfo2->part_info)
-		val2 = sinfo2->part_info->shared;
+		val2 = sinfo2->part_info->max_share;
+	diff = val1 - val2;
+
+	if (reverse_order)
+		diff = -diff;
+	return diff;
+}
+
+static int _sort_by_priority(void *void1, void *void2)
+{
+	int diff;
+	sinfo_data_t *sinfo1 = (sinfo_data_t *) void1;
+	sinfo_data_t *sinfo2 = (sinfo_data_t *) void2;
+	int val1 = 0, val2 = 0;
+
+	if (sinfo1->part_info)
+		val1 = sinfo1->part_info->priority;
+	if (sinfo2->part_info)
+		val2 = sinfo2->part_info->priority;
 	diff = val1 - val2;
 
 	if (reverse_order)

@@ -10,7 +10,7 @@
 # Copyright (C) 2002 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-217948.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -47,17 +47,16 @@ make_bash_script $file_in "$srun $bin_sleep 10"
 #
 # Submit a couple of jobs so we have something to work with
 #
-spawn $srun --batch --output=/dev/null --error=/dev/null --job-name=job1 -t1 $file_in
+set sbatch_pid [spawn $sbatch --output=/dev/null --error=/dev/null --job-name=job1 -t1 $file_in]
 expect {
-	-re "jobid ($number) submitted" {
+	-re "Submitted batch job ($number)" {
 		set job_id1 $expect_out(1,string)
 		exp_continue
 	}
 	timeout {
 		send_user "\nFAILURE: srun not responding\n"
-		kill_srun
+		slow_kill $sbatch_pid
 		set exit_code 1
-		exp_continue
 	}
 	eof {
 		wait
@@ -68,25 +67,24 @@ if {$job_id1 == 0} {
 	exit 1
 }
 
-spawn $srun --batch --output=/dev/null --error=/dev/null --job-name=job2 -t1 $file_in
+set sbatch_pid [spawn $sbatch --output=/dev/null --error=/dev/null --job-name=job2 -t1 $file_in]
 expect {
-	-re "jobid ($number) submitted" {
+	-re "Submitted batch job ($number)" {
 		set job_id2 $expect_out(1,string)
 		exp_continue
 	}
 	timeout {
 		send_user "\nFAILURE: srun not responding\n"
-		kill_srun
+		slow_kill $sbatch_pid
 		set exit_code 1
-		exp_continue
 	}
 	eof {
 		wait
 	}
 }
 if {$job_id2 == 0} {
-	kill_srun
 	send_user "\nFAILURE: job submit failure\n"
+	cancel_job $job_id1
 	exit 1
 }
 exec $bin_rm -f $file_in

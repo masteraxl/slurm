@@ -11,7 +11,7 @@
 # Copyright (C) 2002-2006 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-217948.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -52,6 +52,7 @@ make_bash_script $file_in "
 #
 # Submit a slurm job that will execute 'sleep'
 # Use scontrol to confirm time limit
+# Time format is "minutes"
 #
 set job_id 0
 spawn $sbatch -N1 --output=none --error=none --time=$time_set $file_in
@@ -76,8 +77,8 @@ if { $job_id == 0 } {
 
 spawn $scontrol show job $job_id
 expect {
-	-re "TimeLimit=($number)" {
-		set time_get $expect_out(1,string)
+	-re "TimeLimit=($number):($number):" {
+		set time_get [expr $expect_out(1,string) * 60 + $expect_out(2,string)]
 		exp_continue
 	}
 	eof {
@@ -85,6 +86,98 @@ expect {
 	}
 }
 if {$time_set != $time_get} {
+	send_user "\nFAILURE: sbatch failed to set time limit\n"
+	set exit_code 1
+}
+cancel_job $job_id
+
+#
+# Submit another slurm job that will execute 'sleep'
+# Use scontrol to confirm time limit
+# Time format is "hours:minutes:seconds"
+#
+set job_id 0
+set time_get 0
+set time_set "2:01:00"
+spawn $sbatch -N1 --output=none --error=none --time=$time_set $file_in
+expect {
+	-re "Submitted batch job ($number)" {
+		set job_id $expect_out(1,string)
+		exp_continue
+	}
+	-re "time limit exceeds" {
+		send_user "\nWARNING: unable to fully test time limits\n"
+		exit $exit_code
+	}
+	timeout {
+		send_user "\nFAILURE: sbatch not responding\n"
+		set exit_code 1
+		exp_continue
+	}
+	eof {
+		wait
+	}
+}
+if { $job_id == 0 } {
+	send_user "\nFAILURE: failed to submit job\n"
+	exit 1
+}
+
+spawn $scontrol show job $job_id
+expect {
+	-re "TimeLimit=($number):($number):" {
+		set time_get [expr $expect_out(1,string) * 60 + $expect_out(2,string)]
+		exp_continue
+	}
+	eof {
+		wait
+	}
+}
+if {$time_get != 121} {
+	send_user "\nFAILURE: sbatch failed to set time limit\n"
+	set exit_code 1
+}
+cancel_job $job_id
+
+#
+# Submit another slurm job that will execute 'sleep'
+# Use scontrol to confirm time limit
+# Time format is "days-hours"
+#
+set job_id 0
+set time_get 0
+set time_set "1-1"
+spawn $sbatch -N1 --output=none --error=none --time=$time_set $file_in
+expect {
+	-re "Submitted batch job ($number)" {
+		set job_id $expect_out(1,string)
+		exp_continue
+	}
+	timeout {
+		send_user "\nFAILURE: sbatch not responding\n"
+		set exit_code 1
+		exp_continue
+	}
+	eof {
+		wait
+	}
+}
+if { $job_id == 0 } {
+	send_user "\nFAILURE: failed to submit job\n"
+	exit 1
+}
+
+spawn $scontrol show job $job_id
+expect {
+	-re "TimeLimit=($number)-($number):($number):" {
+		set time_get [expr $expect_out(1,string) * 1440 + $expect_out(2,string) * 60 + $expect_out(3,string)]
+		exp_continue
+	}
+	eof {
+		wait
+	}
+}
+if {$time_get != 1500} {
 	send_user "\nFAILURE: sbatch failed to set time limit\n"
 	set exit_code 1
 }

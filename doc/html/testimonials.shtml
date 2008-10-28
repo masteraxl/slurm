@@ -29,6 +29,16 @@ Jeffrey M. Squyres, Pervasive Technology Labs at Indiana University
 <HR SIZE=4>
 
 <i>
+"Thank you for SLURM! It is one of the nicest pieces of free software
+for managing HPC clusters we have come across in a long time.
+Both of our Blue Genes are running SLURM and it works fantastically 
+well."<br><br>
+Adam Todorski, Computational Center for Nanotechnology Inovations,
+Rensselaer Polytechnic Institute
+</i>
+<HR SIZE=4>
+
+<i>
 We adopted SLURM as our resource manager over two years ago when it was at
 the 0.3.x release level. Since then it has become an integral and important
 component of our production research services. Its stability, flexibility
@@ -67,6 +77,16 @@ Bryan O'Sullivan, Pathscale
 <HR SIZE=4>
 
 <i>
+"SLURM scales perfectly to the size of MareNostrum without noticeable
+performance degradation; the daemons running on the compute nodes are 
+light enough to not interfere with the applications' processes and the 
+status reports are accurate and concise, allowing us to spot possible 
+anomalies in a single sight." <br><br>
+Erest Artiaga, Barcelona Supercomputing Center
+</i>
+<HR SIZE=4>
+
+<i>
 "SLURM was a great help for us in implementing our own very concise 
 job management system on top of it which could be taylored precisely 
 to our needs, and which at the same time is very simple to use for 
@@ -92,6 +112,6 @@ Bill Celmaster, XC Program Manager, Hewlett-Packard Company
 </i>
 <HR SIZE=4>
 
-<p style="text-align:center;">Last modified 3 April 2006</p>
+<p style="text-align:center;">Last modified 28 July 2008</p>
 
 <!--#include virtual="footer.txt"-->

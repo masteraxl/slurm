@@ -1,19 +1,17 @@
 #!/usr/bin/expect
 ############################################################################
 # Purpose: Test of SLURM functionality
-#          Test of srun attach to existing job (--attach and --join options).
+#          Test of --licenses option
 #
 # Output:  "TEST: #.#" followed by "SUCCESS" if test was successful, OR
+#          "WARNING: ..." with an explanation of why the test can't be made, OR
 #          "FAILURE: ..." otherwise with an explanation of the failure, OR
 #          anything else indicates a failure mode that must be investigated.
-#
-# Note:    This script generates and then deletes files in the working directory
-#          named test1.18.prog
 ############################################################################
-# Copyright (C) 2002 The Regents of the University of California.
+# Copyright (C) 2008 Lawrence Livermore National Security.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-217948.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -36,98 +34,77 @@ source ./globals
 
 set test_id     "1.18"
 set exit_code   0
-set file_prog   "test$test_id.prog"
-set job_id      0
-set matches     0
 
 print_header $test_id
 
 #
-# Delete left-over program and rebuild it
+# Run a job attempting to get some dummy license name
 #
-exec $bin_rm -f $file_prog
-exec $bin_make -f /dev/null $file_prog
-exec $bin_chmod 700 $file_prog
-
-#
-# Spawn initial program via srun
-#
-set timeout $max_job_delay
-spawn $srun -N1-4 -v -t5 $file_prog
-set init_id $spawn_id
+set match 0
+set srun_pid [spawn $srun --licenses=DUMMY_FOR_TESTING $bin_printenv SLURMD_NODENAME]
 expect {
-        -i $init_id
-	-re "launching ($number).0 on host" {
-		set job_id $expect_out(1,string)
+	-re "invalid license" {
+		set match 1
+		send_user "This error was expected, no worries\n\n"
 		exp_continue
 	}
-	-re "WAITING" {
-		incr matches
-	}
 	timeout {
-		send_user "\nFAILURE: srun (launch) not responding\n"
-		set exit_code 1
+		send_user "\nFAILURE: srun not responding\n"
+		slow_kill $srun_pid
+		exit 1
 	}
 	eof {
 		wait
 	}
 }
-if {$job_id == 0} {
-	send_user "\nFAILURE: job submit failure\n"
-	exit 1
-}
-if {$matches == 0} {
-	send_user "\nFAILURE: job run time failure\n"
-	exit 1
+if {$match == 0} {
+	send_user "\nFAILURE: No error on with bad license name\n"
+	set exit_code 1
 }
 
 #
-# Attach to initial program via srun
+# Test if any licenses are configured.
 #
-set matches     0
-set timeout     10
-spawn $srun -vv --attach=$job_id --join
-set attach_id $spawn_id
+log_user 0
+set licenses ""
+spawn $scontrol show config
 expect {
-        -i $attach_id
-	-re "WAITING" {
-		incr matches
-		send -i $attach_id "exit\n"
-	}
-	timeout {
-		send_user "\nFAILURE: srun (attach) not responding\n"
-		kill_srun
-		set exit_code 1
+	-re "Licenses *= ($alpha_numeric_under)" {
+		set licenses $expect_out(1,string)
 		exp_continue
 	}
 	eof {
 		wait
 	}
 }
-if {$matches == 0} {
-	send_user "\nFAILURE: job run time failure\n"
-	set exit_code   1
+log_user 1
+
+if {[string compare $licenses ""] != 0} {
+	set srun_pid [spawn $srun --licenses=$licenses $bin_printenv SLURMD_NODENAME]
+	expect {
+		-re "invalid license" {
+			send_user "\nFAILURE: Error getting license\n"
+			set exit_code 1
+			exp_continue
+		}
+		timeout {
+			send_user "\nNOTE: srun not responding\n"
+			send_user "  This test can fail if the selected "
+			send_user "license is in use.\n"
+			set exit_code 1
+		}
+		eof {
+			wait
+		}
+	}
 }
 
 #
-# Make sure initial program terminates too
+# Run a job attempting to get a legitimate license name
 #
-# Explicitly reset spawn_id for wait call
-set spawn_id $init_id
-expect {
-	timeout {
-		send_user "\nFAILURE: srun (terminate) not responding\n"
-		set exit_code   1
-	}
-	eof {
-		wait
-	}
-}
 
 if {$exit_code == 0} {
-	exec $bin_rm -f $file_prog
 	send_user "\nSUCCESS\n"
-} else {
-	cancel_job $job_id
 }
 exit $exit_code
+

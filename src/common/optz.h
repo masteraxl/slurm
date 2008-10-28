@@ -3,7 +3,7 @@
  *****************************************************************************
  *  Copyright (C) 2005 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -41,7 +41,9 @@
 #  include <config.h>
 #endif
 
-#define _GNU_SOURCE
+#ifndef   _GNU_SOURCE
+#  define _GNU_SOURCE
+#endif
 
 #if HAVE_GETOPT_H
 #  include <getopt.h>

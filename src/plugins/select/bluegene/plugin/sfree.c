@@ -6,7 +6,7 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
  *
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -113,7 +113,10 @@ int main(int argc, char *argv[])
 	
 	bridge_init();
 	if (!have_db2) {
-		printf("must be on BG SN to resolve.\n");
+		error("Required libraries can not be found "
+		       "to access the Bluegene system.\nPlease "
+		       "set your LD_LIBRARY_PATH correctly to "
+		       "point to them.");
 		exit(0);
 	}
 

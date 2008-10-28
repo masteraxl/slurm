@@ -42,7 +42,7 @@ A pointer to a string used as a message header for printing along with an error 
 .br
 #include <slurm/slurm.h>
 .br
-#include <slurm/slur_errno.h>
+#include <slurm/slurm_errno.h>
 .LP 
 int main (int argc, char *argv[])
 .br 
@@ -66,13 +66,18 @@ int main (int argc, char *argv[])
 .br
 }
 
+.SH "NOTE"
+These functions are included in the libslurm library, 
+which must be linked to your process for use
+(e.g. "cc \-lslurm myprog.c").
+
 .SH "COPYING"
 Copyright (C) 2002 The Regents of the University of California.
 Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
-UCRL-CODE-217948.
+LLNL\-CODE\-402394.
 .LP
 This file is part of SLURM, a resource management program.
-For details, see <http://www.llnl.gov/linux/slurm/>.
+For details, see <https://computing.llnl.gov/linux/slurm/>.
 .LP
 SLURM is free software; you can redistribute it and/or modify it under
 the terms of the GNU General Public License as published by the Free

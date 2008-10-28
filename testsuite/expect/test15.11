@@ -1,10 +1,7 @@
 #!/usr/bin/expect
 ############################################################################
 # Purpose: Test of SLURM functionality
-#          Test of processors, memory, and temporary disk space 
-#          constraints options (--mincpus, --mem, and --tmp options).
-#          Also test that priority zero job is not started (--hold 
-#          option).
+#          Test of --nice and --job-name options.
 #
 # Output:  "TEST: #.#" followed by "SUCCESS" if test was successful, OR
 #          "FAILURE: ..." otherwise with an explanation of the failure, OR
@@ -13,7 +10,7 @@
 # Copyright (C) 2002-2006 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-217948.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -30,95 +27,105 @@
 # 
 # You should have received a copy of the GNU General Public License along
 # with SLURM; if not, write to the Free Software Foundation, Inc.,
-# 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA.
+# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 ############################################################################
 source ./globals
 
 set test_id     "15.11"
 set exit_code   0
 set job_id      0
-
-set cpu_cnt     1
-set mem_size    13
-set tmp_size    2
-set matches     0
+set job_name    "jobname$test_id"
+set name_read   ""
 
 print_header $test_id
 
-#
-# Spawn a salloc job with constraints
-#
-spawn $salloc --mincpus=$cpu_cnt --mem=$mem_size --tmp=$tmp_size --hold -t1 $bin_bash
-expect {
-	-re "Pending job allocation ($number)" {
-		set job_id $expect_out(1,string)
-	}
-	timeout {
-		send_user "\nFAILURE: salloc not responding\n"
-		exit 1
-	}
-}
-if {$job_id == 0} {
-	send_user "\nFAILURE: salloc submit failure\n"
-	exit 1
+if {[test_wiki_sched] == 1} {
+	send_user "\nWARNING: not compatable with sched/wiki (Maui)\n"
+	send_user "         or sched/wiki2 (Moab) schedulers\n"
+	exit $exit_code
 }
 
 #
-# Confirm constraints are registered and wait for job completion
+# Test setting job's name and get priority
 #
-spawn $scontrol show job $job_id
+set priority1  0
+set matches    0
+set timeout $max_job_delay
+set salloc_pid [spawn $salloc -t1 --job-name=$job_name $bin_bash]
 expect {
+	-re "Granted job allocation ($number)" {
+		set job_id $expect_out(1,string)
+		send "$scontrol show job $job_id\n"
+		exp_continue
+	}
+	-re "Name=$job_name" {
+		set matches 1
+		exp_continue
+	}
 	-re "Priority=($number)" {
-		set read_prio $expect_out(1,string)
-		if {$read_prio == 0} {
-			incr matches
-			send_user "match of Priority\n"
-		}
-		exp_continue
-	}
-	-re "JobState=PENDING" {
-		incr matches
-		send_user "match of JobState\n"
-		exp_continue
-	}
-	-re "MinProcs=($number)" {
-		set read_proc $expect_out(1,string)
-		if {$read_proc == $cpu_cnt} {
-			incr matches
-			send_user "match of MinProcs\n"
-		}
-		exp_continue
-	}
-	-re "MinMemory=($number)" {
-		set read_mem $expect_out(1,string)
-		if {$read_mem == $mem_size} {
-			incr matches
-			send_user "match of MinMemory\n"
-		}
-		exp_continue
-	}
-	-re "MinTmpDisk=($number)" {
-		set read_disk $expect_out(1,string)
-		if {$read_disk == $tmp_size} {
-			incr matches
-			send_user "match of MinTmpDisk\n"
-		}
+		set priority1 $expect_out(1,string)
+		send "exit\n"
 		exp_continue
 	}
 	timeout {
-		send_user "\nFAILURE: scontrol not responding\n"
+		send_user "\nFAILURE: salloc not responding\n"
+		if {$job_id != 0} {
+			cancel_job $job_id
+		}
+		slow_kill [expr 0 - $salloc_pid]
 		set exit_code 1
+		exp_continue
 	}
 	eof {
 		wait
 	}
 }
-cancel_job $job_id
-
-if {$matches != 5} {
-	send_user "\nFAILURE: Did not get proper constraints\n"
+if {$job_id == 0} {
+	send_user "\nFAILURE: salloc failed to initiate job\n"
 	set exit_code 1
 }
+if {$matches == 0} {
+	send_user "\nFAILURE: failed to set job name\n"
+	set exit_code 1
+}
+
+#
+# Test setting job's name and get priority
+#
+set job_id     0
+set priority2  0
+set salloc_pid [spawn $salloc -t1 --nice=1000 $bin_bash]
+expect {
+	-re "Granted job allocation ($number)" {
+		set job_id $expect_out(1,string)
+		send "$scontrol show job $job_id\n"
+		exp_continue
+	}
+	-re "Priority=($number)" {
+		set priority2 $expect_out(1,string)
+		send "exit\n"
+		exp_continue
+        }
+	timeout {
+		send_user "\nFAILURE: salloc not responding\n"
+		if {$job_id != 0} {
+			cancel_job $job_id
+		}
+		slow_kill [expr 0 - $salloc_pid]
+		set exit_code 1
+		exp_continue
+	}
+	eof {
+		wait
+	}
+}
+set delta_prio [expr $priority1 - $priority2]
+if {$delta_prio < 950} {
+	send_user "\nFAILURE: failed to process nice option\n"
+	set exit_code 1
+}
+
+
 if {$exit_code == 0} {
 	send_user "\nSUCCESS\n"
 }

@@ -49,7 +49,7 @@
  *  Copyright (C) 2005-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -60,7 +60,7 @@
  *  any later version.
  *
  *  In addition, as a special exception, the copyright holders give permission 
- *  to link the code of portions of this program with the OpenSSL library under 
+ *  to link the code of portions of this program with the OpenSSL library under
  *  certain conditions as described in each individual source file, and 
  *  distribute linked combinations including the two. You must obey the GNU 
  *  General Public License in all respects for all of the code used other than 
@@ -79,18 +79,23 @@
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
-#define _GNU_SOURCE
+#ifndef   _GNU_SOURCE
+#  define _GNU_SOURCE
+#endif
 
 #include <pthread.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <slurm/pmi.h>
+#include <slurm/slurm.h>
 #include <slurm/slurm_errno.h>
 
 #include "src/api/slurm_pmi.h"
 #include "src/common/macros.h"
 #include "src/common/malloc.h"
+#include "src/slurmd/slurmstepd/slurmstepd_job.h"
 
 #define KVS_STATE_LOCAL    0
 #define KVS_STATE_DEFUNCT  1
@@ -109,8 +114,11 @@ struct kvs_rec {
 	char **		kvs_values;
 };
 
+#define _DEBUG 0
+
 static void _del_kvs_rec( struct kvs_rec *kvs_ptr );
 static void _init_kvs( char kvsname[] );
+static void inline _kvs_dump(void);
 static int  _kvs_put( const char kvsname[], const char key[], 
 		const char value[], int local);
 static void _kvs_swap(struct kvs_rec *kvs_ptr, int inx1, int inx2);
@@ -125,11 +133,19 @@ int pmi_spawned;
 int pmi_rank;
 int pmi_debug;
 
-pthread_mutex_t kvs_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t kvs_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 int kvs_rec_cnt = 0;
 struct kvs_rec *kvs_recs;
 int kvs_name_sequence = 0;
+
+static char *pmi_opt_str =
+  "pmi command line options \n"
+  "        \n"
+  "        \n"
+  "        \n";
+
+static int IsPmiKey(char *);
 
 /* PMI Group functions */
 
@@ -272,6 +288,7 @@ int PMI_Finalize( void )
 	kvs_recs = NULL;
 	kvs_rec_cnt = 0;
 	pthread_mutex_unlock(&kvs_mutex);
+	slurm_pmi_finalize();
 
 	return PMI_SUCCESS;
 }
@@ -686,13 +703,19 @@ mechanisms (e.g., shared memory) and other network mechanisms.
 @*/
 int PMI_Get_clique_size( int *size )
 {
+	char *env;
+
 	if (pmi_debug)
-		fprintf(stderr, "In: PMI_Get_clique_size - NOT SUPPORTED\n");
+		fprintf(stderr, "In: PMI_Get_clique_size\n");
 
 	if (size == NULL)
 		return PMI_ERR_INVALID_ARG;
 
-	/* FIXME */
+	env = getenv("SLURM_CPUS_ON_NODE");
+	if (env) {
+		*size = atoi(env);
+		return PMI_SUCCESS;
+	}
 	return PMI_FAIL;
 }
 
@@ -719,15 +742,22 @@ communicate through IPC mechanisms (e.g., shared memory) and other network
 mechanisms.
 
 @*/
-int PMI_Get_clique_ranks( int ranks[], int length )
+int PMI_Get_clique_ranks( char ranks[], int length )
 {
+	char *env;
+
 	if (pmi_debug)
-		fprintf(stderr, "In: PMI_Get_clique_ranks - NOT SUPPORTED\n");
+		fprintf(stderr, "In: PMI_Get_clique_ranks\n");
 
 	if (ranks == NULL)
 		return PMI_ERR_INVALID_ARG;
 
-	/* FIXME */
+	env = getenv("SLURM_GTIDS");
+	if (env) {
+		strcpy(ranks, env);
+		return PMI_SUCCESS;
+	}
+
 	return PMI_FAIL;
 }
 
@@ -743,12 +773,16 @@ Return values:
 @*/
 int PMI_Abort(int exit_code, const char error_msg[])
 {
-	if (pmi_debug) {
+	if ((pmi_debug) || (error_msg != NULL)) {
 		if (error_msg == NULL)
 			error_msg = "NULL";
 		fprintf(stderr, "In: PMI_Abort(%d, %s)\n", exit_code, error_msg);
 	}
 
+	if (pmi_init) {
+		slurm_kill_job_step((uint32_t) pmi_jobid, (uint32_t) pmi_stepid,
+				SIGKILL);
+	}
 	exit(exit_code);
 }
 
@@ -805,7 +839,10 @@ static void _init_kvs( char kvsname[] )
 	i = kvs_rec_cnt;
 	kvs_rec_cnt++;
 	kvs_recs = realloc(kvs_recs, (sizeof(struct kvs_rec) * kvs_rec_cnt));
-	kvs_recs[i].kvs_name = strndup(kvsname, PMI_MAX_KVSNAME_LEN);
+	/* DO NOT CHANGE TO STRNDUP(), NOT SUPPORTED ON AIX */
+	kvs_recs[i].kvs_name = malloc(PMI_MAX_KVSNAME_LEN);
+	if (kvs_recs[i].kvs_name)
+		strncpy(kvs_recs[i].kvs_name, kvsname, PMI_MAX_KVSNAME_LEN);
 	kvs_recs[i].kvs_state = KVS_STATE_LOCAL;
 	kvs_recs[i].kvs_cnt = 0;
 	kvs_recs[i].kvs_inx = 0;
@@ -1048,13 +1085,16 @@ static int _kvs_put( const char kvsname[], const char key[], const char value[],
 				kvs_recs[i].kvs_key_states[j] = KVS_KEY_STATE_LOCAL;
 			/* else leave unchanged */
 			/* replace the existing value */
-			free(kvs_recs[i].kvs_values[j]);
-			kvs_recs[i].kvs_values[j] = 
-					strndup(value, PMI_MAX_VAL_LEN);
+			/* DO NOT CHANGE TO STRNDUP(), NOT SUPPORTED ON AIX */
+			if (kvs_recs[i].kvs_values[j] == NULL)
+				kvs_recs[i].kvs_values[j] = malloc(PMI_MAX_VAL_LEN);
 			if (kvs_recs[i].kvs_values[j] == NULL)
 				rc = PMI_FAIL;	/* malloc error */
-			else
+			else {
 				rc = PMI_SUCCESS;
+				strncpy(kvs_recs[i].kvs_values[j], value, 
+					PMI_MAX_VAL_LEN);
+			}
 			goto fini;
 		}
 		/* create new key */
@@ -1075,18 +1115,23 @@ static int _kvs_put( const char kvsname[], const char key[], const char value[],
 			kvs_recs[i].kvs_key_states[j] = KVS_KEY_STATE_LOCAL;
 		else
 			kvs_recs[i].kvs_key_states[j] = KVS_KEY_STATE_GLOBAL;
-		kvs_recs[i].kvs_values[j] = strndup(value, PMI_MAX_VAL_LEN);
-		kvs_recs[i].kvs_keys[j]   = strndup(key, PMI_MAX_KEY_LEN);
+		/* DO NOT CHANGE TO STRNDUP(), NOT SUPPORTED ON AIX */
+		kvs_recs[i].kvs_values[j] = malloc(PMI_MAX_VAL_LEN);
+		kvs_recs[i].kvs_keys[j]   = malloc(PMI_MAX_KEY_LEN);
 		if ((kvs_recs[i].kvs_values[j] == NULL)
 		||  (kvs_recs[i].kvs_keys[j] == NULL))
 			rc = PMI_FAIL;	/* malloc error */
-		else
+		else {
 			rc = PMI_SUCCESS;
+			strncpy(kvs_recs[i].kvs_values[j], value, PMI_MAX_VAL_LEN);
+			strncpy(kvs_recs[i].kvs_keys[j],   key,   PMI_MAX_KEY_LEN);
+		}
 		goto fini;
 	}
 	rc = PMI_ERR_INVALID_KVS;
 
 fini:	pthread_mutex_unlock(&kvs_mutex);
+	_kvs_dump();
 	return rc;
 }
 
@@ -1123,7 +1168,11 @@ int PMI_KVS_Commit( const char kvsname[] )
 	 * space. We do this by moving the local key-pairs to the 
 	 * head of the list and sending the count of local entries
 	 * rather than the full set. */
-	kvs_set.task_id       = pmi_rank;
+	kvs_set.host_cnt      = 1;
+	kvs_set.kvs_host_ptr  = malloc(sizeof(struct kvs_hosts));
+	kvs_set.kvs_host_ptr->task_id  = pmi_rank;
+	kvs_set.kvs_host_ptr->port     = 0;
+	kvs_set.kvs_host_ptr->hostname = NULL;
 	kvs_set.kvs_comm_recs = 0;
 	kvs_set.kvs_comm_ptr  = NULL;
 
@@ -1168,6 +1217,7 @@ int PMI_KVS_Commit( const char kvsname[] )
 	pthread_mutex_unlock(&kvs_mutex);
 
 	/* Free any temporary storage */
+	free(kvs_set.kvs_host_ptr);
 	for (i=0; i<kvs_set.kvs_comm_recs; i++)
 		free(kvs_set.kvs_comm_ptr[i]);
 	if (kvs_set.kvs_comm_ptr)
@@ -1504,8 +1554,12 @@ argument as long as the options are contiguous in the args array.
 int PMI_Parse_option(int num_args, char *args[], int *num_parsed, PMI_keyval_t **keyvalp, 
 		int *size)
 {
-if (pmi_debug)
-		fprintf(stderr, "In: PMI_Parse_option - NOT SUPPORTED\n");
+	int i, n, s, len;
+	char *cp, *kp, *vp;
+	PMI_keyval_t *temp;
+
+	if (pmi_debug)
+		fprintf(stderr, "In: PMI_Parse_option - \n");
 
 	if (num_parsed == NULL)
 		return PMI_ERR_INVALID_NUM_PARSED;
@@ -1514,8 +1568,62 @@ if (pmi_debug)
 	if (size == NULL)
 		return PMI_ERR_INVALID_SIZE;
 
-	/* FIXME */
-	return PMI_FAIL;
+	i = 0;
+	n = 0;
+	s = 0;
+
+	cp = args[0];
+	temp = (PMI_keyval_t *) malloc(num_args * (sizeof (PMI_keyval_t)));
+	if (temp == NULL)
+		return PMI_FAIL;
+
+	cp = args[0];
+	while (i < num_args) {
+
+		while (*cp == ' ') cp++;
+		n++; // number of array elements processed
+		kp = cp;	// keyword start here
+		while (*cp != ' ' && *cp != '=' && *cp != '\n' && *cp != '\0')
+			cp++;
+		if (*cp != '=')  {
+			n++;
+			break;
+		}
+		len = cp - kp;
+		temp[s].key = (char *) malloc((len+1) * sizeof (char));
+		if (temp[s].key == NULL)
+			return PMI_FAIL;
+		strncpy(temp[s].key, kp, len);
+		temp[s].key[len] = '\0';
+		if (!IsPmiKey(temp[s].key)) {
+			free(temp[s].key);
+			temp[s].key=NULL;
+			break;
+		}
+		vp = ++cp;
+		while (*cp != ' ' && *cp != '\n' && *cp != '\0')
+			cp++;
+		len = cp - vp + 1;
+		temp[s].val = (char *) malloc((len+1) * sizeof (char));
+		if (temp[s].val == NULL)
+			return PMI_FAIL;
+		strncpy(temp[s].val, vp, len);
+		temp[s].val[len] = '\0';
+		s++;
+		i++;  // try next args
+		cp = args[i];
+
+	}
+
+	if (s == 0) {
+		free(temp);
+		temp = NULL;
+	}
+	*keyvalp = temp;
+	*num_parsed = n;
+	*size = s;
+	
+	return PMI_SUCCESS;
 }
 
 /*@
@@ -1543,17 +1651,80 @@ not be used to free this array as there is no requirement that the array be
 allocated with 'malloc()'.
 
 @*/
+
+/* Assume it is the standard c input argument format, i.e.,
+   argcp points to number of arguments
+   argvp points to the number of array of arguments, with argv[0] is the cmd
+   argv[1], argv[2]... are the keyword/argument pair.
+
+*/
+
 int PMI_Args_to_keyval(int *argcp, char *((*argvp)[]), PMI_keyval_t **keyvalp, 
 		int *size)
 {
-	if  (pmi_debug)
-		fprintf(stderr, "In: PMI_Args_to_keyval - NOT SUPPORTED\n");
+	int i, j, cnt;
+	PMI_keyval_t *temp;
+	char **argv;
 
-	if ((keyvalp == NULL) || (size == NULL))
+	if  (pmi_debug)
+		fprintf(stderr, "In: PMI_Args_to_keyval \n");
+
+	if ((keyvalp == NULL) || (size == NULL) || (argcp == NULL) || (argvp == NULL))
 		return PMI_ERR_INVALID_ARG;
 
-	/* FIXME */
-	return PMI_FAIL;
+	cnt=*argcp;
+	argv = *argvp;
+
+	temp = (PMI_keyval_t *) malloc(cnt * (sizeof (PMI_keyval_t)));
+	if (temp == NULL)
+		return PMI_FAIL;
+
+	if (cnt == 0)
+		return PMI_ERR_INVALID_ARG;
+	j = 0;
+	i = 0;
+
+	if (argv[i][0] != '-') {
+		temp[j].val = (char *) malloc((strlen(argv[i])+1) * sizeof (char));
+		if (temp[j].val == NULL)
+			return PMI_FAIL;
+		strcpy(temp[j].val, argv[i]);
+		temp[i].key=NULL;
+		--cnt;
+		++j;
+		++i;
+	}
+
+	while (cnt) {
+		if (argv[i][0] == '-') {
+			temp[j].key = (char *) malloc((strlen(argv[i])+1) * 
+					sizeof (char));
+			if (temp[j].key == NULL)
+				return PMI_FAIL;
+			strcpy(temp[j].key, argv[i]);
+			++i;
+			--cnt;
+			if ((cnt) && (argv[i][0] != '-')){
+				temp[j].val = (char *) malloc(
+						(strlen(argv[i])+1) * 
+						sizeof (char));
+				if (temp[j].val == NULL)
+					return PMI_FAIL;
+				strcpy(temp[j].val, argv[i]);
+				i++;
+				--cnt;
+			} else {
+				temp[j].val = NULL;
+			}
+			j++;
+		} else {
+			return PMI_ERR_INVALID_ARG;
+		}
+	}
+	*size = j;
+	*keyvalp = temp;
+
+	return PMI_SUCCESS;
 }
 
 /*@
@@ -1575,14 +1746,28 @@ Notes:
 @*/
 int PMI_Free_keyvals(PMI_keyval_t keyvalp[], int size)
 {
-	if (pmi_debug)
-		fprintf(stderr, "In: PMI_Free_keyvals - NOT SUPPORTED\n");
+	int i;
 
-	if ((keyvalp == NULL) && size)
+	if (pmi_debug)
+		fprintf(stderr, "In: PMI_Free_keyvals \n");
+
+	if (((keyvalp == NULL) && size)  || (size < 0))
 		return PMI_ERR_INVALID_ARG;
 
-	/* FIXME */
-	return PMI_FAIL;
+	if (size == 0) {
+		if (keyvalp != NULL)
+			free(keyvalp);
+		return PMI_SUCCESS;
+	}
+
+	for (i=0; i<size; i++) {
+		if ((keyvalp[i].key) != NULL)
+			free(keyvalp[i].key);
+		if ((keyvalp[i].val) != NULL)
+			free(keyvalp[i].val);
+	}
+	free(keyvalp);
+	return PMI_SUCCESS;
 }
 
 /*@
@@ -1608,12 +1793,56 @@ Notes:
 @*/
 int PMI_Get_options(char *str, int *length)
 {
+	int optlen;
+
 	if (pmi_debug)
-		fprintf(stderr, "In: PMI_Get_options - NOT SUPPORTED\n");
+		fprintf(stderr, "In: PMI_Get_options \n");
 
 	if ((str == NULL) || (length == NULL))
 		return PMI_ERR_INVALID_ARG;
 
-	/* FIXME */
-	return PMI_FAIL;
+	optlen = strlen(pmi_opt_str);
+	if (*length <= optlen) {
+		strncpy(str, pmi_opt_str, *length-1);
+		str[*length-1] = '\0';
+		return PMI_ERR_NOMEM;
+	}
+
+    strcpy(str, pmi_opt_str);
+    return PMI_SUCCESS;
+}
+
+static int IsPmiKey(char * key) {
+	char strh[5];
+
+	if (pmi_debug)
+		fprintf(stderr, "In: IsPmiKey \n");
+
+	strncpy(strh, key, 4);
+	strh[4]='\0';
+ 	if (!strcmp(strh, "PMI_") && (strlen(key) > 4)) {
+		return 1;
+	}
+
+	/* add code to test special key if needed */
+	return 0;
+}
+
+static void inline _kvs_dump(void)
+{
+#if _DEBUG
+	int i, j;
+
+	for (i=0; i<kvs_rec_cnt; i++) {
+		info("name=%s state=%u cnt=%u inx=%u",
+			kvs_recs[i].kvs_name, kvs_recs[i].kvs_state,
+			kvs_recs[i].kvs_cnt, kvs_recs[i].kvs_inx);
+		for (j=0; j<kvs_recs[i].kvs_cnt; j++) {
+			info("  state=%u key=%s value=%s",
+				kvs_recs[i].kvs_key_states[j],
+				kvs_recs[i].kvs_keys[j],
+				kvs_recs[i].kvs_values[j]);
+		}
+	}
+#endif
 }

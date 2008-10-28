@@ -6,7 +6,7 @@
  *  Copyright (C) 2003 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Jay Windley <jwindley@lnxi.com>, Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -45,11 +45,12 @@
 #include "src/common/plugin.h"
 #include "src/common/log.h"
 #include "src/common/macros.h"
+#include "src/slurmctld/slurmctld.h"
 #include "backfill.h"
 
 const char		plugin_name[]	= "SLURM Backfill Scheduler plugin";
 const char		plugin_type[]	= "sched/backfill";
-const uint32_t		plugin_version	= 90;
+const uint32_t		plugin_version	= 100;
 
 /* A plugin-global errno. */
 static int plugin_errno = SLURM_SUCCESS;
@@ -62,15 +63,6 @@ static pthread_mutex_t thread_flag_mutex = PTHREAD_MUTEX_INITIALIZER;
 /**************************************************************************/
 int init( void )
 {
-#ifdef HAVE_BG
-	/* Backfill scheduling on Blue Gene is possible, 
-	 * but difficult and would require substantial 
-	 * software development to accomplish. 
-	 * It would need to consider each job's geometry, 
-	 * ability to rotate, node-use (coprocessor or virtual)
-	 * and conn-type (mesh, torus or nav). */
-	fatal("Backfill scheduler incompatable with Blue Gene");
-#else
 	pthread_attr_t attr;
 
 	verbose( "Backfill scheduler plugin loaded" );
@@ -83,41 +75,36 @@ int init( void )
 	}
 
 	slurm_attr_init( &attr );
-	pthread_attr_setdetachstate( &attr, PTHREAD_CREATE_DETACHED );
 	if (pthread_create( &backfill_thread, &attr, backfill_agent, NULL))
 		error("Unable to start backfill thread: %m");
 	pthread_mutex_unlock( &thread_flag_mutex );
 	slurm_attr_destroy( &attr );
-#endif
+
 	return SLURM_SUCCESS;
 }
 
 /**************************************************************************/
 /*  TAG(                              fini                              ) */
 /**************************************************************************/
-static void _cancel_thread (pthread_t thread_id)
-{
-	int i;
-
-	for (i=0; i<4; i++) {
-		if (pthread_cancel(thread_id))
-			return;
-		usleep(1000);
-	}
-	error("Could not kill backfill sched pthread");
-}
-
 void fini( void )
 {
 	pthread_mutex_lock( &thread_flag_mutex );
 	if ( backfill_thread ) {
 		verbose( "Backfill scheduler plugin shutting down" );
-		_cancel_thread( backfill_thread );
-		backfill_thread = false;
+		stop_backfill_agent();
+		pthread_join(backfill_thread, NULL);
+		backfill_thread = 0;
 	}
 	pthread_mutex_unlock( &thread_flag_mutex );
 }
 
+/**************************************************************************/
+/* TAG(              slurm_sched_plugin_reconfig                        ) */
+/**************************************************************************/
+int slurm_sched_plugin_reconfig( void )
+{
+       return SLURM_SUCCESS;
+}
 
 /***************************************************************************/
 /*  TAG(                   slurm_sched_plugin_schedule                   ) */
@@ -128,12 +115,31 @@ slurm_sched_plugin_schedule( void )
 	return SLURM_SUCCESS;
 }
 
+/***************************************************************************/
+/*  TAG(                   slurm_sched_plugin_newalloc                   ) */
+/***************************************************************************/
+int
+slurm_sched_plugin_newalloc( struct job_record *job_ptr )
+{
+	return SLURM_SUCCESS;
+}
+
+/***************************************************************************/
+/*  TAG(                   slurm_sched_plugin_freealloc                  ) */
+/***************************************************************************/
+int
+slurm_sched_plugin_freealloc( struct job_record *job_ptr )
+{
+	return SLURM_SUCCESS;
+}
+
 
 /**************************************************************************/
 /* TAG(                   slurm_sched_plugin_initial_priority           ) */
 /**************************************************************************/
 u_int32_t
-slurm_sched_plugin_initial_priority( u_int32_t last_prio )
+slurm_sched_plugin_initial_priority( u_int32_t last_prio, 
+				     struct job_record *job_ptr )
 {
 	if (last_prio >= 2)
 		return (last_prio - 1);
@@ -147,6 +153,14 @@ slurm_sched_plugin_initial_priority( u_int32_t last_prio )
 void slurm_sched_plugin_job_is_pending( void )
 {
 	run_backfill();
+}
+
+/**************************************************************************/
+/* TAG(              slurm_sched_plugin_partition_change                ) */
+/**************************************************************************/
+void slurm_sched_plugin_partition_change( void )
+{
+	/* Empty. */
 }
 
 /**************************************************************************/
@@ -165,3 +179,18 @@ char *slurm_sched_strerror( int errnum )
 	return NULL;
 }
 
+/**************************************************************************/
+/* TAG(              slurm_sched_plugin_requeue                         ) */
+/**************************************************************************/
+void slurm_sched_plugin_requeue( struct job_record *job_ptr, char *reason )
+{
+	/* Empty. */
+}
+
+/**************************************************************************/
+/* TAG(              slurm_sched_get_conf                               ) */
+/**************************************************************************/
+char *slurm_sched_get_conf( void )
+{
+	return NULL;
+}

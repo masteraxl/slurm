@@ -7,7 +7,7 @@
 # Copyright (C) 2002 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-217948.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -53,14 +53,15 @@ else
 	iterations=3
 fi
 
-if [ $5 ]; then
-    inx=512
-else
-    inx=1
-fi
+bluegene=0
+if [ $# -gt 5 ]; then
+	if  [ $5 ]; then
+		bluegene=1
+	fi
+fi	
 
 exit_code=0
-
+inx=1
 log="test9.7.$$.output"
 touch $log
 while [ $inx -le $iterations ]
@@ -73,7 +74,11 @@ do
 		exit_code=$rc
 	fi
 	sleep $sleep_time
-	$exec2 -N1-$inx -n$inx -O -s -l hostname         >>$log 2>&1
+	if [ $bluegene ]; then
+		$exec2 --job-name=test9.7 -N1-512 -n1 -s -l hostname         >>$log 2>&1
+	else
+		$exec2 --job-name=test9.7 -N1-$inx -n$inx -O -s -l hostname  >>$log 2>&1
+	fi
 	rc=$?
 	if [ $rc -ne 0 ]; then
 		echo "exec2 rc=$rc" >> $log

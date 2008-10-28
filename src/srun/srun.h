@@ -4,7 +4,7 @@
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -30,6 +30,9 @@
 #ifdef HAVE_CONFIG_H
 #  include "config.h"
 #endif
+
+#include <sys/types.h>
+#include <unistd.h>
 
 #include "src/api/step_io.h"
 #include "src/srun/srun_job.h"

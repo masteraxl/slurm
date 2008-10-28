@@ -1,12 +1,12 @@
 /*****************************************************************************\
  *  slurm_step_layout.c - functions to distribute tasks over nodes.
- *  $Id: slurm_step_layout.c,v 1.7 2006/09/08 15:59:11 palermo Exp $
+ *  $Id$
  *****************************************************************************
  *
  *  Copyright (C) 2005 Hewlett-Packard Development Company, L.P.
  *  Written by Chris Holmes, <cholmes@hp.com>, who borrowed heavily
  *  from other parts of SLURM.
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -55,15 +55,15 @@
 /* build maps for task layout on nodes */
 static int _init_task_layout(slurm_step_layout_t *step_layout, 
 			     const char *arbitrary_nodes, 
-			     uint32_t *cpus_per_node, uint32_t *cpu_count_reps,
-			     uint16_t task_dist, uint32_t plane_size);
+			     uint16_t *cpus_per_node, uint32_t *cpu_count_reps,
+			     uint16_t task_dist, uint16_t plane_size);
 
 static int _task_layout_block(slurm_step_layout_t *step_layout, 
-			      uint32_t *cpus);
+			      uint16_t *cpus);
 static int _task_layout_cyclic(slurm_step_layout_t *step_layout, 
-			       uint32_t *cpus);
+			       uint16_t *cpus);
 static int _task_layout_plane(slurm_step_layout_t *step_layout,
-			       uint32_t *cpus);
+			       uint16_t *cpus);
 #ifndef HAVE_FRONT_END
 static int _task_layout_hostfile(slurm_step_layout_t *step_layout,
 				 const char *arbitrary_nodes);
@@ -87,23 +87,19 @@ static int _task_layout_hostfile(slurm_step_layout_t *step_layout,
  */
 slurm_step_layout_t *slurm_step_layout_create(
 	const char *tlist,
-	uint32_t *cpus_per_node, uint32_t *cpu_count_reps, 
-	uint16_t num_hosts, 
+	uint16_t *cpus_per_node, uint32_t *cpu_count_reps, 
+	uint32_t num_hosts, 
 	uint32_t num_tasks,
 	uint16_t task_dist,
-	uint32_t plane_size)
+	uint16_t plane_size)
 {
 	char *arbitrary_nodes = NULL;
 	slurm_step_layout_t *step_layout = 
 		xmalloc(sizeof(slurm_step_layout_t));
-	if(!step_layout) {
-		error("xmalloc error for step_layout");
-		return NULL;
-	}
 		
 	if(task_dist == SLURM_DIST_ARBITRARY) {
 		hostlist_t hl = NULL;
-		char buf[8192];
+		char buf[65536];
 		/* set the node list for the task layout later if user
 		   supplied could be different that the job allocation */
 		arbitrary_nodes = xstrdup(tlist);
@@ -136,7 +132,7 @@ slurm_step_layout_t *slurm_step_layout_create(
 		slurm_step_layout_destroy(step_layout);
 		step_layout = NULL;
 	}
-
+	xfree(arbitrary_nodes);
 	return step_layout;
 }
 
@@ -156,25 +152,21 @@ slurm_step_layout_t *slurm_step_layout_create(
  */
 slurm_step_layout_t *fake_slurm_step_layout_create(
 	const char *tlist,
-	uint32_t *cpus_per_node, 
+	uint16_t *cpus_per_node, 
 	uint32_t *cpu_count_reps,
-	uint16_t node_cnt, 
+	uint32_t node_cnt, 
 	uint32_t task_cnt) 
 {
 	uint32_t cpn = 1;
 	int cpu_cnt = 0, cpu_inx = 0, i, j;
-	char *name = NULL;
+/* 	char *name = NULL; */
 	hostlist_t hl = NULL;
 	slurm_step_layout_t *step_layout = 
 		xmalloc(sizeof(slurm_step_layout_t));
 
-	if(!step_layout) {
-		error("xmalloc error for step_layout");
-		return NULL;
-	}
-	if(node_cnt <= 0 || (task_cnt <= 0 && !cpus_per_node) || !tlist) {
+	if((node_cnt <= 0) || (task_cnt <= 0 && !cpus_per_node) || !tlist) {
 		error("there is a problem with your fake_step_layout request\n"
-		      "node_cnt = %d, task_cnt = %d, tlist = %s",
+		      "node_cnt = %u, task_cnt = %u, tlist = %s",
 		      node_cnt, task_cnt, tlist);
 		xfree(step_layout);
 		return NULL;
@@ -188,10 +180,10 @@ slurm_step_layout_t *fake_slurm_step_layout_create(
 	step_layout = xmalloc(sizeof(slurm_step_layout_t));
 	step_layout->node_list = xstrdup(tlist);
 	step_layout->node_cnt = node_cnt;
-	step_layout->tasks = xmalloc(sizeof(uint32_t) * node_cnt);
+	step_layout->tasks = xmalloc(sizeof(uint16_t) * node_cnt);
 	step_layout->tids  = xmalloc(sizeof(uint32_t *) * node_cnt);
-	step_layout->node_addr = 
-		xmalloc(sizeof(slurm_addr) * node_cnt);
+/* 	step_layout->node_addr =  */
+/* 		xmalloc(sizeof(slurm_addr) * node_cnt); */
 
 	step_layout->task_cnt = 0;
 	for (i=0; i<step_layout->node_cnt; i++) {
@@ -222,27 +214,32 @@ slurm_step_layout_t *fake_slurm_step_layout_create(
 					step_layout->tids[i][j] = 
 						step_layout->task_cnt++;
 					if(step_layout->task_cnt >= task_cnt) {
-						step_layout->tasks[i] = j;
+						step_layout->tasks[i] = j + 1;
 						break;
 					}
 				}
 			}
 		}
-		name = hostlist_shift(hl);
-		if(!name) {
-			error("job_create_noalloc: "
-			      "We don't have the correct nodelist.");
-			goto error;			      
-		}
-		slurm_conf_get_addr(name, &step_layout->node_addr[i]);
-		free(name);
+/* 		name = hostlist_shift(hl); */
+/* 		if(!name) { */
+/* 			error("fake_slurm_step_layout_create: " */
+/* 			      "We don't have the correct nodelist."); */
+/* 			goto error;			       */
+/* 		} */
+/* 		if(slurm_conf_get_addr(name, &step_layout->node_addr[i]) ==  */
+/* 		   SLURM_ERROR) { */
+/* 			error("fake_slurm_step_layout_create: " */
+/* 			      "we didn't get an addr for host %s.", name); */
+				
+/* 		} */
+/* 		free(name); */
 	}
 	hostlist_destroy(hl);
 	return step_layout;
-error:
-	hostlist_destroy(hl);
-	slurm_step_layout_destroy(step_layout);
-	return NULL;
+/* error: */
+/* 	hostlist_destroy(hl); */
+/* 	slurm_step_layout_destroy(step_layout); */
+/* 	return NULL; */
 }
 
 
@@ -261,13 +258,13 @@ extern slurm_step_layout_t *slurm_step_layout_copy(
 	layout->node_cnt = step_layout->node_cnt;
 	layout->task_cnt = step_layout->task_cnt;
 	
-	layout->node_addr = xmalloc(sizeof(slurm_addr) * layout->node_cnt);
-	memcpy(layout->node_addr, step_layout->node_addr, 
-	       (sizeof(slurm_addr) * layout->node_cnt));
+/* 	layout->node_addr = xmalloc(sizeof(slurm_addr) * layout->node_cnt); */
+/* 	memcpy(layout->node_addr, step_layout->node_addr,  */
+/* 	       (sizeof(slurm_addr) * layout->node_cnt)); */
 
-	layout->tasks = xmalloc(sizeof(uint32_t) * layout->node_cnt);
+	layout->tasks = xmalloc(sizeof(uint16_t) * layout->node_cnt);
 	memcpy(layout->tasks, step_layout->tasks, 
-	       (sizeof(uint32_t) * layout->node_cnt));
+	       (sizeof(uint16_t) * layout->node_cnt));
 
 	layout->tids  = xmalloc(sizeof(uint32_t *) * layout->node_cnt);
 	for (i=0; i<layout->node_cnt; i++) {
@@ -290,10 +287,10 @@ extern void pack_slurm_step_layout(slurm_step_layout_t *step_layout,
 	if(!i)
 		return;
 	packstr(step_layout->node_list, buffer);
-	pack16(step_layout->node_cnt, buffer);
+	pack32(step_layout->node_cnt, buffer);
 	pack32(step_layout->task_cnt, buffer);
-	slurm_pack_slurm_addr_array(step_layout->node_addr, 
-				    step_layout->node_cnt, buffer);
+/* 	slurm_pack_slurm_addr_array(step_layout->node_addr,  */
+/* 				    step_layout->node_cnt, buffer); */
 
 	for(i=0; i<step_layout->node_cnt; i++) {
 		pack32_array(step_layout->tids[i], step_layout->tasks[i], 
@@ -304,7 +301,7 @@ extern void pack_slurm_step_layout(slurm_step_layout_t *step_layout,
 extern int unpack_slurm_step_layout(slurm_step_layout_t **layout, Buf buffer)
 {
 	uint16_t uint16_tmp;
-	uint32_t num_tids;
+	uint32_t num_tids, uint32_tmp;
 	slurm_step_layout_t *step_layout = NULL;
 	int i;
 	
@@ -319,15 +316,15 @@ extern int unpack_slurm_step_layout(slurm_step_layout_t **layout, Buf buffer)
 	step_layout->node_cnt = 0;
 	step_layout->tids = NULL;
 	step_layout->tasks = NULL;
-	safe_unpackstr_xmalloc(&step_layout->node_list, &uint16_tmp, buffer);
-	safe_unpack16(&step_layout->node_cnt, buffer);
+	safe_unpackstr_xmalloc(&step_layout->node_list, &uint32_tmp, buffer);
+	safe_unpack32(&step_layout->node_cnt, buffer);
 	safe_unpack32(&step_layout->task_cnt, buffer);
 	
-	if (slurm_unpack_slurm_addr_array(&(step_layout->node_addr), 
-					  &uint16_tmp, buffer))
-		goto unpack_error;
-	if (uint16_tmp != step_layout->node_cnt)
-		goto unpack_error;
+/* 	if (slurm_unpack_slurm_addr_array(&(step_layout->node_addr),  */
+/* 					  &uint32_tmp, buffer)) */
+/* 		goto unpack_error; */
+/* 	if (uint32_tmp != step_layout->node_cnt) */
+/* 		goto unpack_error; */
 	
 	step_layout->tasks = xmalloc(sizeof(uint32_t) * step_layout->node_cnt);
 	step_layout->tids = xmalloc(sizeof(uint32_t *) 
@@ -353,7 +350,7 @@ extern int slurm_step_layout_destroy(slurm_step_layout_t *step_layout)
 	int i=0;
 	if(step_layout) {
 		xfree(step_layout->node_list);
-		xfree(step_layout->node_addr);
+/* 		xfree(step_layout->node_addr); */
 		xfree(step_layout->tasks);
 		for (i = 0; i < step_layout->node_cnt; i++) {
 			xfree(step_layout->tids[i]);
@@ -392,13 +389,13 @@ char *slurm_step_layout_host_name (slurm_step_layout_t *s, int taskid)
 /* build maps for task layout on nodes */
 static int _init_task_layout(slurm_step_layout_t *step_layout,
 			     const char *arbitrary_nodes,
-			     uint32_t *cpus_per_node, uint32_t *cpu_count_reps,
-			     uint16_t task_dist, uint32_t plane_size)
+			     uint16_t *cpus_per_node, uint32_t *cpu_count_reps,
+			     uint16_t task_dist, uint16_t plane_size)
 {
 	int cpu_cnt = 0, cpu_inx = 0, i;
 	hostlist_t hl = NULL;
-	char *name = NULL;
-	uint32_t cpus[step_layout->node_cnt];
+/* 	char *name = NULL; */
+	uint16_t cpus[step_layout->node_cnt];
 
 	if (step_layout->node_cnt == 0)
 		return SLURM_ERROR;
@@ -407,20 +404,18 @@ static int _init_task_layout(slurm_step_layout_t *step_layout,
 	
 	step_layout->plane_size = plane_size;
 
-	step_layout->node_addr = xmalloc(sizeof(slurm_addr) 
-				     * step_layout->node_cnt);
-	step_layout->tasks = xmalloc(sizeof(uint32_t) 
+	step_layout->tasks = xmalloc(sizeof(uint16_t) 
 				     * step_layout->node_cnt);
 	step_layout->tids  = xmalloc(sizeof(uint32_t *) 
 				     * step_layout->node_cnt);
 
 	hl = hostlist_create(step_layout->node_list);
 	/* make sure the number of nodes we think we have 
-	   is the correct number */
+	 * is the correct number */
 	i = hostlist_count(hl);
 	if(step_layout->node_cnt > i)
 		step_layout->node_cnt = i;
-	debug("laying out the %d tasks on %d hosts %s\n", 
+	debug("laying out the %u tasks on %u hosts %s\n", 
 	      step_layout->task_cnt, step_layout->node_cnt,
 	      step_layout->node_list);
 	if(step_layout->node_cnt < 1) {
@@ -430,18 +425,16 @@ static int _init_task_layout(slurm_step_layout_t *step_layout,
 	}
 	
 	for (i=0; i<step_layout->node_cnt; i++) {
-		name = hostlist_shift(hl);
-		if(!name) {
-			error("hostlist incomplete for this job request");
-			hostlist_destroy(hl);
-			return SLURM_ERROR;
-		}
-		slurm_conf_get_addr(name, &step_layout->node_addr[i]);
-							
-		debug2("host %d = %s", i, name);
-		free(name);
+/* 		name = hostlist_shift(hl); */
+/* 		if(!name) { */
+/* 			error("hostlist incomplete for this job request"); */
+/* 			hostlist_destroy(hl); */
+/* 			return SLURM_ERROR; */
+/* 		} */							
+/* 		debug2("host %d = %s", i, name); */
+/* 		free(name); */
 		cpus[i] = cpus_per_node[cpu_inx];
-		
+		//info("got %d cpus", cpus[i]);
 		if ((++cpu_cnt) >= cpu_count_reps[cpu_inx]) {
 			/* move to next record */
 			cpu_inx++;
@@ -489,7 +482,7 @@ static int _task_layout_hostfile(slurm_step_layout_t *step_layout,
 	debug2("list is %s", arbitrary_nodes);
 	step_alloc_hosts = hostlist_create(arbitrary_nodes);
 	if(hostlist_count(step_alloc_hosts) != step_layout->task_cnt) {
-		error("Asked for %d tasks have %d in the nodelist. "
+		error("Asked for %u tasks have %d in the nodelist."
 		      "Check your nodelist",
 		      step_layout->task_cnt, 
 		      hostlist_count(step_alloc_hosts));
@@ -507,7 +500,7 @@ static int _task_layout_hostfile(slurm_step_layout_t *step_layout,
 			if(task_cnt >= step_layout->task_cnt)
 				break;			
 		}
-		debug3("%s got %d tasks\n",
+		debug3("%s got %u tasks\n",
 		       host,
 		       step_layout->tasks[i]);
 		if(step_layout->tasks[i] == 0)
@@ -539,7 +532,7 @@ static int _task_layout_hostfile(slurm_step_layout_t *step_layout,
 	hostlist_destroy(job_alloc_hosts);
 	hostlist_destroy(step_alloc_hosts);
 	if(task_cnt != step_layout->task_cnt) {
-		error("Asked for %d tasks but placed %d. Check your nodelist",
+		error("Asked for %u tasks but placed %d. Check your nodelist",
 		      step_layout->task_cnt, task_cnt);
 		return SLURM_ERROR;
 	}
@@ -551,7 +544,7 @@ static int _task_layout_hostfile(slurm_step_layout_t *step_layout,
 /* to effectively deal with heterogeneous nodes, we fake a cyclic
  * distribution to figure out how many tasks go on each node and
  * then make those assignments in a block fashion */
-static int _task_layout_block(slurm_step_layout_t *step_layout, uint32_t *cpus)
+static int _task_layout_block(slurm_step_layout_t *step_layout, uint16_t *cpus)
 {
 	int i, j, taskid = 0;
 	bool over_subscribe = false;
@@ -577,10 +570,6 @@ static int _task_layout_block(slurm_step_layout_t *step_layout, uint32_t *cpus)
 	for (i=0; i < step_layout->node_cnt; i++) {
 		step_layout->tids[i] = xmalloc(sizeof(uint32_t) 
 					       * step_layout->tasks[i]);
-		if (step_layout->tids[i] == NULL) {
-			slurm_seterrno(ENOMEM);
-			return SLURM_ERROR;
-		}
 		for (j=0; j<step_layout->tasks[i]; j++) {
 			step_layout->tids[i][j] = taskid;
 			taskid++;
@@ -603,7 +592,7 @@ static int _task_layout_block(slurm_step_layout_t *step_layout, uint32_t *cpus)
  *                     12 13 14 15  etc.
  */
 static int _task_layout_cyclic(slurm_step_layout_t *step_layout, 
-			       uint32_t *cpus)
+			       uint16_t *cpus)
 {
 	int i, j, taskid = 0;
 	bool over_subscribe = false;
@@ -611,10 +600,6 @@ static int _task_layout_cyclic(slurm_step_layout_t *step_layout,
 	for (i=0; i<step_layout->node_cnt; i++) {
 		step_layout->tids[i] = xmalloc(sizeof(uint32_t) 
 					       * step_layout->task_cnt);
-		if (step_layout->tids[i] == NULL) {
-			slurm_seterrno(ENOMEM);
-			return SLURM_ERROR;
-		}
 	}
 	for (j=0; taskid<step_layout->task_cnt; j++) {   /* cycle counter */
 		bool space_remaining = false;
@@ -637,120 +622,74 @@ static int _task_layout_cyclic(slurm_step_layout_t *step_layout,
 
 
 /* 
- * Compute the number of tasks per node for the plane 
- * distribution given a plane size of "plane_size".
+ * The plane distribution results in a block cyclic of block size
+ * "plane_size". 
  * The plane distribution does not do any workload balancing and 
  * just use the user specified blocksize: "plane_size".
  * This distribution does not take the hardware (number of CPUs 
  * per node) into account when computing the number of tasks per 
  * hosts.
- *
- */
-uint32_t *task_count_layout_plane(const uint32_t node_cnt, 
-				  const uint32_t num_tasks,
-				  const uint32_t plane_size)
-{
-	int i, left = 0;
-	uint32_t *ntask = NULL;
-	int tasks_all;
-	int planes_per_host;
-
-	ntask = (uint32_t *) xmalloc(sizeof(uint32_t *) * node_cnt);
-	if (ntask == NULL) {
-		slurm_seterrno(ENOMEM);
-		return NULL;
-	}
-
-	tasks_all = node_cnt*plane_size;
-	planes_per_host = num_tasks/tasks_all;
-
-	for(i = 0; i <node_cnt; i++) {
-		ntask[i] = planes_per_host*plane_size;
-	}
-
-	left = num_tasks - (node_cnt*(planes_per_host*plane_size));
-	if(left > 0) {
-		for (i = 0; i < node_cnt; i++) {
-			if (left <= 0)
-				continue;
-			if (left < plane_size) {
-				ntask[i] += left;
-				info("I ntask[%d]: %d", i, ntask[i]);
-			} else {
-				ntask[i] += plane_size;
-				info("II ntask[%d]: %d", i, ntask[i]);
-			}
-			left -= plane_size;
-		}
-	}
-
-	return ntask;
-}
-
-/* 
- * The plane distribution results in a block cyclic of block size "
- * plane_size". 
- * The plane distribution does not do any workload balancing and 
- * just use the user specified blocksize: "plane_size".
- * This distribution does not take the hardware (number of CPUs 
- * per node) into account when computing the number of tasks per 
- * hosts.
- *
+ * For example:
+ *	plane_size = 2
+ *          node       Node0 Node1
+ *                     -- -- -- --
+ * task distribution:   0  1  2  3
+ *                      4  5  6  7
+ *                      8  9 10 11
+ *                     12 13 14 15  etc.
  */
 static int _task_layout_plane(slurm_step_layout_t *step_layout,
-			       uint32_t *cpus)
+			       uint16_t *cpus)
 {
-	int i, j, taskid = 0;
-	uint32_t *temp_tasks = NULL;
+	int i, j, k, taskid = 0;
 
-	debug3("_task_layout_plane plane_size %d ", step_layout->plane_size);
+	debug3("_task_layout_plane plane_size %u node_cnt %u task_cnt %u",
+		step_layout->plane_size,
+		step_layout->node_cnt, step_layout->task_cnt);
 
-	if(step_layout->plane_size <= 0)
+	if (step_layout->plane_size <= 0)
 	        return SLURM_ERROR;
 
-	for (i=0; i<step_layout->node_cnt; i++) {
-		step_layout->tids[i] = xmalloc(sizeof(int) * step_layout->task_cnt);
-		if (step_layout->tids[i] == NULL) {
-			return SLURM_ERROR;
-		}
-	}
-
-	temp_tasks = task_count_layout_plane(step_layout->node_cnt, 
-					     step_layout->task_cnt,
-					     step_layout->plane_size);
-
-	for(i=0; i < step_layout->node_cnt; i++)
-		step_layout->tasks[i]= temp_tasks[i];
-	xfree(temp_tasks);
-
-	info("node_cnt %d task_cnt %d plane_size %d",
-	     step_layout->node_cnt, step_layout->task_cnt, 
-	     step_layout->plane_size);
-	for(i = 0; i <step_layout->node_cnt; i++) {
-		info("tasks[%d]: %d", i, step_layout->tasks[i]);
-	}
-
-	if(step_layout->tasks == NULL)
+	if (step_layout->tasks == NULL)
 		return SLURM_ERROR;
 
+	for (i=0; i<step_layout->node_cnt; i++) {
+		step_layout->tids[i] = xmalloc(sizeof(uint32_t)
+						* step_layout->task_cnt);
+	}
+
 	taskid = 0;
-	for(i = 0; i <step_layout->node_cnt; i++) {
-		for(j = 0; j < step_layout->tasks[i]; j++) {
-			step_layout->tids[i][j] = taskid++;
+	for (j=0; taskid<step_layout->task_cnt; j++) {   /* cycle counter */
+		for (i=0; ((i<step_layout->node_cnt) 
+			   && (taskid<step_layout->task_cnt)); i++) {
+			/* assign a block of 'plane_size' tasks to this node */
+			for (k=0; ((k<step_layout->plane_size)
+				   && (taskid<step_layout->task_cnt)); k++) {
+				step_layout->tids[i][step_layout->tasks[i]] = 
+					taskid;
+				taskid++;
+				step_layout->tasks[i]++;
+			}
 		}
 	}
-	if(taskid != step_layout->task_cnt) {
+
+	if (taskid != step_layout->task_cnt) {
 		error("_task_layout_plane: Mismatch in task count (%d != %d) ", 
 		      taskid, step_layout->task_cnt);
 		return SLURM_ERROR;
 	}
-	
+
 #if(0)
-	/* debugging only remove */
+	/* debugging only */
 	for (i=0; i < step_layout->node_cnt; i++) {
-		info ("Host %d _plane_ # of tasks %d", i, step_layout->tasks[i]);
+		info("tasks[%d]: %u", i, step_layout->tasks[i]);
+	}
+	
+	for (i=0; i < step_layout->node_cnt; i++) {
+		info ("Host %d _plane_ # of tasks %u", i, step_layout->tasks[i]);
 		for (j=0; j<step_layout->tasks[i]; j++) {
-			info ("Host %d _plane_ taskid %d task %d", i, j, step_layout->tids[i][j]);
+			info ("Host %d _plane_ localid %d taskid %u", 
+			      i, j, step_layout->tids[i][j]);
 		}
 	}
 #endif	  

@@ -11,7 +11,7 @@
 # Copyright (C) 2002 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-217948.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -47,7 +47,7 @@ print_header $test_id
 set format "--format=partition=%P node_cnt=%D"
 spawn $sinfo --noheader $format
 expect {
-	-re "partition=($alpha_numeric).* node_cnt=($number)" {
+	-re "partition=($alpha_numeric_under).* node_cnt=($number)" {
 		incr matches
 		exp_continue
 	}
@@ -73,7 +73,7 @@ set matches      0
 set env(SINFO_FORMAT) "part=%P nodes=%D"
 spawn $sinfo --noheader
 expect {
-	-re "part=($alpha_numeric).* nodes=($number)" {
+	-re "part=($alpha_numeric_under).* nodes=($number)" {
 		incr matches
 		exp_continue
 	}

@@ -5,7 +5,7 @@
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <grondona@llnl.gov>, et. al.
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -170,7 +170,6 @@ struct file_read_info {
 	uint32_t nodeid;
 
 	bool eof;
-	bool was_blocking;
 };
 
 
@@ -569,7 +568,7 @@ static int _write_line(int fd, void *buf, int len)
 /*
  * Write as many lines from the message as possible.  Return
  * the number of bytes from the message that have been written,
- * or 0 on eof, or -1 on error.
+ * or -1 on error.
  *
  * Prepend a label of the task number if label parameter was
  * specified.
@@ -586,7 +585,7 @@ static int _write_msg(int fd, void *buf, int len, int taskid,
 	int remaining = len;
 	int written = 0;
 	int line_len;
-	int rc = SLURM_SUCCESS;
+	int rc = -1;
 
 	while (remaining > 0) {
 		start = buf + written;
@@ -720,12 +719,6 @@ create_file_read_eio_obj(int fd, uint32_t taskid, uint32_t nodeid,
 	info->header.ltaskid = (uint16_t)-1;
 	info->eof = false;
 
-	if (fd_is_blocking(fd)) {
-		fd_set_nonblocking(fd);
-		info->was_blocking = true;
-	} else {
-		info->was_blocking = false;
-	}
 	eio = eio_obj_create(fd, &file_read_ops, (void *)info);
 
 	return eio;
@@ -748,11 +741,6 @@ static bool _file_readable(eio_obj_t *obj)
 	}
 	if (obj->shutdown == true) {
 		debug3("  false, shutdown");
-		/* if the file descriptor was in blocking mode before we set it
-		 * to O_NONBLOCK, then set it back to blocking mode before
-		 * closing */
-		if (info->was_blocking)
-			fd_set_blocking(obj->fd);
 		close(obj->fd);
 		obj->fd = -1;
 		info->eof = true;
@@ -839,8 +827,13 @@ again:
 		msg->ref_count = 1;
 		nodeid = info->nodeid;
 		debug3("  taskid %d maps to nodeid %ud", header.gtaskid, nodeid);
-		server = info->cio->ioserver[nodeid]->arg;
-		list_enqueue(server->msg_queue, msg);
+		if (nodeid == (uint32_t)-1) {
+			error("A valid node id must be specified"
+			      " for SLURM_IO_STDIN");
+		} else {
+			server = info->cio->ioserver[nodeid]->arg;
+			list_enqueue(server->msg_queue, msg);
+		}
 	} else {
 		fatal("Unsupported header.type");
 	}
@@ -994,8 +987,8 @@ _handle_io_init_msg(int fd, client_io_t *cio)
 
 		/*
 		 * On AIX the new socket [sd] seems to inherit the O_NONBLOCK
-		 * flag from the listening socket [fd], so we need to explicitly
-		 * set it back to blocking mode.
+		 * flag from the listening socket [fd], so we need to 
+		 * explicitly set it back to blocking mode.
 		 * (XXX: This should eventually be fixed by making
 		 *  reads of IO headers nonblocking)
 		 */
@@ -1197,7 +1190,7 @@ client_io_handler_create(slurm_step_io_fds_t fds,
 		eio_obj_t *obj;
 
 		if (net_stream_listen(&cio->listensock[i],
-				      &cio->listenport[i]) < 0) {
+				      (short *)&cio->listenport[i]) < 0) {
 			fatal("unable to initialize stdio listen socket: %m");
 		}
 		debug("initialized stdio listening socket, port %d\n",
@@ -1262,11 +1255,15 @@ client_io_handler_destroy(client_io_t *cio)
 {
 	xassert(cio);
 
-	/* FIXME - need to make certain that IO engine is shutdown
+	/* FIXME - perhaps should make certain that IO engine is shutdown
 	   (by calling client_io_handler_finish()) before freeing anything */
 
-	bit_free(cio->ioservers_ready_bits);
 	pthread_mutex_destroy(&cio->ioservers_lock);
+	bit_free(cio->ioservers_ready_bits);
+	xfree(cio->ioserver); /* need to destroy the obj first? */
+	xfree(cio->listenport);
+	xfree(cio->listensock);
+	eio_handle_destroy(cio->eio);
 	xfree(cio->io_key);
 	xfree(cio);
 }

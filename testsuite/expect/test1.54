@@ -11,7 +11,7 @@
 # Copyright (C) 2006 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-217948.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -40,6 +40,7 @@ print_header $test_id
 
 if {[test_front_end] != 0} {
         send_user "\nThis test is incompatable with front-end systems\n"
+	exit 0
 }
 
 #
@@ -60,7 +61,7 @@ exec $bin_chmod 700 $file_in
 #
 set matches 0
 set timeout $max_job_delay
-spawn $srun -N1 -n4 --overcommit -l -t1 --multi-prog $file_in  
+set srun_pid [spawn $srun -N1 -n4 --overcommit -l -t1 --multi-prog ./$file_in]
 expect {
 	-re "($number): task:($number):offset:($number)" {
 		set label       $expect_out(1,string)
@@ -82,9 +83,8 @@ expect {
 	}
 	timeout {
 		send_user "\nFAILURE: srun not responding\n"
-		kill_srun
+		slow_kill $srun_pid
 		set exit_code 1
-		exp_continue
 	}
 	eof {
 		wait
@@ -96,6 +96,8 @@ if {$matches != 4} {
 }
 if {$exit_code != 0} {
 	exit $exit_code
+} else {
+	send_user "\nSo far, so good\n\n"
 }
 
 #
@@ -117,10 +119,14 @@ puts $file "# multi-program configuration file
 close $file
 exec $bin_chmod 700 $file_in
 
+set job_id    -
 set matches   0
-set timed_out 0
-spawn $srun -N1 -n4 --overcommit -l -t1 --multi-prog --debugger-test $file_in
+set srun_pid [spawn $srun -N1 -n4 --overcommit -l -t1 --multi-prog --debugger-test -v ./$file_in]
 expect {
+	-re "launching ($number)" {
+		set job_id $expect_out(1,string)
+		exp_continue
+	}
 	-re "executable:(/bin/)($alpha)" {
 		if {[string compare $expect_out(2,string) "date"] != 0} {
 			incr matches
@@ -128,28 +134,64 @@ expect {
 		if {[string compare $expect_out(2,string) "hostname"] != 0} {
 			incr matches
 		}
+		if {$matches == 4} {
+			slow_kill $srun_pid
+		}
 		exp_continue
 	}
 	timeout {
 		send_user "\nFAILURE: srun not responding\n"
-		kill_srun
+		slow_kill $srun_pid
 		set exit_code 1
-		exp_continue
 	}
 	eof {
 		wait
 	}
 }
-if {$timed_out == 1} {
-	send_user "\nEarly termination is expected, no worries.\n"
-}
 if {$matches != 4} {
 	send_user "\nFAILURE: did not generate full list of executables.\n"
 	set exit_code 1
 }
+if {$job_id == 0} {
+	send_user "\nFAILURE: failed to get job id\n"
+	set exit_code 1
+} else {
+	cancel_job $job_id
+}
+
+if {$exit_code != 0} {
+	exit $exit_code
+} else {
+	send_user "\nSo far, so good\n\n"
+}
+
+#
+# Submit a slurm job that asks for more tasks than specified in our 
+# configuration file
+#
+set matches   0
+set srun_pid [spawn $srun -N1 -n5 --overcommit -l -t1 --multi-prog  ./$file_in]
+expect {
+	-re "Configuration file .* invalid" {
+		send_user "\nNo worries. This error is expected\n"
+		incr matches
+	}
+	timeout {
+		send_user "\nFAILURE: srun not responding\n"
+		slow_kill $srun_pid
+		set exit_code 1
+	}
+	eof {
+		wait
+	}
+}
+if {$matches != 1} {
+	send_user "\nFAILURE: did not note lack of a executable for task 5.\n"
+	set exit_code 1
+}
 
 if {$exit_code == 0} {
-	exec $bin_rm $file_in
+	exec $bin_rm -f $file_in
 	send_user "\nSUCCESS\n"
 }
 exit $exit_code

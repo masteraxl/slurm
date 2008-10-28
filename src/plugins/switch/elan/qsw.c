@@ -5,7 +5,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Jim Garlick <garlick@llnl.gov>
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -393,7 +393,6 @@ qsw_init(qsw_libstate_t oldstate)
 	else {
 		new->ls_prognum = QSW_PRG_START + 
 			(lrand48() % (QSW_PRG_END - QSW_PRG_START + 1));
-		new->step_ctx_list = list_create(_step_ctx_del);
 	}
 	qsw_internal_state = new;
 	return 0;
@@ -748,7 +747,7 @@ _free_hwcontext(uint32_t prog_num)
 			if (prog_num != step_ctx_p->st_prognum)
 				continue;
 			_dump_step_ctx("_free_hwcontext", step_ctx_p);
-			list_delete(iter);
+			list_delete_item(iter);
 			break;
 		}
 		if (!step_ctx_p) {
@@ -766,7 +765,7 @@ _free_hwcontext(uint32_t prog_num)
  */
 static int
 _init_elan_capability(ELAN_CAPABILITY *cap, uint32_t prognum, int ntasks, 
-		int nnodes, bitstr_t *nodeset, uint32_t *tasks_per_node,
+		int nnodes, bitstr_t *nodeset, uint16_t *tasks_per_node,
 		int cyclic_alloc, int max_tasks_per_node)
 {
 	int i, node_index;
@@ -866,7 +865,7 @@ _init_elan_capability(ELAN_CAPABILITY *cap, uint32_t prognum, int ntasks,
  */
 int
 qsw_setup_jobinfo(qsw_jobinfo_t j, int ntasks, bitstr_t *nodeset, 
-		uint32_t *tasks_per_node, int cyclic_alloc)
+		uint16_t *tasks_per_node, int cyclic_alloc)
 {
 	int i, max_tasks_per_node = 0;
 	int nnodes = bit_set_count(nodeset);
@@ -959,11 +958,15 @@ static int elan_statkey (int prgid)
 }
 
 /*
- * Return the statkey to caller if shared memory was created
+ * Return the statkey to caller in keyp if shared memory was created
+ * Return -1 if shared memory creation failed.
  */
-int qsw_statkey (qsw_jobinfo_t jobinfo)
+int qsw_statkey (qsw_jobinfo_t jobinfo, int *keyp)
 {
-	return (shmid > 0 ? elan_statkey (jobinfo->j_prognum) : -1);
+	if (shmid < 0)
+		return (-1);
+	*keyp = elan_statkey (jobinfo->j_prognum);
+	return (0);
 }
 
 /*

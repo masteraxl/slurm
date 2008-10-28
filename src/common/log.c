@@ -5,7 +5,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  Much of this code was derived or adapted from the log.c component of 
  *  openssh which contains the following notices:
@@ -59,7 +59,6 @@
 
 #include <stdarg.h>
 #include <errno.h>
-#include <syslog.h>
 
 #ifdef WITH_PTHREADS
 #  include <pthread.h>
@@ -73,6 +72,7 @@
 #include <slurm/slurm_errno.h>
 
 #include "src/common/log.h"
+#include "src/common/fd.h"
 #include "src/common/macros.h"
 #include "src/common/safeopen.h"
 #include "src/common/xassert.h"
@@ -239,8 +239,13 @@ _log_init(char *prog, log_options_t opt, log_facility_t fac, char *logfile )
 		log->logfp = fp;
 	}
 
-	if (log->logfp && (fileno(log->logfp) < 0))
-		log->logfp = NULL;
+	if (log->logfp) {
+		int fd;
+		if ((fd = fileno(log->logfp)) < 0)
+			log->logfp = NULL;
+		else
+			fd_set_close_on_exec(fd);
+	}
 
 	log->initialized = 1;
  out:
@@ -357,7 +362,7 @@ static char *vxstrfmt(const char *fmt, va_list ap)
 	size_t      len = (size_t) 0;
 	char        tmp[LINEBUFSIZE];
 	int         unprocessed = 0;
-
+	int         long_long = 0;
 
 	while (*fmt != '\0') {
 
@@ -431,24 +436,76 @@ static char *vxstrfmt(const char *fmt, va_list ap)
 					xstrcat(buf, "%u");
 				break;
 			case 'l':
+				if((unprocessed == 0) && (*(p+1) == 'l')) {
+					long_long = 1;
+					p++;
+				}
+				
 				if ((unprocessed == 0) && (*(p+1) == 'u')) {
-					snprintf(tmp, sizeof(tmp), "%lu",
-						va_arg(ap, long unsigned));
+					if(long_long) {
+						snprintf(tmp, sizeof(tmp),
+							"%llu", 
+							 va_arg(ap,
+								long long unsigned));
+						long_long = 0;
+					} else 
+						snprintf(tmp, sizeof(tmp),
+							 "%lu",
+							 va_arg(ap,
+								long unsigned));
 					xstrcat(buf, tmp);
 					p++;
 				} else if ((unprocessed==0) && (*(p+1)=='d')) {
-					snprintf(tmp, sizeof(tmp), "%ld",
-						va_arg(ap, long int));
+					if(long_long) {
+						snprintf(tmp, sizeof(tmp),
+							"%lld", 
+							 va_arg(ap,
+								long long int));
+						long_long = 0;
+					} else
+						snprintf(tmp, sizeof(tmp),
+							 "%ld",
+							 va_arg(ap, long int));
+					xstrcat(buf, tmp);
+					p++;
+				} else if ((unprocessed==0) && (*(p+1)=='f')) {
+					if(long_long) {
+						xstrcat(buf, "%llf");
+						long_long = 0;
+					} else 
+						snprintf(tmp, sizeof(tmp),
+							 "%lf",
+							 va_arg(ap, double));
 					xstrcat(buf, tmp);
 					p++;
 				} else if ((unprocessed==0) && (*(p+1)=='x')) {
-					snprintf(tmp, sizeof(tmp), "%lx",
-						va_arg(ap, long int));
+					if(long_long) {
+						snprintf(tmp, sizeof(tmp),
+							 "%llx", 
+							 va_arg(ap,
+								long long int));
+						long_long = 0;
+					} else
+						snprintf(tmp, sizeof(tmp),
+							 "%lx",
+							 va_arg(ap, long int));
 					xstrcat(buf, tmp);
 					p++;
+				} else if(long_long) {
+					xstrcat(buf, "%ll");
+					long_long = 0;
 				} else
 					xstrcat(buf, "%l");
 				break; 
+			case 'L':
+				if ((unprocessed==0) && (*(p+1)=='f')) {
+					snprintf(tmp, sizeof(tmp), "%Lf", 
+						 va_arg(ap, long double));
+					xstrcat(buf, tmp);
+					p++;
+				} else
+					xstrcat(buf, "%L");
+				break;
 			default:	/* try to handle the rest  */
 				xstrcatchar(buf, '%');
 				xstrcatchar(buf, *p);

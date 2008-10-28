@@ -1,10 +1,11 @@
 /*****************************************************************************\
  *  node_scheduler.h - definitions of functions in node_scheduler.c
  *****************************************************************************
- *  Copyright (C) 2004 The Regents of the University of California.
+ *  Copyright (C) 2004-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette@llnl.gov> et. al.
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -40,39 +41,26 @@
 
 /*
  * allocate_nodes - change state of specified nodes to NODE_STATE_ALLOCATED
+ *	also claim required licenses
  * IN job_ptr - job being allocated resources
- * globals: node_record_count - number of nodes in the system
- *	node_record_table_ptr - pointer to global node table
- *	last_node_update - last update time of node table
  */
 extern void allocate_nodes(struct job_record *job_ptr);
 
 /*
- * build_node_details - set cpu counts and addresses for allocated nodes:
- *	cpu_count_reps, cpus_per_node, node_addr, node_cnt, num_cpu_groups
+ * build_node_details - sets addresses for allocated nodes
  * IN job_ptr - pointer to a job record
  */
 extern void build_node_details(struct job_record *job_ptr);
 
 /*
- * count_cpus - report how many cpus are associated with the identified nodes 
- * IN bitmap - map of nodes to tally
- * RET cpu count
- * globals: node_record_count - number of nodes configured
- *	node_record_table_ptr - pointer to global node table
- */
-extern int count_cpus(unsigned *bitmap);
-
-/*
  * deallocate_nodes - for a given job, deallocate its nodes and make
  *	their state NODE_STATE_COMPLETING
+ *	also release the job's licenses
  * IN job_ptr - pointer to terminating job (already in some COMPLETING state)
  * IN timeout - true if job exhausted time limit, send REQUEST_KILL_TIMELIMIT
  *	RPC instead of REQUEST_TERMINATE_JOB
  * IN suspended - true if job was already suspended (node's job_run_cnt
  *	already decremented);
- * globals: node_record_count - number of nodes in the system
- *	node_record_table_ptr - pointer to global node table
  */
 extern void deallocate_nodes(struct job_record *job_ptr, bool timeout,
 		bool suspended);
@@ -91,6 +79,9 @@ extern void re_kill_job(struct job_record *job_ptr);
  * IN job_ptr - pointer to the job record
  * IN test_only - if set do not allocate nodes, just confirm they  
  *	could be allocated now
+ * IN select_node_bitmap - bitmap of nodes to be used for the
+ *	job's resource allocation (not returned if NULL), caller
+ *	must free
  * RET 0 on success, ESLURM code from slurm_errno.h otherwise
  * globals: list_part - global list of partition info
  *	default_part_loc - pointer to default partition 
@@ -103,6 +94,7 @@ extern void re_kill_job(struct job_record *job_ptr);
  *	   the request, (e.g. best-fit or other criterion)
  *	3) Call allocate_nodes() to perform the actual allocation
  */
-extern int select_nodes(struct job_record *job_ptr, bool test_only);
+extern int select_nodes(struct job_record *job_ptr, bool test_only,
+		bitstr_t **select_node_bitmap);
 
-#endif /* !_HAVE_NODE_SCHEDULER_H*/
+#endif /* !_HAVE_NODE_SCHEDULER_H */

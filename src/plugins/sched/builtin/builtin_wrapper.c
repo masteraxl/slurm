@@ -4,7 +4,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Kevin Tew <tew1@llnl.gov> et. al.
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -40,10 +40,11 @@
 
 #include "src/common/plugin.h"
 #include "src/common/log.h"
+#include "src/slurmctld/slurmctld.h"
 
 const char		plugin_name[]	= "SLURM Built-in Scheduler plugin";
 const char		plugin_type[]	= "sched/builtin";
-const uint32_t		plugin_version	= 90;
+const uint32_t		plugin_version	= 100;
 
 /* A plugin-global errno. */
 static int plugin_errno = SLURM_SUCCESS;
@@ -65,6 +66,13 @@ void fini( void )
 	/* Empty. */
 }
 
+/**************************************************************************/
+/* TAG(              slurm_sched_plugin_reconfig                        ) */
+/**************************************************************************/
+int slurm_sched_plugin_reconfig( void )
+{
+	return SLURM_SUCCESS;
+}
 
 /***************************************************************************/
 /*  TAG(                   slurm_sched_plugin_schedule                   ) */
@@ -72,7 +80,24 @@ void fini( void )
 int
 slurm_sched_plugin_schedule( void )
 {
-	verbose( "Built-in plugin: schedule() is a NO-OP" );
+	return SLURM_SUCCESS;
+}
+
+/***************************************************************************/
+/*  TAG(                   slurm_sched_plugin_newalloc                   ) */
+/***************************************************************************/
+int
+slurm_sched_plugin_newalloc( struct job_record *job_ptr )
+{
+	return SLURM_SUCCESS;
+}
+
+/***************************************************************************/
+/*  TAG(                   slurm_sched_plugin_freealloc                  ) */
+/***************************************************************************/
+int
+slurm_sched_plugin_freealloc( struct job_record *job_ptr )
+{
 	return SLURM_SUCCESS;
 }
 
@@ -81,7 +106,8 @@ slurm_sched_plugin_schedule( void )
 /* TAG(                   slurm_sched_plugin_initial_priority           ) */ 
 /**************************************************************************/
 u_int32_t
-slurm_sched_plugin_initial_priority( u_int32_t last_prio )
+slurm_sched_plugin_initial_priority( u_int32_t last_prio,
+				     struct job_record *job_ptr )
 {
 	if (last_prio >= 2)
 		return (last_prio - 1);
@@ -93,6 +119,14 @@ slurm_sched_plugin_initial_priority( u_int32_t last_prio )
 /* TAG(              slurm_sched_plugin_job_is_pending                  ) */
 /**************************************************************************/
 void slurm_sched_plugin_job_is_pending( void )
+{
+	/* Empty. */
+}
+
+/**************************************************************************/
+/* TAG(              slurm_sched_plugin_partition_change                ) */
+/**************************************************************************/
+void slurm_sched_plugin_partition_change( void )
 {
 	/* Empty. */
 }
@@ -113,3 +147,18 @@ char *slurm_sched_strerror( int errnum )
 	return NULL;
 }
 
+/**************************************************************************/
+/* TAG(              slurm_sched_plugin_requeue                         ) */
+/**************************************************************************/
+void slurm_sched_plugin_requeue( struct job_record *job_ptr, char *reason )
+{
+	/* Empty. */
+}
+
+/**************************************************************************/
+/* TAG(              slurm_sched_get_conf                               ) */
+/**************************************************************************/
+char *slurm_sched_get_conf( void )
+{
+	return NULL;
+}

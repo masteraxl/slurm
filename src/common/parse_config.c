@@ -8,7 +8,7 @@
  *  Copyright (C) 2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Christopher J. Morrone <morrone2@llnl.gov>.
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -377,8 +377,9 @@ static int _handle_string(s_p_values_t *v,
 			  const char *value, const char *line, char **leftover)
 {
 	if (v->data_count != 0) {
-		error("%s specified more than once", v->key);
-		return -1;
+		debug("%s specified more than once", v->key);
+		xfree(v->data);
+		v->data_count = 0;
 	}
 
 	if (v->handler != NULL) {
@@ -400,8 +401,9 @@ static int _handle_long(s_p_values_t *v,
 			const char *value, const char *line, char **leftover)
 {
 	if (v->data_count != 0) {
-		error("%s specified more than once", v->key);
-		return -1;
+		debug("%s specified more than once", v->key);
+		xfree(v->data);
+		v->data_count = 0;
 	}
 
 	if (v->handler != NULL) {
@@ -420,7 +422,7 @@ static int _handle_long(s_p_values_t *v,
 		    || (*endptr != '\0')) {
 			if (strcasecmp(value, "UNLIMITED") == 0
 			    || strcasecmp(value, "INFINITE") == 0) {
-				num = (long)-1;
+				num = (long) INFINITE;
 			} else {
 				error("\"%s\" is not a valid number", value);
 				return -1;
@@ -441,8 +443,9 @@ static int _handle_uint16(s_p_values_t *v,
 			  const char *value, const char *line, char **leftover)
 {
 	if (v->data_count != 0) {
-		error("%s specified more than once", v->key);
-		return -1;
+		debug("%s specified more than once", v->key);
+		xfree(v->data);
+		v->data_count = 0;
 	}
 
 	if (v->handler != NULL) {
@@ -462,7 +465,7 @@ static int _handle_uint16(s_p_values_t *v,
 		    || (*endptr != '\0')) {
 			if (strcasecmp(value, "UNLIMITED") == 0
 			    || strcasecmp(value, "INFINITE") == 0) {
-				num = (uint16_t)-1;
+				num = (uint16_t) INFINITE;
 			} else {
 				error("%s value \"%s\" is not a valid number", 
 					v->key, value);
@@ -475,7 +478,8 @@ static int _handle_uint16(s_p_values_t *v,
 			error("%s value (%s) is less than zero", v->key, value);
 			return -1;
 		} else if (num > 0xffff) {
-			error("%s value (%s) is greater than 65535", v->key, value);
+			error("%s value (%s) is greater than 65535", v->key,
+			      value);
 			return -1;
 		}
 		v->data = xmalloc(sizeof(uint16_t));
@@ -490,8 +494,9 @@ static int _handle_uint32(s_p_values_t *v,
 			  const char *value, const char *line, char **leftover)
 {
 	if (v->data_count != 0) {
-		error("%s specified more than once", v->key);
-		return -1;
+		debug("%s specified more than once", v->key);
+		xfree(v->data);
+		v->data_count = 0;
 	}
 
 	if (v->handler != NULL) {
@@ -507,11 +512,15 @@ static int _handle_uint32(s_p_values_t *v,
 
 		errno = 0;
 		num = strtoul(value, &endptr, 0);
+		if ((endptr[0] == 'k') || (endptr[0] == 'K')) {
+			num *= 1024;
+			endptr++;
+		}
 		if ((num == 0 && errno == EINVAL)
 		    || (*endptr != '\0')) {
-			if (strcasecmp(value, "UNLIMITED") == 0
-			    || strcasecmp(value, "INFINITE") == 0) {
-				num = (uint32_t)-1;
+			if ((strcasecmp(value, "UNLIMITED") == 0) ||
+			    (strcasecmp(value, "INFINITE")  == 0)) {
+				num = (uint32_t) INFINITE;
 			} else {
 				error("%s value (%s) is not a valid number", 
 					v->key, value);
@@ -539,11 +548,6 @@ static int _handle_uint32(s_p_values_t *v,
 static int _handle_pointer(s_p_values_t *v,
 			   const char *value, const char *line, char **leftover)
 {
-	if (v->data_count != 0) {
-		error("%s specified more than once", v->key);
-		return -1;
-	}
-
 	if (v->handler != NULL) {
 		/* call the handler function */
 		int rc;
@@ -552,6 +556,11 @@ static int _handle_pointer(s_p_values_t *v,
 		if (rc != 1)
 			return rc == 0 ? 0 : -1;
 	} else {
+		if (v->data_count != 0) {
+			debug("%s specified more than once", v->key);
+			xfree(v->data);
+			v->data_count = 0;
+		}
 		v->data = xstrdup(value);
 	}
 
@@ -587,8 +596,9 @@ static int _handle_boolean(s_p_values_t *v,
 			   const char *value, const char *line, char **leftover)
 {
 	if (v->data_count != 0) {
-		error("%s specified more than once", v->key);
-		return -1;
+		debug("%s specified more than once", v->key);
+		xfree(v->data);
+		v->data_count = 0;
 	}
 
 	if (v->handler != NULL) {

@@ -5,7 +5,7 @@
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Takao Hatazaki <takao.hatazaki@hp.com>
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -52,6 +52,7 @@
 #include <string.h>
 #include <limits.h>
 
+#include "slurm/slurm.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
 #include "src/common/log.h"
@@ -334,4 +335,55 @@ extern pid_t find_ancestor(pid_t process, char *process_name)
 	} while (!strstr(rbuf, process_name));
 
 	return pid;
+}
+
+/* The returned "pids" array does NOT include the slurmstepd */
+extern int proctrack_linuxproc_get_pids(pid_t top, pid_t **pids, int *npids)
+{
+	xppid_t **hashtbl;
+	xpid_t *list, *ptr;
+	pid_t *p;
+	int i;
+	int len = 32;
+
+	if ((hashtbl = _build_hashtbl()) == NULL)
+		return SLURM_ERROR;
+
+	list = _get_list(top, NULL, hashtbl);
+	if (list == NULL) {
+		*pids = NULL;
+		*npids = 0;
+		_destroy_hashtbl(hashtbl);
+		return SLURM_ERROR;
+	}
+
+	p = (pid_t *)xmalloc(sizeof(pid_t) * len);
+	ptr = list;
+	i = 0;
+	while(ptr != NULL) {
+		if (ptr->is_usercmd) { /* don't include the slurmstepd */
+			if (i >= len-1) {
+				len *= 2;
+				xrealloc(p, (sizeof(pid_t) * len));
+			}
+			p[i] = ptr->pid;
+			i++;
+		}
+		ptr = ptr->next;
+	}
+
+	if (i == 0) {
+		xfree(p);
+		*pids = NULL;
+		*npids = 0;
+		_destroy_hashtbl(hashtbl);
+		_destroy_list(list);
+		return SLURM_ERROR;
+	} else {
+		*pids = p;
+		*npids = i;
+		_destroy_hashtbl(hashtbl);
+		_destroy_list(list);
+		return SLURM_SUCCESS;
+	}
 }

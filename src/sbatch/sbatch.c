@@ -1,12 +1,11 @@
 /*****************************************************************************\
- *  sbatch.c - Submit a SLURM batch script.
- *
- *  $Id$
+ *  sbatch.c - Submit a SLURM batch script.$
  *****************************************************************************
- *  Copyright (C) 2006 The Regents of the University of California.
+ *  Copyright (C) 2006-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Christopher J. Morrone <morrone2@llnl.gov>
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -30,6 +29,7 @@
 #  include "config.h"
 #endif
 
+#include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -39,15 +39,22 @@
 
 #include <slurm/slurm.h>
 
+#include "src/common/env.h"
+#include "src/common/read_config.h"
+#include "src/common/slurm_rlimits_info.h"
 #include "src/common/xstring.h"
 #include "src/common/xmalloc.h"
-#include "src/common/env.h"
 
 #include "src/sbatch/opt.h"
 
-static int fill_job_desc_from_opts(job_desc_msg_t *desc);
+#define MAX_RETRIES 15
+
+static int   fill_job_desc_from_opts(job_desc_msg_t *desc);
 static void *get_script_buffer(const char *filename, int *size);
-static int set_umask_env(void);
+static void  set_prio_process_env(void);
+static int   set_umask_env(void);
+static char *script_wrap(char *command_string);
+static int  _set_rlimit_env(void);
 
 int main(int argc, char *argv[])
 {
@@ -57,6 +64,7 @@ int main(int argc, char *argv[])
 	char *script_name;
 	void *script_body;
 	int script_size = 0;
+	int retries = 0;
 
 	log_init(xbasename(argv[0]), logopt, 0, NULL);
 	script_name = process_options_first_pass(argc, argv);
@@ -68,7 +76,11 @@ int main(int argc, char *argv[])
 		log_alter(logopt, 0, NULL);
 	}
 
-	script_body = get_script_buffer(script_name, &script_size);
+	if (opt.wrap != NULL) {
+		script_body = script_wrap(opt.wrap);
+	} else {
+		script_body = get_script_buffer(script_name, &script_size);
+	}
 	if (script_body == NULL)
 		exit(1);
 
@@ -77,6 +89,14 @@ int main(int argc, char *argv[])
 		fatal("sbatch parameter parsing");
 	}
 
+	if (opt.get_user_env_time < 0) {
+		/* Moab does not propage the user's resource limits, so 
+		 * slurmd determines the values at the same time that it 
+		 * gets the user's default environment variables. */
+		(void) _set_rlimit_env();
+	}
+
+	set_prio_process_env();
 	set_umask_env();
 	slurm_init_job_desc_msg(&desc);
 	if (fill_job_desc_from_opts(&desc) == -1) {
@@ -85,15 +105,30 @@ int main(int argc, char *argv[])
 
 	desc.script = (char *)script_body;
 
-	if (slurm_submit_batch_job(&desc, &resp) == -1) {
-		error("Batch job submission failed: %m");
-		exit(3);
-	}
+	while (slurm_submit_batch_job(&desc, &resp) < 0) {
+		static char *msg;
+		
+		if (errno == ESLURM_ERROR_ON_DESC_TO_RECORD_COPY)
+			msg = "Slurm job queue full, sleeping and retrying.";
+		else if (errno == EAGAIN) {
+			msg = "Slurm temporarily unable to accept job, "
+			      "sleeping and retrying.";
+		} else
+			msg = NULL;
+		if ((msg == NULL) || (retries >= MAX_RETRIES)) {
+			error("Batch job submission failed: %m");
+			exit(3);
+		}
 
+		if (retries)
+			debug(msg);
+		else
+			error(msg);
+		sleep (++retries);
+        }
 	info("Submitted batch job %d", resp->job_id);
 	xfree(desc.script);
 	slurm_free_submit_response_response_msg(resp);
-
 	return 0;
 }
 
@@ -114,12 +149,22 @@ static int fill_job_desc_from_opts(job_desc_msg_t *desc)
 	desc->req_nodes = opt.nodelist;
 	desc->exc_nodes = opt.exc_nodes;
 	desc->partition = opt.partition;
-	desc->min_nodes = opt.min_nodes;
+	if (opt.min_nodes)
+		desc->min_nodes = opt.min_nodes;
+	if (opt.licenses)
+		desc->licenses = xstrdup(opt.licenses);
 	if (opt.max_nodes)
 		desc->max_nodes = opt.max_nodes;
+	if (opt.ntasks_per_node)
+		desc->ntasks_per_node = opt.ntasks_per_node;
 	desc->user_id = opt.uid;
 	desc->group_id = opt.gid;
-	desc->dependency = opt.dependency;
+	if (opt.dependency)
+		desc->dependency = xstrdup(opt.dependency);
+	desc->task_dist  = opt.distribution;
+	if (opt.plane_size != NO_VAL)
+		desc->plane_size = opt.plane_size;
+	desc->network = opt.network;
 	if (opt.nice)
 		desc->nice = NICE_OFFSET + opt.nice;
 	desc->mail_type = opt.mail_type;
@@ -129,6 +174,8 @@ static int fill_job_desc_from_opts(job_desc_msg_t *desc)
 		desc->begin_time = opt.begin;
 	if (opt.account)
 		desc->account = xstrdup(opt.account);
+	if (opt.comment)
+		desc->comment = xstrdup(opt.comment);
 
 	if (opt.hold)
 		desc->priority     = 0;
@@ -139,36 +186,90 @@ static int fill_job_desc_from_opts(job_desc_msg_t *desc)
 			desc->geometry[i] = opt.geometry[i];
 	}
 #endif
-	if (opt.conn_type != -1)
+	if (opt.conn_type != (uint16_t) NO_VAL)
 		desc->conn_type = opt.conn_type;
+	if (opt.reboot)
+		desc->reboot = 1;
 	if (opt.no_rotate)
 		desc->rotate = 0;
+	if (opt.blrtsimage)
+		desc->blrtsimage = xstrdup(opt.blrtsimage);
+	if (opt.linuximage)
+		desc->linuximage = xstrdup(opt.linuximage);
+	if (opt.mloaderimage)
+		desc->mloaderimage = xstrdup(opt.mloaderimage);
+	if (opt.ramdiskimage)
+		desc->ramdiskimage = xstrdup(opt.ramdiskimage);
+
+	/* job constraints */
 	if (opt.mincpus > -1)
 		desc->job_min_procs = opt.mincpus;
+	if (opt.minsockets > -1)
+		desc->job_min_sockets = opt.minsockets;
+	if (opt.mincores > -1)
+		desc->job_min_cores = opt.mincores;
+	if (opt.minthreads > -1)
+		desc->job_min_threads = opt.minthreads;
 	if (opt.realmem > -1)
 		desc->job_min_memory = opt.realmem;
+	else if (opt.mem_per_cpu > -1)
+		desc->job_min_memory = opt.mem_per_cpu | MEM_PER_CPU;
 	if (opt.tmpdisk > -1)
 		desc->job_min_tmp_disk = opt.tmpdisk;
-	desc->num_procs = opt.nprocs * opt.cpus_per_task;
+	if (opt.overcommit) {
+		desc->num_procs = MAX(opt.min_nodes, 1);
+		desc->overcommit = opt.overcommit;
+	} else
+		desc->num_procs = opt.nprocs * opt.cpus_per_task;
 	if (opt.nprocs_set)
 		desc->num_tasks = opt.nprocs;
 	if (opt.cpus_set)
 		desc->cpus_per_task = opt.cpus_per_task;
+	if (opt.ntasks_per_socket > -1)
+		desc->ntasks_per_socket = opt.ntasks_per_socket;
+	if (opt.ntasks_per_core > -1)
+		desc->ntasks_per_core = opt.ntasks_per_core;
+
+	/* node constraints */
+	if (opt.min_sockets_per_node > -1)
+		desc->min_sockets = opt.min_sockets_per_node;
+	if (opt.max_sockets_per_node > -1)
+		desc->max_sockets = opt.max_sockets_per_node;
+	if (opt.min_cores_per_socket > -1)
+		desc->min_cores = opt.min_cores_per_socket;
+	if (opt.max_cores_per_socket > -1)
+		desc->max_cores = opt.max_cores_per_socket;
+	if (opt.min_threads_per_core > -1)
+		desc->min_threads = opt.min_threads_per_core;
+	if (opt.max_threads_per_core > -1)
+		desc->max_threads = opt.max_threads_per_core;
+
 	if (opt.no_kill)
 		desc->kill_on_node_fail = 0;
-	if (opt.time_limit > -1)
+	if (opt.time_limit != NO_VAL)
 		desc->time_limit = opt.time_limit;
 	desc->shared = opt.shared;
 
-	desc->environment = environ;
-	desc->env_size = envcount (environ);
+	desc->environment = NULL;
+	if (opt.get_user_env_time >= 0) {
+		desc->environment = env_array_create();
+		env_array_overwrite(&desc->environment,
+				    "SLURM_GET_USER_ENV", "1");
+	}
+	env_array_merge(&desc->environment, (const char **)environ);
+	desc->env_size = envcount (desc->environment);
 	desc->argv = opt.script_argv;
 	desc->argc = opt.script_argc;
 	desc->err  = opt.efname;
 	desc->in   = opt.ifname;
 	desc->out  = opt.ofname;
 	desc->work_dir = opt.cwd;
-	desc->no_requeue = opt.no_requeue;
+	if (opt.requeue != NO_VAL)
+		desc->requeue = opt.requeue;
+	if (opt.open_mode)
+		desc->open_mode = opt.open_mode;
+	if (opt.acctg_freq >= 0)
+		desc->acctg_freq = opt.acctg_freq;
 
 	return 0;
 }
@@ -177,7 +278,12 @@ static int fill_job_desc_from_opts(job_desc_msg_t *desc)
 static int set_umask_env(void)
 {
 	char mask_char[5];
-	mode_t mask = (int)umask(0);
+	mode_t mask;
+
+	if (getenv("SLURM_UMASK"))	/* use this value */
+		return SLURM_SUCCESS;
+
+	mask = (int)umask(0);
 	umask(mask);
 
 	sprintf(mask_char, "0%d%d%d", 
@@ -188,6 +294,34 @@ static int set_umask_env(void)
 	}
 	debug ("propagating UMASK=%s", mask_char); 
 	return SLURM_SUCCESS;
+}
+
+/*
+ * set_prio_process_env
+ *
+ * Set the internal SLURM_PRIO_PROCESS environment variable to support
+ * the propagation of the users nice value and the "PropagatePrioProcess"
+ * config keyword.
+ */
+static void  set_prio_process_env(void)
+{
+	int retval;
+
+	errno = 0; /* needed to detect a real failure since prio can be -1 */
+
+	if ((retval = getpriority (PRIO_PROCESS, 0)) == -1)  {
+		if (errno) {
+			error ("getpriority(PRIO_PROCESS): %m");
+			return;
+		}
+	}
+
+	if (setenvf (NULL, "SLURM_PRIO_PROCESS", "%d", retval) < 0) {
+		error ("unable to set SLURM_PRIO_PROCESS in environment");
+		return;
+	}
+
+	debug ("propagating SLURM_PRIO_PROCESS=%d", retval);
 }
 
 /*
@@ -217,6 +351,24 @@ static bool contains_null_char(const void *buf, int size)
 	for (i = 0; i < size; i++) {
 		if (str[i] == '\0')
 			return true;
+	}
+
+	return false;
+}
+
+/*
+ * Checks if the buffer contains any DOS linebreak (\r\n).
+ */
+static bool contains_dos_linebreak(const void *buf, int size)
+{
+	char *str = (char *)buf;
+	char prev_char = '\0';
+	int i;
+
+	for (i = 0; i < size; i++) {
+		if (prev_char == '\r' && str[i] == '\n')
+			return true;
+		prev_char = str[i];
 	}
 
 	return false;
@@ -264,7 +416,8 @@ static void *get_script_buffer(const char *filename, int *size)
 		ptr = buf + script_size;
 		buf_left = buf_size - script_size;
 	}
-	close(fd);
+	if (filename)
+		close(fd);
 
 	/*
 	 * Finally we perform some sanity tests on the script.
@@ -285,6 +438,10 @@ static void *get_script_buffer(const char *filename, int *size)
 		error("The SLURM controller does not allow scripts that");
 		error("contain a NULL character '\\0'.");
 		goto fail;
+	} else if (contains_dos_linebreak(buf, script_size)) {
+		error("Batch script contains DOS line breaks (\\r\\n)");
+		error("instead of expected UNIX line breaks (\\n).");
+		goto fail;
 	}
 
 	*size = script_size;
@@ -293,4 +450,80 @@ fail:
 	xfree(buf);
 	*size = 0;
 	return NULL;
+}
+
+/* Wrap a single command string in a simple shell script */
+static char *script_wrap(char *command_string)
+{
+	char *script = NULL;
+
+	xstrcat(script, "#!/bin/sh\n");
+	xstrcat(script, "# This script was created by sbatch --wrap.\n\n");
+	xstrcat(script, command_string);
+	xstrcat(script, "\n");
+
+	return script;
+}
+
+/* Set SLURM_RLIMIT_* environment variables with current resource 
+ * limit values, reset RLIMIT_NOFILE to maximum possible value */
+static int _set_rlimit_env(void)
+{
+	int                  rc = SLURM_SUCCESS;
+	struct rlimit        rlim[1];
+	unsigned long        cur;
+	char                 name[64], *format;
+	slurm_rlimits_info_t *rli;
+
+	/* Load default limits to be propagated from slurm.conf */
+	slurm_conf_lock();
+	slurm_conf_unlock();
+
+	/* Modify limits with any command-line options */
+	if (opt.propagate && parse_rlimits( opt.propagate, PROPAGATE_RLIMITS))
+		fatal( "--propagate=%s is not valid.", opt.propagate );
+
+	for (rli = get_slurm_rlimits_info(); rli->name != NULL; rli++ ) {
+
+		if (rli->propagate_flag != PROPAGATE_RLIMITS)
+			continue;
+
+		if (getrlimit (rli->resource, rlim) < 0) {
+			error ("getrlimit (RLIMIT_%s): %m", rli->name);
+			rc = SLURM_FAILURE;
+			continue;
+		}
+		
+		cur = (unsigned long) rlim->rlim_cur;
+		snprintf(name, sizeof(name), "SLURM_RLIMIT_%s", rli->name);
+		if (opt.propagate && rli->propagate_flag == PROPAGATE_RLIMITS)
+			/*
+			 * Prepend 'U' to indicate user requested propagate
+			 */
+			format = "U%lu";
+		else
+			format = "%lu";
+		
+		if (setenvf (NULL, name, format, cur) < 0) {
+			error ("unable to set %s in environment", name);
+			rc = SLURM_FAILURE;
+			continue;
+		}
+		
+		debug ("propagating RLIMIT_%s=%lu", rli->name, cur);
+	}
+
+	/* 
+	 *  Now increase NOFILE to the max available for this srun
+	 */
+	if (getrlimit (RLIMIT_NOFILE, rlim) < 0)
+	 	return (error ("getrlimit (RLIMIT_NOFILE): %m"));
+
+	if (rlim->rlim_cur < rlim->rlim_max) {
+		rlim->rlim_cur = rlim->rlim_max;
+		if (setrlimit (RLIMIT_NOFILE, rlim) < 0) 
+			return (error("Unable to increase max no. files: %m"));
+	}
+
+	return rc;
 }

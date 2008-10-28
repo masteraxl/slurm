@@ -1,10 +1,11 @@
 /*****************************************************************************\
  *  src/common/switch.c - Generic switch (interconnect) for slurm
  *****************************************************************************
- *  Copyright (C) 2002-2006 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>.
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -57,12 +58,11 @@
 typedef struct slurm_switch_ops {
 	int          (*state_save)        ( char *dir_name );
 	int          (*state_restore)     ( char *dir_name, bool recover );
-	
-	bool         (*no_frag)           ( void );
+
 	int          (*alloc_jobinfo)     ( switch_jobinfo_t *jobinfo );
 	int          (*build_jobinfo)     ( switch_jobinfo_t jobinfo,
 						char *nodelist,
-						uint32_t *tasks_per_node, 
+						uint16_t *tasks_per_node, 
 						int cyclic_alloc, 
 						char *network);
 	switch_jobinfo_t (*copy_jobinfo)  ( switch_jobinfo_t jobinfo );
@@ -168,6 +168,8 @@ _slurm_switch_context_destroy( slurm_switch_context_t c )
 		if ( plugrack_destroy( c->plugin_list ) != SLURM_SUCCESS ) {
 			return SLURM_ERROR;
 		}
+	} else {
+		plugin_unload(c->cur_plugin);
 	}
 
 	xfree( c->switch_type );
@@ -189,7 +191,6 @@ _slurm_switch_get_ops( slurm_switch_context_t c )
 	static const char *syms[] = {
 		"switch_p_libstate_save",
 		"switch_p_libstate_restore",
-		"switch_p_no_frag",
 		"switch_p_alloc_jobinfo",
 		"switch_p_build_jobinfo",
 		"switch_p_copy_jobinfo",
@@ -226,6 +227,16 @@ _slurm_switch_get_ops( slurm_switch_context_t c )
 	};
 	int n_syms = sizeof( syms ) / sizeof( char * );
 
+	/* Find the correct plugin. */
+        c->cur_plugin = plugin_load_and_link(c->switch_type, n_syms, syms,
+					     (void **) &c->ops);
+        if ( c->cur_plugin != PLUGIN_INVALID_HANDLE ) 
+        	return &c->ops;
+
+	error("Couldn't find the specified plugin name for %s "
+	      "looking at all files",
+	      c->switch_type);
+	
 	/* Get the plugin list, if needed. */
 	if ( c->plugin_list == NULL ) {
 		char *plugin_dir;
@@ -330,14 +341,6 @@ extern int  switch_clear(void)
 	return (*(g_context->ops.state_clear))( );
 }
 
-extern bool switch_no_frag(void)
-{
-	if ( switch_init() < 0 )
-		return SLURM_ERROR;
-
-	return (*(g_context->ops.no_frag))( );
-}
-
 extern int  switch_alloc_jobinfo(switch_jobinfo_t *jobinfo)
 {
 	if ( switch_init() < 0 )
@@ -347,7 +350,7 @@ extern int  switch_alloc_jobinfo(switch_jobinfo_t *jobinfo)
 }
 
 extern int  switch_build_jobinfo(switch_jobinfo_t jobinfo, 
-		char *nodelist, uint32_t *tasks_per_node, 
+		char *nodelist, uint16_t *tasks_per_node, 
 		int cyclic_alloc, char *network)
 {
 	if ( switch_init() < 0 )

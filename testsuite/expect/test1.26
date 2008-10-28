@@ -9,10 +9,11 @@
 #          "FAILURE: ..." otherwise with an explanation of the failure, OR
 #          anything else indicates a failure mode that must be investigated.
 ############################################################################
-# Copyright (C) 2002-2006 The Regents of the University of California.
+# Copyright (C) 2002-2007 The Regents of the University of California.
+# Copyright (C) 2008 Lawrence Livermore National Security.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-217948.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -44,6 +45,11 @@ if {[is_super_user] == 0} {
 	exit 0
 }
 
+if {[test_bluegene] == 1} {
+	send_user "\nWARNING: This test is incompatable with BlueGene systems\n"
+	exit 0
+}
+
 #
 # Submit a 1 node job and record the node name
 #
@@ -54,23 +60,23 @@ if {[is_super_user] == 0} {
 set host_0      ""
 set nodelist_name ""
 set timeout $max_job_delay
-spawn $srun -v -N1 -l $bin_printenv SLURMD_NODENAME  
+set srun_pid [spawn $srun -v -N1 -l $bin_printenv SLURMD_NODENAME]
 expect {
-	-re "on host ($alpha_numeric)," {
+	-re "on host ($alpha_numeric_under)," {
 		set nodelist_name $expect_out(1,string)
 		exp_continue
 	}
-	-re "^0: ($alpha_numeric)" {
+	-re "^0: ($alpha_numeric_under)" {
 		set host_0 $expect_out(1,string)
 		exp_continue
 	}
-	-re "\n0: ($alpha_numeric)" {
+	-re "\n0: ($alpha_numeric_under)" {
 		set host_0 $expect_out(1,string)
 		exp_continue
 	}
 	timeout {
 		send_user "\nFAILURE: srun not responding\n"
-		kill_srun
+		slow_kill $srun_pid
 		set exit_code 1
 	}
 	eof {
@@ -89,7 +95,7 @@ if {[string compare $nodelist_name ""] == 0} {
     send_user "\nFAILURE: Did not get nodelist_name of task 0\n"
     exit 1	
 }
-set include_node $nodelist_name
+set include_node $host_0
 
 #
 # Submit a job directly to that node
@@ -97,7 +103,7 @@ set include_node $nodelist_name
 set host_1      ""
 set slurm_user  1
 set timeout     10
-spawn $srun -N1 -l --nodelist=$include_node --no-allocate -t1 $bin_printenv SLURMD_NODENAME  
+set srun_pid [spawn $srun -N1 -l --nodelist=$include_node --no-allocate -t1 $bin_printenv SLURMD_NODENAME]
 expect {
 	-re "Invalid job credential" {
 		send_user "\nWARNING: Not SlurmUser or root.\n"
@@ -117,13 +123,14 @@ expect {
 	-re "error: .*exit code 1" {
 		exp_continue
 	}
-	-re "0: ($alpha_numeric)" {
+	-re "0: ($alpha_numeric_under)" {
 		set host_1 $expect_out(1,string)
 		exp_continue
 	}
 	timeout {
 		send_user "\nWARNING: srun not responding, "
 		send_user "expected if not SlurmUser or root.\n"
+		slow_kill $srun_pid
 		set slurm_user 0
 	}
 	eof {
@@ -133,22 +140,10 @@ expect {
 if {$slurm_user == 0} {
 	exit 0;
 }
-if {[string compare $host_0 $host_1]} {
-	send_user "\nFAILURE: host name value wrong $host_0 $host_1\n"
+if {[string compare $host_1 $include_node]} {
+	send_user "\nFAILURE: Allocation lacked an included node\n"
 	set exit_code 1
 }
-
-#
-# Verify node count and name
-#
-if {[string compare $host_0 ""] == 0} {
-	send_user "\nFAILURE: Did not get hostname of task 0\n"
-	set exit_code   1	
-}
-#if {[string compare $host_0 $include_node] != 0} {
-#	send_user "\nFAILURE: Allocation lacked an included node\n"
-#	set exit_code   1	
-#}
 
 #
 # Run three tasks at a time on some node and do so repeatedly
@@ -164,35 +159,20 @@ for {set inx 0} {$inx < $interations} {incr inx} {
 	exec $bin_usleep 250000
 
 	set failures 0
-	spawn $srun -N1 --nodelist=$include_node -t1 -l $bin_printenv SLURMD_NODENAME
+	set srun_pid [spawn $srun -N1 --nodelist=$include_node -t1 -l $bin_printenv SLURMD_NODENAME]
 	set   alloc $spawn_id
 
-	spawn $srun -N1 --nodelist=$include_node -Z $bin_usleep 500000
+	set srun_pid1 [spawn $srun -N1 --nodelist=$include_node -Z $bin_usleep 500000]
 	set   noalloc1 $spawn_id
 
-	spawn $srun -N1 --nodelist=$include_node -Z $bin_usleep 250000
+	set srun_pid2 [spawn $srun -N1 --nodelist=$include_node -Z $bin_usleep 250000]
 	set   noalloc2 $spawn_id
 
 	set timeout 20
 	set spawn_id $noalloc2
 	expect {
 		-i $noalloc2
-		-re "error: .*try again" {
-			send_user "Can't avoid this possible error\n"
-			exp_continue
-		}
-		-re "error: .*already in shared memory" {
-			send_user "Can't avoid this possible error\n"
-			exp_continue
-		}
-		-re "error: .*exit code 1" {
-			exp_continue
-		}
-		-re "error: elan" {
-			send_user "Can't avoid this possible error\n"
-			exp_continue
-		}
-		-re "error: qsw_prog_init" {
+		-re "error:.*configuring interconnect" {
 			send_user "Can't avoid this possible error\n"
 			exp_continue
 		}
@@ -203,6 +183,7 @@ for {set inx 0} {$inx < $interations} {incr inx} {
 		}
 		timeout {
 			send_user "\nFAILURE: srun not responding\n"
+			slow_kill $srun_pid2
 			set failures 1
 		}
 		eof {
@@ -213,22 +194,7 @@ for {set inx 0} {$inx < $interations} {incr inx} {
 	set spawn_id $noalloc1
 	expect {
 		-i $noalloc1
-		-re "error: .*try again" {
-			send_user "Can't avoid this possible error\n"
-			exp_continue
-		}
-		-re "error: .*already in shared memory" {
-			send_user "Can't avoid this possible error\n"
-			exp_continue
-		}
-		-re "error: .*exit code 1" {
-			exp_continue
-		}
-		-re "error: elan" {
-			send_user "Can't avoid this possible error\n"
-			exp_continue
-		}
-		-re "error: qsw_prog_init" {
+		-re "error:.*configuring interconnect" {
 			send_user "Can't avoid this possible error\n"
 			exp_continue
 		}
@@ -239,6 +205,7 @@ for {set inx 0} {$inx < $interations} {incr inx} {
 		}
 		timeout {
 			send_user "\nFAILURE: srun not responding\n"
+			slow_kill $srun_pid1
 			set failures 1
 		}
 		eof {
@@ -259,11 +226,7 @@ for {set inx 0} {$inx < $interations} {incr inx} {
 			}
 			exp_continue
 		}
-		-re "error: elan" {
-			send_user "Can't avoid this possible error\n"
-			exp_continue
-		}
-		-re "error: qsw_prog_init" {
+		-re "error:.*configuring interconnect" {
 			send_user "Can't avoid this possible error\n"
 			exp_continue
 		}
@@ -272,12 +235,13 @@ for {set inx 0} {$inx < $interations} {incr inx} {
 			set failures 1
 			exp_continue
 		}
-		-re "0: ($alpha_numeric)" {
+		-re "0: ($alpha_numeric_under)" {
 			set host_0 $expect_out(1,string)
 			exp_continue
 		}
 		timeout {
 			send_user "\nFAILURE: srun not responding\n"
+			slow_kill $srun_pid
 			set failures 1
 		}
 		eof {
@@ -288,7 +252,6 @@ for {set inx 0} {$inx < $interations} {incr inx} {
 	if {$failures == 0} {
 		incr successes
 	} else {
-		kill_srun
 		set exit_code 1
 	}
 }

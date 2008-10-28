@@ -7,7 +7,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Jim Garlick <garlick@llnl.gov>, Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -18,7 +18,7 @@
  *  any later version.
  *
  *  In addition, as a special exception, the copyright holders give permission 
- *  to link the code of portions of this program with the OpenSSL library under 
+ *  to link the code of portions of this program with the OpenSSL library under
  *  certain conditions as described in each individual source file, and 
  *  distribute linked combinations including the two. You must obey the GNU 
  *  General Public License in all respects for all of the code used other than 
@@ -42,6 +42,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <ctype.h>
 
 #include "src/common/bitstring.h"
 #include "src/common/macros.h"
@@ -68,7 +69,6 @@ strong_alias(bit_or,		slurm_bit_or);
 strong_alias(bit_set_count,	slurm_bit_set_count);
 strong_alias(bit_clear_count,	slurm_bit_clear_count);
 strong_alias(bit_nset_max_count,slurm_bit_nset_max_count);
-strong_alias(bit_and_set_count,	slurm_bit_and_set_count);
 strong_alias(int_and_set_count,	slurm_int_and_set_count);
 strong_alias(bit_rotate_copy,	slurm_bit_rotate_copy);
 strong_alias(bit_rotate,	slurm_bit_rotate);
@@ -82,6 +82,7 @@ strong_alias(bit_unfmt_binmask,	slurm_bit_unfmt_binmask);
 strong_alias(bit_fls,		slurm_bit_fls);
 strong_alias(bit_fill_gaps,	slurm_bit_fill_gaps);
 strong_alias(bit_super_set,	slurm_bit_super_set);
+strong_alias(bit_overlap,	slurm_bit_overlap);
 strong_alias(bit_equal,		slurm_bit_equal);
 strong_alias(bit_copy,		slurm_bit_copy);
 strong_alias(bit_pick_cnt,	slurm_bit_pick_cnt);
@@ -337,7 +338,7 @@ bit_noc(bitstr_t *b, int n, int seed)
 		}
 	}
 
-	cnt = 0;					/* start at beginning */
+	cnt = 0;	/* start at beginning */
 	for (bit = 0; bit < _bitstr_bits(b); bit++) {
 		if (bit_test(b, bit)) {		/* fail */
 			if (bit >= seed)
@@ -664,6 +665,25 @@ bit_set_count(bitstr_t *b)
 }
 
 /*
+ * return number of bits set in b1 that are also set in b2, 0 if no overlap
+ */
+extern int
+bit_overlap(bitstr_t *b1, bitstr_t *b2)
+{
+	int count = 0;
+	bitoff_t bit;
+	
+	_assert_bitstr_valid(b1);
+	_assert_bitstr_valid(b2);
+	assert(_bitstr_bits(b1) == _bitstr_bits(b2));
+
+	for (bit = 0; bit < _bitstr_bits(b1); bit += sizeof(bitstr_t)*8) 
+		count += hweight(b1[_bit_word(bit)] & b2[_bit_word(bit)]);
+
+	return count;
+}
+
+/*
  * Count the number of bits clear in bitstring.
  *   b (IN)		bitstring to check
  *   RETURN		count of clear bits 
@@ -705,29 +725,6 @@ bit_nset_max_count(bitstr_t *b)
 	}
 
 	return maxcnt;
-}
-
-/*
- * And two bitstrings and count the number of set bits: SUM(b1 & b2)
- *   b1 (IN)		first bitstring
- *   b2 (IN)		second bitstring
- */
-int
-bit_and_set_count(bitstr_t *b1, bitstr_t *b2) {
-	bitoff_t bit;
-	bitstr_t word;
-	int sum;
-
-	_assert_bitstr_valid(b1);
-	_assert_bitstr_valid(b2);
-	assert(_bitstr_bits(b1) == _bitstr_bits(b2));
-
-	sum = 0;
-	for (bit = 0; bit < _bitstr_bits(b1); bit += sizeof(bitstr_t)*8) {
-		word = b1[_bit_word(bit)] & b2[_bit_word(bit)];
-		sum += hweight(word);
-	}
-	return(sum);
 }
 
 /*
@@ -933,6 +930,8 @@ bit_unfmt(bitstr_t *b, char *str)
 	int *intvec, *p, rc = 0; 
 
 	_assert_bitstr_valid(b);
+	if (str[0] == '\0')	/* no bits set */
+		return rc;
 	intvec = bitfmt2int(str);
 	if (intvec == NULL) 
 		return -1;
@@ -967,10 +966,8 @@ bitfmt2int (char *bit_str_ptr)
 	if (bit_str_ptr == NULL) 
 		return NULL;
 	size = strlen (bit_str_ptr) + 1;
-	bit_int_ptr = xmalloc ( sizeof (int *) * 
+	bit_int_ptr = xmalloc ( sizeof (int) * 
 			(size * 2 + 1));	/* more than enough space */
-	if (bit_int_ptr == NULL)
-		return NULL;
 
 	bit_inx = sum = 0;
 	start_val = -1;
@@ -986,7 +983,7 @@ bitfmt2int (char *bit_str_ptr)
 		}
 
 		else if (bit_str_ptr[i] == ',' || 
-		         bit_str_ptr[i] == (char) NULL) {
+		         bit_str_ptr[i] == '\0') {
 			if (i == 0)
 				break;
 			if (start_val == -1)
@@ -1023,10 +1020,6 @@ char * bit_fmt_hexmask(bitstr_t * bitmap)
 	bitoff_t charsize = (bitsize + 3) / 4;
 
 	retstr = xmalloc(charsize + 3);
-	if (!retstr) {
-		error("bit_fmt_hexmask: failed to alloc %d bytes", charsize+3);
-		return NULL;
-	}
 
 	retstr[0] = '0';  
 	retstr[1] = 'x';  
@@ -1038,8 +1031,11 @@ char * bit_fmt_hexmask(bitstr_t * bitmap)
 		if ((i < bitsize) && bit_test(bitmap,i++)) current |= 0x2;
 		if ((i < bitsize) && bit_test(bitmap,i++)) current |= 0x4;
 		if ((i < bitsize) && bit_test(bitmap,i++)) current |= 0x8;
-		current += '0';
-		if (current > '9') current += ('A' - '9');
+		if (current <= 9) {
+			current += '0';
+		} else {
+			current += 'A' - 10;
+		}
 		*ptr-- = current;
 	}
 
@@ -1058,6 +1054,7 @@ char * bit_fmt_hexmask(bitstr_t * bitmap)
 int bit_unfmt_hexmask(bitstr_t * bitmap, const char* str) 
 {
 	int bit_index = 0, len = strlen(str);
+	int rc = 0;
 	const char *curpos = str + len - 1;
 	char current;
 	bitoff_t bitsize = bit_size(bitmap);
@@ -1069,8 +1066,18 @@ int bit_unfmt_hexmask(bitstr_t * bitmap, const char* str)
 
 	while(curpos >= str) {
 		current = (int) *curpos; 
-		if (current <= '9') current -= '0';
-		if (current > '9') current -= ('A' - '9');
+		if (isxdigit(current)) {	/* valid hex digit */
+			if (isdigit(current)) {
+				current -= '0';
+			} else {
+				current = toupper(current);
+				current -= 'A' - 10;
+			}
+		} else {			/* not a valid hex digit */
+		    	current = 0;
+			rc = -1;
+		}
+
 		if ((current & 1) && (bit_index   < bitsize))
 			bit_set(bitmap, bit_index);
 		if ((current & 2) && (bit_index+1 < bitsize))
@@ -1083,7 +1090,7 @@ int bit_unfmt_hexmask(bitstr_t * bitmap, const char* str)
 		curpos--;
 		bit_index+=4;
 	}
-	return 0;
+	return rc;
 }
 
 /* bit_fmt_binmask
@@ -1107,10 +1114,6 @@ char * bit_fmt_binmask(bitstr_t * bitmap)
 	bitoff_t charsize = bitsize;
 
 	retstr = xmalloc(charsize + 1);
-	if (!retstr)  {
-		error("bit_fmt_binmask: failed to alloc %d bytes", charsize+1);
-		return NULL;
-	}
 
 	retstr[charsize] = '\0';
 	ptr = &retstr[charsize - 1];
@@ -1212,3 +1215,4 @@ bit_get_pos_num(bitstr_t *b, bitoff_t pos)
 
 	return cnt;
 }
+

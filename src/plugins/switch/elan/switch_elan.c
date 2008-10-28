@@ -1,11 +1,11 @@
 /*****************************************************************************\
  *  switch_elan.c - Library routines for initiating jobs on QsNet. 
- *  $Id$
  *****************************************************************************
- *  Copyright (C) 2003-2006 The Regents of the University of California.
+ *  Copyright (C) 2003-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Kevin Tew <tew1@llnl.gov>, et. al.
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -233,7 +233,7 @@ int switch_p_libstate_restore (char *dir_name, bool recover)
 	int error_code = SLURM_SUCCESS;
 	int state_fd, data_allocated = 0, data_read = 0, data_size = 0;
 	char *ver_str = NULL;
-	uint16_t ver_str_len;
+	uint32_t ver_str_len;
 
 	if (!recover)	/* clean start, no recovery */
 		return qsw_init(NULL);
@@ -271,11 +271,11 @@ int switch_p_libstate_restore (char *dir_name, bool recover)
 	if (error_code == SLURM_SUCCESS) {
 		buffer = create_buf (data, data_size);
 		data = NULL;    /* now in buffer, don't xfree() */
-		if (buffer && (size_buf(buffer) >= sizeof(uint16_t) + 
+		if (buffer && (size_buf(buffer) >= sizeof(uint32_t) + 
 				strlen(QSW_STATE_VERSION))) {
 			char *ptr = get_buf_data(buffer);
 
-			if (!memcmp(&ptr[sizeof(uint16_t)], 
+			if (!memcmp(&ptr[sizeof(uint32_t)], 
 					QSW_STATE_VERSION, 3)) {
 				unpackstr_xmalloc(&ver_str, &ver_str_len, 
 						buffer);
@@ -309,12 +309,6 @@ int switch_p_libstate_clear ( void )
 	return qsw_clear();
 }
 
-
-bool switch_p_no_frag ( void )
-{
-	return true;
-}
-
 /*
  * switch functions for job step specific credential
  */
@@ -324,7 +318,7 @@ int switch_p_alloc_jobinfo(switch_jobinfo_t *jp)
 }
 
 int switch_p_build_jobinfo ( switch_jobinfo_t switch_job, char *nodelist,
-		uint32_t *tasks_per_node, int cyclic_alloc, char *network)
+		uint16_t *tasks_per_node, int cyclic_alloc, char *network)
 {
 	int node_set_size = QSW_MAX_TASKS; /* overkill but safe */
 	hostlist_t host_list;
@@ -693,10 +687,8 @@ int switch_p_job_attach ( switch_jobinfo_t jobinfo, char ***env,
 	/* 
 	 * Tell libelan the key to use for Elan state shmem segment
 	 */
-	if ((id = qsw_statkey ((qsw_jobinfo_t) jobinfo)) > 0)
-		slurm_setenvpf (env, "ELAN_STATKEY", "0x%x", id);
-	
-
+	if (qsw_statkey ((qsw_jobinfo_t) jobinfo, &id) >= 0)
+		slurm_setenvpf (env, "ELAN_STATKEY", "%d", id);
 
 	return SLURM_SUCCESS;
 }

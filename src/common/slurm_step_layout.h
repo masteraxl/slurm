@@ -6,7 +6,7 @@
  *  Copyright (C) 2005 Hewlett-Packard Development Company, L.P.
  *  Written by Chris Holmes, <cholmes@hp.com>, who borrowed heavily
  *  from other parts of SLURM.
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -61,12 +61,12 @@
  * NOTE: allocates memory that should be xfreed by caller
  */
 extern slurm_step_layout_t *slurm_step_layout_create(const char *tlist,
-						     uint32_t *cpus_per_node, 
+						     uint16_t *cpus_per_node, 
 						     uint32_t *cpu_count_reps,
-						     uint16_t node_cnt, 
+						     uint32_t node_cnt, 
 						     uint32_t task_cnt,
 						     uint16_t task_dist,
-						     uint32_t plane_size);
+						     uint16_t plane_size);
 
 /* 
  * fake_slurm_step_layout_create - used when you don't allocate a job from the
@@ -84,9 +84,9 @@ extern slurm_step_layout_t *slurm_step_layout_create(const char *tlist,
  */
 extern slurm_step_layout_t *fake_slurm_step_layout_create(
 	const char *tlist,
-	uint32_t *cpus_per_node, 
+	uint16_t *cpus_per_node, 
 	uint32_t *cpu_count_reps,
-	uint16_t node_cnt, 
+	uint32_t node_cnt, 
 	uint32_t task_cnt);
 
 /* copys structure for step layout */

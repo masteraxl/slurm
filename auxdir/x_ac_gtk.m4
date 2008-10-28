@@ -16,40 +16,66 @@ AC_DEFUN([X_AC_GTK],
 [
 ### Set to "no" if any test fails
     ac_have_gtk="yes"
+    _x_ac_pkcfg_bin="no"
 
 ### Check for pkg-config program
-    AC_PATH_PROG(HAVEPKGCONFIG, pkg-config, $PATH)
-    if test -z "$HAVEPKGCONFIG"; then
-        AC_MSG_WARN([*** pkg-config not found. Cannot probe for libglade-2.0 or gtk+-2.0.])
-        ac_have_gtk="no"
+    AC_ARG_WITH(
+	    [pkg-config],
+	    AS_HELP_STRING(--with-pkg-config=PATH, 
+		    Specify path to pkg-config binary),
+	    [_x_ac_pkcfg_bin="$withval"])
+    
+    if test x$_x_ac_pkcfg_bin = xno; then
+    	    AC_PATH_PROG(HAVEPKGCONFIG, pkg-config, no)
+    else
+   	    AC_PATH_PROG(HAVEPKGCONFIG, pkg-config, no, $_x_ac_pkcfg_bin)
     fi
-
-### Check for libglade package
-    if test "$ac_have_gtk" == "yes"; then   
-        $HAVEPKGCONFIG --exists libglade-2.0
-        if ! test $? -eq 0 ; then
-            AC_MSG_WARN([*** libbglade-2.0 is not available.])
+    
+    if test x$HAVEPKGCONFIG = xno; then
+            AC_MSG_WARN([*** pkg-config not found. Cannot probe for libglade-2.0 or gtk+-2.0.])
             ac_have_gtk="no"
-        fi
     fi
 
+### Check for libglade package (We don't need this right now so don't add it)
+#    if test "$ac_have_gtk" == "yes"; then   
+#        $HAVEPKGCONFIG --exists libglade-2.0
+#        if ! test $? -eq 0 ; then
+#            AC_MSG_WARN([*** libbglade-2.0 is not available.])
+#            ac_have_gtk="no"
+#        fi
+#    fi
 
-### Check for gtk2 package
+
+### Check for gtk2.7.1 package
     if test "$ac_have_gtk" == "yes" ; then
         $HAVEPKGCONFIG --exists gtk+-2.0
         if ! test $? -eq 0 ; then
             AC_MSG_WARN([*** gtk+-2.0 is not available.])
             ac_have_gtk="no"
+	else
+	   gtk_config_major_version=`$HAVEPKGCONFIG --modversion gtk+-2.0 | \
+             sed 's/\([[0-9]]*\).\([[0-9]]*\).\([[0-9]]*\)/\1/'`
+    	   gtk_config_minor_version=`$HAVEPKGCONFIG --modversion gtk+-2.0 | \
+             sed 's/\([[0-9]]*\).\([[0-9]]*\).\([[0-9]]*\)/\2/'`
+    	   gtk_config_micro_version=`$HAVEPKGCONFIG --modversion gtk+-2.0 | \
+             sed 's/\([[0-9]]*\).\([[0-9]]*\).\([[0-9]]*\)/\3/'`
+
+	   if test $gtk_config_major_version -lt 2 || test $gtk_config_minor_version -lt 7 || test $gtk_config_micro_version -lt 1; then
+	   	AC_MSG_WARN([*** gtk+-$gtk_config_major_version.$gtk_config_minor_version.$gtk_config_micro_version available, we need >= gtk+-2.7.1 installed for sview.])
+            	ac_have_gtk="no"
+	   fi
         fi
     fi
 
 ### Run a test program
     if test "$ac_have_gtk" == "yes" ; then
-        GTK2_CFLAGS=`$HAVEPKGCONFIG --cflags libglade-2.0 gtk+-2.0 gthread-2.0`
-        GTK2_LIBS=`$HAVEPKGCONFIG --libs libglade-2.0 gtk+-2.0 gthread-2.0`
-        if test ! -z "GLADE_STATIC"  ; then
-            GTK2_LIBS=`echo $GTK2_LIBS | sed "s/-lglade-2.0/$GLADE_STATIC -lglade-2.0 $BDYNAMIC/g"`
-        fi
+ #       GTK2_CFLAGS=`$HAVEPKGCONFIG --cflags libglade-2.0 gtk+-2.0 gthread-2.0`
+        GTK2_CFLAGS=`$HAVEPKGCONFIG --cflags gtk+-2.0 gthread-2.0`
+#        GTK2_LIBS=`$HAVEPKGCONFIG --libs libglade-2.0 gtk+-2.0 gthread-2.0`
+       GTK2_LIBS=`$HAVEPKGCONFIG --libs gtk+-2.0 gthread-2.0`
+#        if test ! -z "GLADE_STATIC"  ; then
+#            GTK2_LIBS=`echo $GTK2_LIBS | sed "s/-lglade-2.0/$GLADE_STATIC -lglade-2.0 $BDYNAMIC/g"`
+#        fi
         save_CFLAGS="$CFLAGS"
         save_LIBS="$LIBS"
         CFLAGS="$GTK2_CFLAGS $save_CFLAGS"
@@ -61,6 +87,7 @@ AC_DEFUN([X_AC_GTK],
           {
             (void) gtk_action_group_new ("MenuActions");
             (void) gtk_ui_manager_new ();
+	    (void) gtk_cell_renderer_combo_new();	
           }
         ], , [ac_have_gtk="no"])
 	CFLAGS="$save_CFLAGS"

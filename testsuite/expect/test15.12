@@ -11,7 +11,7 @@
 # Copyright (C) 2002-2006 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-217948.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -38,6 +38,12 @@ set file_in     "test$test_id.input"
 
 print_header $test_id
 
+if {[test_wiki_sched] == 1} {
+	send_user "\nWARNING: not compatable with sched/wiki (Maui)\n"
+	send_user "         or sched/wiki2 (Moab) schedulers\n"
+	exit $exit_code
+}
+
 #
 # Submit a job with invalid constraint requirement
 #
@@ -45,7 +51,7 @@ set err_msg     0
 set timeout $max_job_delay
 spawn $salloc -N1 -t1 --constraint=invalid,constraint salloc -t1 $bin_bash 
 expect {
-	-re "configuration is not available" {
+	-re "error:.*Invalid feature specification" {
 		send_user "This error is expected, no worries\n"
 		set err_msg 1
 		exp_continue

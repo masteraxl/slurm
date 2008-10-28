@@ -1,11 +1,11 @@
 /*****************************************************************************\
  *  ping_nodes.c - ping the slurmd daemons to test if they respond
- *	Note: there is a global node table (node_record_table_ptr)
  *****************************************************************************
- *  Copyright (C) 2003-2006 The Regents of the University of California.
+ *  Copyright (C) 2003-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov> et. al.
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -65,7 +65,6 @@
 static pthread_mutex_t lock_mutex = PTHREAD_MUTEX_INITIALIZER;
 static int ping_count = 0;
 
-/* struct timeval start_time, end_time; */
 
 /*
  * is_ping_done - test if the last node ping cycle has completed.
@@ -112,15 +111,6 @@ void ping_end (void)
 	else
 		fatal ("ping_count < 0");
 	slurm_mutex_unlock(&lock_mutex);
-	
-	/* gettimeofday(&end_time, NULL); */
-/* 	start = start_time.tv_sec; */
-/* 	start *= 1000000; */
-/* 	start += start_time.tv_usec; */
-/* 	end = end_time.tv_sec; */
-/* 	end *= 1000000; */
-/* 	end += end_time.tv_usec; */
-/* 	info("done with ping took %ld",(end-start)); */
 }
 
 /*
@@ -130,29 +120,27 @@ void ping_end (void)
 void ping_nodes (void)
 {
 	static int offset = 0;	/* mutex via node table write lock on entry */
-	int i, pos;
+	int i;
 	time_t now, still_live_time, node_dead_time;
 	static time_t last_ping_time = (time_t) 0;
 	uint16_t base_state, no_resp_flag;
 	bool restart_flag;
-	hostlist_t ping_hostlist = hostlist_create("");
-	hostlist_t reg_hostlist  = hostlist_create("");
 	hostlist_t down_hostlist = NULL;
 	char host_str[MAX_SLURM_NAME];
+	agent_arg_t *ping_agent_args = NULL;
+	agent_arg_t *reg_agent_args = NULL;
 
-	int ping_buf_rec_size = 0;
-	agent_arg_t *ping_agent_args;
-
-	int reg_buf_rec_size = 0;
-	agent_arg_t *reg_agent_args;
+	now = time (NULL);
 	
 	ping_agent_args = xmalloc (sizeof (agent_arg_t));
 	ping_agent_args->msg_type = REQUEST_PING;
 	ping_agent_args->retry = 0;
+	ping_agent_args->hostlist = hostlist_create("");
+			
 	reg_agent_args = xmalloc (sizeof (agent_arg_t));
 	reg_agent_args->msg_type = REQUEST_NODE_REGISTRATION_STATUS;
 	reg_agent_args->retry = 0;
-	/* gettimeofday(&start_time, NULL); */
+	reg_agent_args->hostlist = hostlist_create("");
 		
 	/*
 	 * If there are a large number of down nodes, the node ping
@@ -163,7 +151,6 @@ void ping_nodes (void)
 	 * Because of this, we extend the SlurmdTimeout by the 
 	 * time needed to complete a ping of all nodes.
 	 */
-	now = time (NULL);
 	if ((slurmctld_conf.slurmd_timeout == 0) 
 	||  (last_ping_time == (time_t) 0)) {
 		node_dead_time = (time_t) 0;
@@ -171,7 +158,7 @@ void ping_nodes (void)
 		node_dead_time = last_ping_time -
 				slurmctld_conf.slurmd_timeout;
 	}
-	still_live_time = now - (slurmctld_conf.slurmd_timeout / 2);
+	still_live_time = now - (slurmctld_conf.slurmd_timeout / 3);
 	last_ping_time  = now;
 
 	offset += MAX_REG_THREADS;
@@ -185,20 +172,26 @@ void ping_nodes (void)
 		node_ptr = &node_record_table_ptr[i];
 		base_state   = node_ptr->node_state & NODE_STATE_BASE;
 		no_resp_flag = node_ptr->node_state & NODE_STATE_NO_RESPOND;
-		
-		if ((slurmctld_conf.slurmd_timeout == 0)
-		&&  (base_state != NODE_STATE_UNKNOWN))
+
+		if ((base_state == NODE_STATE_FUTURE) ||
+		    (node_ptr->node_state & NODE_STATE_POWER_SAVE))
+			continue;
+		if ((slurmctld_conf.slurmd_timeout == 0) &&
+		    (base_state != NODE_STATE_UNKNOWN)   &&
+		    (no_resp_flag == 0))
 			continue;
 
-		if ((node_ptr->last_response != (time_t) 0)
-		    &&  (node_ptr->last_response <= node_dead_time)
-		    &&  (base_state != NODE_STATE_DOWN)) {
+		if ((node_ptr->last_response != (time_t) 0)     &&
+		    (node_ptr->last_response <= node_dead_time) &&
+		    (base_state != NODE_STATE_DOWN)) {
 			if (down_hostlist)
 				(void) hostlist_push_host(down_hostlist,
 					node_ptr->name);
 			else
-				down_hostlist = hostlist_create(node_ptr->name);
+				down_hostlist = 
+					hostlist_create(node_ptr->name);
 			set_node_down(node_ptr->name, "Not responding");
+			node_ptr->not_responding = false;  /* logged below */
 			continue;
 		}
 
@@ -221,66 +214,43 @@ void ping_nodes (void)
 		 * can generate a flood of incomming RPCs. */
 		if ((base_state == NODE_STATE_UNKNOWN) || restart_flag ||
 		    ((i >= offset) && (i < (offset + MAX_REG_THREADS)))) {
-			(void) hostlist_push_host(reg_hostlist, node_ptr->name);
-			if ((reg_agent_args->node_count+1) > 
-						reg_buf_rec_size) {
-				reg_buf_rec_size += 32;
-				xrealloc ((reg_agent_args->slurm_addr), 
-				          (sizeof (struct sockaddr_in) * 
-					  reg_buf_rec_size));
-				xrealloc ((reg_agent_args->node_names), 
-				          (MAX_SLURM_NAME * reg_buf_rec_size));
-			}
-			reg_agent_args->slurm_addr[reg_agent_args->node_count] 
-				= node_ptr->slurm_addr;
-			pos = MAX_SLURM_NAME * reg_agent_args->node_count;
-			strncpy (&reg_agent_args->node_names[pos],
-			         node_ptr->name, MAX_SLURM_NAME);
+			hostlist_push(reg_agent_args->hostlist, 
+				      node_ptr->name);
 			reg_agent_args->node_count++;
 			continue;
 		}
 
-		if (node_ptr->last_response >= still_live_time)
+		if ((!no_resp_flag) && 
+		    (node_ptr->last_response >= still_live_time))
 			continue;
 
 		/* Do not keep pinging down nodes since this can induce
 		 * huge delays in hierarchical communication fail-over */
-		if (no_resp_flag)
+		if ((no_resp_flag) && (base_state == NODE_STATE_DOWN))
 			continue;
 
-		(void) hostlist_push_host(ping_hostlist, node_ptr->name);
-		if ((ping_agent_args->node_count+1) > ping_buf_rec_size) {
-			ping_buf_rec_size += 32;
-			xrealloc ((ping_agent_args->slurm_addr), 
-			          (sizeof (struct sockaddr_in) * 
-				  ping_buf_rec_size));
-			xrealloc ((ping_agent_args->node_names), 
-			          (MAX_SLURM_NAME * ping_buf_rec_size));
-		}
-		ping_agent_args->slurm_addr[ping_agent_args->node_count] = 
-					node_ptr->slurm_addr;
-		pos = MAX_SLURM_NAME * ping_agent_args->node_count;
-		strncpy (&ping_agent_args->node_names[pos],
-		         node_ptr->name, MAX_SLURM_NAME);
+		hostlist_push(ping_agent_args->hostlist, node_ptr->name);
 		ping_agent_args->node_count++;
 	}
 
-	if (ping_agent_args->node_count == 0)
+	if (ping_agent_args->node_count == 0) {
+		hostlist_destroy(ping_agent_args->hostlist);
 		xfree (ping_agent_args);
-	else {
-		hostlist_uniq(ping_hostlist);
-		hostlist_ranged_string(ping_hostlist, 
+	} else {
+		hostlist_uniq(ping_agent_args->hostlist);
+		hostlist_ranged_string(ping_agent_args->hostlist, 
 			sizeof(host_str), host_str);
 		verbose("Spawning ping agent for %s", host_str);
 		ping_begin();
 		agent_queue_request(ping_agent_args);
 	}
 
-	if (reg_agent_args->node_count == 0)
+	if (reg_agent_args->node_count == 0) {
+		hostlist_destroy(reg_agent_args->hostlist);
 		xfree (reg_agent_args);
-	else {
-		hostlist_uniq(reg_hostlist);
-		hostlist_ranged_string(reg_hostlist, 
+	} else {
+		hostlist_uniq(reg_agent_args->hostlist);
+		hostlist_ranged_string(reg_agent_args->hostlist, 
 			sizeof(host_str), host_str);
 		verbose("Spawning registration agent for %s %d hosts", 
 			host_str, reg_agent_args->node_count);
@@ -295,6 +265,49 @@ void ping_nodes (void)
 		error("Nodes %s not responding, setting DOWN", host_str);
 		hostlist_destroy(down_hostlist);
 	}
-	hostlist_destroy(ping_hostlist);
-	hostlist_destroy(reg_hostlist);
+}
+
+/* Spawn health check function for every node that is not DOWN */
+extern void run_health_check(void)
+{
+	int i;
+	uint16_t base_state;
+	char host_str[MAX_SLURM_NAME];
+	agent_arg_t *check_agent_args = NULL;
+	
+	check_agent_args = xmalloc (sizeof (agent_arg_t));
+	check_agent_args->msg_type = REQUEST_HEALTH_CHECK;
+	check_agent_args->retry = 0;
+	check_agent_args->hostlist = hostlist_create("");
+
+	for (i = 0; i < node_record_count; i++) {
+		struct node_record *node_ptr;
+		
+		node_ptr   = &node_record_table_ptr[i];
+		base_state = node_ptr->node_state & NODE_STATE_BASE;
+
+		if ((base_state == NODE_STATE_DOWN) ||
+		    (base_state == NODE_STATE_FUTURE))
+			continue;
+
+#ifdef HAVE_FRONT_END		/* Operate only on front-end */
+		if (i > 0)
+			continue;
+#endif
+
+		hostlist_push(check_agent_args->hostlist, node_ptr->name);
+		check_agent_args->node_count++;
+	}
+
+	if (check_agent_args->node_count == 0) {
+		hostlist_destroy(check_agent_args->hostlist);
+		xfree (check_agent_args);
+	} else {
+		hostlist_uniq(check_agent_args->hostlist);
+		hostlist_ranged_string(check_agent_args->hostlist, 
+			sizeof(host_str), host_str);
+		verbose("Spawning health check agent for %s", host_str);
+		ping_begin();
+		agent_queue_request(check_agent_args);
+	}
 }

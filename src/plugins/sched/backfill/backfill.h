@@ -4,7 +4,7 @@
  *  Copyright (C) 2003 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -35,8 +35,14 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
+#define STOP_CHECK_USEC     100000	/* check for shutdown every 0.1 secs */
+#define BACKFILL_CHECK_SEC  2		/* try to backfill every 2.0 seconds */
+
 /* backfill_agent - detached thread periodically attempts to backfill jobs */
 extern void *backfill_agent(void *args);
+
+/* Terminate backfill_agent */
+extern void stop_backfill_agent(void);
 
 /* trigger the attempt of a backfill */
 extern void run_backfill (void);

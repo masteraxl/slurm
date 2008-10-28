@@ -25,7 +25,7 @@ This plugin is recommended for systems without shared nodes.</li>
 memory, etc. within nodes. This plugin is recommended for systems with 
 many non-parallel programs sharing nodes. For more information see
 <a href=cons_res.html>Consumable Resources in SLURM</a>.</li>
-<li><b>bluegene</b>&#151;<a href="http://www.research.ibm.com/bluegene">IBM Blue Gene</a>  
+<li><b>bluegene</b>&#151;<a href="http://www.research.ibm.com/bluegene/">IBM Blue Gene</a>  
 node selector. Note that this plugin not only selects the nodes for a job, but performs 
 some initialization and termination functions for the job.</li>
 </ul>
@@ -68,7 +68,7 @@ if (<i>select_p_job_test</i>(all available nodes) != SLURM_SUCCESS) {
 wait for slurmctld shutdown request
 <i>select_p_state_save</i>()
 </pre>
-Depending upon failure modes, it is possible that 
+<p>Depending upon failure modes, it is possible that 
 <span class="commandline">select_p_state_save()</span>
 will not be called at slurmctld terminatation.
 When slurmctld is restarted, other function calls may be replayed.
@@ -154,9 +154,10 @@ the plugin should return SLURM_ERROR.</p>
 <p class="commandline">int select_p_pack_node_info (time_t last_query_time, Buf *buffer_ptr);</p>
 <p style="margin-left:.2in"><b>Description</b>: pack node specific information into a buffer.</p>
 <p style="margin-left:.2in"><b>Arguments</b>:
-<span class="commandline"> last_query_time</span>&nbsp;&nbsp;&nbsp;(input) time that the data
-was last saved. If it has not changed since this time, return SLURM_NO_CHANGE_IN_DATA. <br>
-<span class="commandline"> buffer_ptre</span>&nbsp;&nbsp;&nbsp;(input/output) buffer into 
+<span class="commandline">
+last_query_time</span>&nbsp;&nbsp;&nbsp;(input) time that the data was
+last saved.<br>
+<span class="commandline"> buffer_ptr</span>&nbsp;&nbsp;&nbsp;(input/output) buffer into 
 which the node data is appended.</p>
 <p style="margin-left:.2in"><b>Returns</b>: SLURM_SUCCESS if successful, 
 SLURM_NO_CHANGE_IN_DATA if data has not changed since last packed, otherwise SLURM_ERROR</p>
@@ -268,21 +269,6 @@ failure, the plugin should return a SLURM error code.</p>
 <p class="footer"><a href="#top">top</a></p>
 
 <h3>Get/set plugin information</h3>
-<p class="commandline">int select_p_get_extra_jobinfo(struct node_record *node_ptr,
-struct job_record *job_ptr, enum select_data_info info, void *data);</p>
-<p style="margin-left:.2in"><b>Description</b>: Get plugin-specific information 
-related to the specified job and/or node.</p>
-<p style="margin-left:.2in"><b>Arguments</b>:<br>
-<span class="commandline"> node_ptr</span>&nbsp; &nbsp;&nbsp;(input) pointer
-to the node for which information is requested.<br>
-<span class="commandline"> job_ptr</span>&nbsp; &nbsp;&nbsp;(input) pointer
-to the job for which information is requested.<br>
-<span class="commandline"> info</span>&nbsp; &nbsp;&nbsp;(input) identifies 
-the type of data requested.<br>
-<span class="commandline"> data</span>&nbsp; &nbsp;&nbsp;(output) the requested data.</p>
-<p style="margin-left:.2in"><b>Returns</b>: SLURM_SUCCESS if successful. On failure,
-the plugin should return SLURM_ERROR.</p>
-
 <p class="commandline">int select_p_get_select_nodeinfo(struct node_record *node_ptr,
 enum select_data_info info, void *data);</p>
 <p style="margin-left:.2in"><b>Description</b>: Get plugin-specific information
@@ -296,23 +282,23 @@ the type of data requested.<br>
 <p style="margin-left:.2in"><b>Returns</b>: SLURM_SUCCESS if successful. On failure,
 the plugin should return SLURM_ERROR.</p>
 
-<p class="commandline">int select_p_update_nodeinfo(struct node_record *node_ptr,
-enum select_data_info info);</p>
+<p class="commandline">int select_p_update_nodeinfo(struct node_record *node_ptr);</p>
 <p style="margin-left:.2in"><b>Description</b>: Update plugin-specific information
-related to the specified  node.</p>
-<p style="margin-left:.2in"><b>Arguments</b>:<br>
+related to the specified node. This is called after changes in a node's configuration.</p>
+<p style="margin-left:.2in"><b>Argument</b>:
 <span class="commandline"> node_ptr</span>&nbsp; &nbsp;&nbsp;(input) pointer
-to the node for which information is requested.<br>
-<span class="commandline"> info</span>&nbsp; &nbsp;&nbsp;(input) identifies
-the type of data requested.</p>
+to the node for which information is requested.</p>
 <p style="margin-left:.2in"><b>Returns</b>: SLURM_SUCCESS if successful. On failure,
 the plugin should return SLURM_ERROR.</p>
 
-<p class="commandline">int select_p_get_info_from_plugin(enum select_data_info info, void *data);</p>
+<p class="commandline">int select_p_get_info_from_plugin(enum select_data_info info,
+struct node_record *node_ptr, void *data);</p>
 <p style="margin-left:.2in"><b>Description</b>: Get plugin-specific information.</p>
 <p style="margin-left:.2in"><b>Arguments</b>:<br>
 <span class="commandline"> info</span>&nbsp; &nbsp;&nbsp;(input) identifies 
 the type of data to be updated.<br>
+<span class="commandline"> job_ptr</span>&nbsp; &nbsp;&nbsp;(input) pointer to
+the job related to the query (if applicable; may be NULL).<br>
 <span class="commandline"> data</span>&nbsp; &nbsp;&nbsp;(output) the requested data.</p>
 <p style="margin-left:.2in"><b>Returns</b>: SLURM_SUCCESS if successful. On failure,
 the plugin should return SLURM_ERROR.</p>
@@ -325,6 +311,42 @@ syncrhonize plugin (and node) state with that of currectly active jobs.</p>
 list of slurm jobs from slurmctld job records.</p>
 <p style="margin-left:.2in"><b>Returns</b>: SLURM_SUCCESS if successful. On failure,
 the plugin should return SLURM_ERROR.</p>
+
+<p class="commandline">int select_p_update_node_state (int index, uint16_t state);</p>
+<p style="margin-left:.2in"><b>Description</b>: push a change of state
+into the plugin the index should be the index from the slurmctld of
+the entire system.  The state should be the same state the node_record
+was set to in the slurmctld.</p>
+<p style="margin-left:.2in"><b>Arguments</b>:
+<span class="commandline"> index</span>&nbsp;&nbsp;&nbsp;(input) index
+of the node in reference to the entire system. <br>
+<span class="commandline"> state</span>&nbsp;&nbsp;&nbsp;(input) new
+state of the node.</p>
+<p style="margin-left:.2in"><b>Returns</b>: SLURM_SUCCESS if successful, otherwise SLURM_ERROR</p>
+
+<p class="commandline">int select_p_alter_node_cnt (enum
+select_node_cnt type, void *data);</p>
+<p style="margin-left:.2in"><b>Description</b>: Used for systems like
+a Bluegene system where SLURM sees 1 node where many nodes really
+exists, in Bluegene's case 1 node reflects 512 nodes in real live, but
+since usually 512 is the smallest allocatable block slurm only handles
+it as 1 node.  This is a function so the user can issue a 'real'
+number and the fuction will alter it so slurm can understand what the
+user really means in slurm terms.</p>
+<p style="margin-left:.2in"><b>Arguments</b>:
+<span class="commandline"> type</span>&nbsp;&nbsp;&nbsp;(input) enum
+telling the plug in what the user is really wanting.<br>
+<span class="commandline"> data</span>&nbsp;&nbsp;&nbsp;(input/output)
+Is a void * so depending on the type sent in argument 1 this should 
+adjust the variable returning what the user is asking for.</p>
+<p style="margin-left:.2in"><b>Returns</b>: SLURM_SUCCESS if successful, otherwise SLURM_ERROR</p>
+
+<p class="commandline">int select_p_reconfigure (void);</p>
+<p style="margin-left:.2in"><b>Description</b>: Used to notify plugin 
+of change in partition configuration or general configuration change.
+The plugin will test global variables for changes as appropriate.</p>
+<p style="margin-left:.2in"><b>Returns</b>: SLURM_SUCCESS if successful, otherwise SLURM_ERROR</p>
+
 <p class="footer"><a href="#top">top</a></p>
 
 <h2>Versioning</h2>
@@ -337,6 +359,6 @@ to maintain data format compatibility across different versions of the plugin.</
 
 <p class="footer"><a href="#top">top</a></p>
 
-<p style="text-align:center;">Last modified 12 May 2006</p>
+<p style="text-align:center;">Last modified 10 September 2008</p>
 
 <!--#include virtual="footer.txt"-->

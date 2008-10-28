@@ -1,12 +1,12 @@
 /***************************************************************************** \
- **  switch_federation.c - Library routines for initiating jobs on IBM 
- **	Federation
- **  $Id$
+ *  switch_federation.c - Library routines for initiating jobs on IBM 
+ *	Federation
  *****************************************************************************
- *  Copyright (C) 2004-2006 The Regents of the University of California.
+ *  Copyright (C) 2004-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Jason King <jking@llnl.gov>
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -390,7 +390,7 @@ static char *adapter_name_check(char *network)
 }
 
 int switch_p_build_jobinfo(switch_jobinfo_t switch_job, char *nodelist, 
-			uint32_t *tasks_per_node, int cyclic_alloc, 
+			uint16_t *tasks_per_node, int cyclic_alloc, 
 			char *network) 
 {
 	hostlist_t list = NULL;
@@ -607,10 +607,6 @@ int switch_p_job_attach(switch_jobinfo_t jobinfo, char ***env,
 /*
  * switch functions for other purposes
  */
-bool switch_p_no_frag(void)
-{
-	return false;
-}
 
 /* 
  * Linear search through table of errno values and strings,

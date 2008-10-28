@@ -4,7 +4,7 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Jim Garlick <garlick@llnl.gov>, et. al.
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -66,7 +66,7 @@ typedef struct {
 static slurm_errtab_t slurm_errtab[] = {
 	{0, "No error"},
 	{-1, "Unspecified error"},
-	{EINPROGRESS, "Operation already in progress"},
+	{EINPROGRESS, "Operation now in progress"},
 
 	/*General Message error codes */
 	{ SLURM_UNEXPECTED_MSG_ERROR, 
@@ -87,6 +87,12 @@ static slurm_errtab_t slurm_errtab[] = {
           "Protocol authentication error"                       },
         { SLURM_PROTOCOL_INSANE_MSG_LENGTH,
           "Insane message length"                               },
+	{ SLURM_MPI_PLUGIN_NAME_INVALID,
+	  "Invalid MPI plugin name"                             },
+	{ SLURM_MPI_PLUGIN_PRELAUNCH_SETUP_FAILED,
+	  "MPI plugin's pre-launch setup failed"                },
+	{ SLURM_PLUGIN_NAME_INVALID,
+	  "Plugin initialization failed"			},
 
 	/* communication failures to/from slurmctld */
 	{ SLURMCTLD_COMMUNICATIONS_CONNECTION_ERROR,
@@ -110,7 +116,7 @@ static slurm_errtab_t slurm_errtab[] = {
 	{ ESLURM_DEFAULT_PARTITION_NOT_SET,
 	  "No partition specified or system default partition"	},
 	{ ESLURM_ACCESS_DENIED, 
-	  "Access denied"					},
+	  "Access/permission denied"				},
 	{ ESLURM_JOB_MISSING_REQUIRED_PARTITION_GROUP,
 	  "User's group not permitted to use this partition"	},
 	{ ESLURM_REQUESTED_NODES_NOT_IN_PARTITION,
@@ -118,7 +124,7 @@ static slurm_errtab_t slurm_errtab[] = {
 	{ ESLURM_TOO_MANY_REQUESTED_CPUS,
 	  "More processors requested than permitted"		},
 	{ ESLURM_TOO_MANY_REQUESTED_NODES,
-	  "More nodes requested than permitted"			},
+	  "Node count specification invalid"			},
 	{ ESLURM_ERROR_ON_DESC_TO_RECORD_COPY,
 	  "Unable to create job record, try again"		},
 	{ ESLURM_JOB_MISSING_SIZE_SPECIFICATION,
@@ -130,9 +136,9 @@ static slurm_errtab_t slurm_errtab[] = {
 	{ ESLURM_DUPLICATE_JOB_ID, 
 	  "Duplicate job id"					},
 	{ ESLURM_PATHNAME_TOO_LONG,
-	  "Pathname of a file or directory too long"   		},
+	  "Pathname of a file, directory or other parameter too long" },
 	{ ESLURM_NOT_TOP_PRIORITY,
-	  "Immediate execution impossible, higher priority jobs pending" },
+	  "Immediate execution impossible, insufficient priority" },
 	{ ESLURM_REQUESTED_NODE_CONFIG_UNAVAILABLE,
 	  "Requested node configuration is not available"	},
 	{ ESLURM_REQUESTED_PART_CONFIG_UNAVAILABLE,
@@ -148,7 +154,7 @@ static slurm_errtab_t slurm_errtab[] = {
 	{ ESLURM_TRANSITION_STATE_NO_UPDATE,
 	  "Job can not be altered now, try again later"		},
 	{ ESLURM_ALREADY_DONE, 
-	  "Job/step already completed"				},
+	  "Job/step already completing or completed"		},
 	{ ESLURM_INTERCONNECT_FAILURE, 
 	  "Error configuring interconnect"			},
 	{ ESLURM_BAD_DIST, 
@@ -166,15 +172,23 @@ static slurm_errtab_t slurm_errtab[] = {
 	{ ESLURM_INVALID_FEATURE, 
 	  "Invalid feature specification"			},
 	{ ESLURM_INVALID_AUTHTYPE_CHANGE,
-	  "AuthType change requires restart of all SLURM daemons and commands"},
+	  "AuthType change requires restart of all SLURM daemons and "
+	  "commands to take effect"},
 	{ ESLURM_INVALID_CHECKPOINT_TYPE_CHANGE,
-	  "Invalid change in CheckpointType requested"		},
+	  "CheckpointType change requires restart of all SLURM daemons "
+	  "to take effect"					},
+	{ ESLURM_INVALID_CRYPTO_TYPE_CHANGE,
+	  "CryptoType change requires restart of all SLURM daemons "
+	  "to take effect"					},
 	{ ESLURM_INVALID_SCHEDTYPE_CHANGE,
-	  "Invalid change in SchedulerType requested"		},
+	  "SchedulerType change requires restart of the slurmctld daemon "
+	  "to take effect"					},
 	{ ESLURM_INVALID_SELECTTYPE_CHANGE,
-	  "Invalid change in SelectType requested"		},
+	  "SelectType change requires restart of the slurmctld daemon "
+	  "to take effect"					},
 	{ ESLURM_INVALID_SWITCHTYPE_CHANGE,
-	  "SwitchType change requires restart of all SLURM daemons and jobs"},
+	  "SwitchType change requires restart of all SLURM daemons and "
+	  "jobs to take effect"					},
 	{ ESLURM_FRAGMENTATION,
 	  "Immediate execution impossible, "
 	  "resources too fragmented for allocation"		},
@@ -183,7 +197,7 @@ static slurm_errtab_t slurm_errtab[] = {
 	{ ESLURM_DISABLED,
 	  "Requested operation is presently disabled"		},
 	{ ESLURM_DEPENDENCY,
-	  "Immediate execution impossible, job dependency problem"},
+	  "Job dependency problem"				},
  	{ ESLURM_BATCH_ONLY,
 	  "Only batch jobs are accepted or processed"		},
 	{ ESLURM_TASKDIST_ARBITRARY_UNSUPPORTED,
@@ -192,6 +206,21 @@ static slurm_errtab_t slurm_errtab[] = {
 	  "Requested more tasks than available processors"	},
 	{ ESLURM_JOB_HELD,
 	  "Job is in held state, pending scheduler release"	},
+	{ ESLURM_INVALID_BANK_ACCOUNT,
+	  "Invalid bank account specified"			},
+	{ ESLURM_INVALID_TASK_MEMORY,
+	  "Memory required by task is not available"		},
+	{ ESLURM_INVALID_ACCOUNT,
+	  "Job has invalid account"				},
+	{ ESLURM_INVALID_LICENSES,
+	  "Job has invalid license specification"		},
+	{ ESLURM_NEED_RESTART,
+	  "The node configuration changes that were made require restart "
+	  "of the slurmctld daemon to take effect"},
+	{ ESLURM_ACCOUNTING_POLICY,
+	  "Job violates accounting policy (job submit limit, the user's size and/or time limits)"},
+	{ ESLURM_INVALID_TIME_LIMIT,
+	  "Requested time limit exceeds partition limit"	},
 
 	/* slurmd error codes */
 

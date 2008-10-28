@@ -6,9 +6,18 @@ INCLUDES = -I$(top_srcdir)
 
 bin_PROGRAMS = scontrol
 
-scontrol_SOURCES = scontrol.c
+scontrol_SOURCES =	\
+	info_job.c	\
+	info_node.c	\
+	info_part.c	\
+	scontrol.c	\
+	scontrol.h	\
+	update_job.c	\
+	update_node.c	\
+	update_part.c
 
-convenience_libs = $(top_builddir)/src/api/libslurmhelper.la
+convenience_libs = $(top_builddir)/src/api/libslurm.o -ldl
+
 
 scontrol_LDADD = \
 	$(convenience_libs) \

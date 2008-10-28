@@ -8,10 +8,10 @@
   Meta:		1
   Name:		slurm
   Major:	1
-  Minor:	2
+  Minor:	4
   Micro:        0
-  Version:	1.2.0
-  Release:	0.pre2
-  API_CURRENT:	10	
+  Version:	1.4.0
+  Release:	0.pre3
+  API_CURRENT:	13
   API_AGE:	0
   API_REVISION:	0

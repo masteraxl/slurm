@@ -11,7 +11,7 @@
  *  and
  *  Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>.
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -22,7 +22,7 @@
  *  any later version.
  *
  *  In addition, as a special exception, the copyright holders give permission 
- *  to link the code of portions of this program with the OpenSSL library under 
+ *  to link the code of portions of this program with the OpenSSL library under
  *  certain conditions as described in each individual source file, and 
  *  distribute linked combinations including the two. You must obey the GNU 
  *  General Public License in all respects for all of the code used other than 
@@ -54,11 +54,12 @@
 #include <sys/types.h>
 #include <unistd.h>
 
+#include "src/common/bitstring.h"
 #include "src/common/log.h"
 #include "src/common/xassert.h"
 #include "src/common/xmalloc.h"
 #include "src/common/xstring.h"
-#include "src/srun/attach.h"
+#include "src/srun/debugger.h"
 
 /* Given a program name, translate it to a fully qualified pathname
  * as needed based upon the PATH environment variable */
@@ -66,7 +67,7 @@ static char *
 _build_path(char* fname)
 {
 	int i;
-	char *path_env = NULL, *dir, *ptrptr;
+	char *path_env = NULL, *dir = NULL, *ptrptr = NULL;
 	static char file_name[256], file_path[256];	/* return values */
 	struct stat buf;
 
@@ -126,58 +127,59 @@ _set_range(int low_num, int high_num, char *exec_name)
 static void
 _set_exec_names(char *ranks, char *exec_name, int ntasks)
 {
-	char *range, *p, *ptrptr, *exec_path, *upper;
-	int low_num, high_num;
+	char *ptrptr = NULL, *exec_path = NULL;
+	int low_num, high_num, num, i;
 
-	if (ranks[0] == '*' && ranks[1] == '\0') {
+	exec_path = _build_path(exec_name);
+	if ((ranks[0] == '*') && (ranks[1] == '\0')) {
 		low_num = 0;
-		high_num = ntasks -1;
-		_set_range(low_num, high_num, exec_name);
+		high_num = ntasks - 1;
+		_set_range(low_num, high_num, exec_path);
 		return;
 	}
-	exec_path = _build_path(exec_name);
 
-	for (range = strtok_r(ranks, ",", &ptrptr); range != NULL;
-			range = strtok_r(NULL, ",", &ptrptr)) {
-		p = ranks;
-		while (*p != '\0' && isdigit (*p))
-			p ++;
+	ptrptr = ranks;
+	for (i=0; i<ntasks; i++) {
+		if (!isdigit(ptrptr[0]))
+			goto invalid;
 
-		if (*p == '\0') { /* single rank */
-			low_num  = MAX(0, atoi(range));
-			high_num = MIN((ntasks-1), atoi(range));
-			_set_range(low_num, high_num, exec_path);	
-		} else if (*p == '-') { /* lower-upper */
-			upper = ++ p;
-			while (isdigit (*p))
-				p ++;
-			if (*p != '\0') {
-				error ("Invalid task range specification (%s) "
-					"ignored.", range);
-				continue;
-			}
-			low_num  = MAX(0, atoi (range));
-			high_num = MIN((ntasks-1), atoi(upper));
+		num = strtol(ptrptr, &ptrptr, 10);
+
+		if ((ptrptr[0] == ',') || (ptrptr[0] == '\0')) {
+			low_num = MAX(0, num);
+			high_num = MIN((ntasks-1), num);
 			_set_range(low_num, high_num, exec_path);
-		} else {
-			error ("Invalid task range specification (%s) ignored.",				range);
-		}
+		} else if (ptrptr[0] == '-') {
+			low_num = MAX(0, num);
+			num = strtol(ptrptr+1, &ptrptr, 10);
+			if ((ptrptr[0] != ',') && (ptrptr[0] != '\0'))
+				goto invalid; 
+			high_num = MIN((ntasks-1), num);
+			_set_range(low_num, high_num, exec_path);
+		} else
+			goto invalid;
+		if (ptrptr[0] == '\0')
+			break;
+		ptrptr++;
 	}
+	return;
+
+  invalid:
+	error ("Invalid task range specification (%s) ignored.", ranks);
+	return;
 }
 
 extern int
-set_multi_name(int ntasks)
+mpir_set_multi_name(int ntasks, const char *config_fname)
 {
 	FILE *config_fd;
 	char line[256];
-	char *config_fname = NULL, *ranks, *exec_name, *p, *ptrptr;
+	char *ranks, *exec_name, *p, *ptrptr;
 	int line_num = 0, i;
 
 	for (i=0; i<ntasks; i++) {
 		MPIR_PROCDESC *tv;
 		tv = &MPIR_proctable[i];
-		if (i == 0)
-			config_fname = tv->executable_name;
 		tv->executable_name = NULL;
 	}
 
@@ -189,8 +191,8 @@ set_multi_name(int ntasks)
 	while (fgets(line, sizeof(line), config_fd)) {
 		line_num ++;
 		if (strlen (line) >= (sizeof(line) - 1)) {
-			error ("Line %d of configuration file too long", 
-				line_num);
+			error ("Line %d of configuration file %s too long", 
+				line_num, config_fname);
 			fclose(config_fd);
 			return -1;
 		} 
@@ -207,7 +209,8 @@ set_multi_name(int ntasks)
 		ranks = strtok_r(p, " \t\n", &ptrptr);
 		exec_name = strtok_r(NULL, " \t\n", &ptrptr);
 		if (!ranks || !exec_name) {
-			error("Line %d is invalid", line_num);
+			error("Line %d of configuration file %s is invalid", 
+				line_num, config_fname);
 			fclose(config_fd);
 			return -1;
 		}
@@ -215,4 +218,200 @@ set_multi_name(int ntasks)
 	}
 	fclose(config_fd);
 	return 0;
+}
+
+extern void
+mpir_init(int num_tasks)
+{
+	MPIR_proctable_size = num_tasks;
+	MPIR_proctable = xmalloc(sizeof(MPIR_PROCDESC) * num_tasks);
+	if (MPIR_proctable == NULL)
+		fatal("Unable to initialize MPIR_proctable: %m");
+}
+
+extern void
+mpir_cleanup()
+{
+	int i;
+
+	for (i = 0; i < MPIR_proctable_size; i++) {
+		xfree(MPIR_proctable[i].host_name);
+		xfree(MPIR_proctable[i].executable_name);
+	}
+	xfree(MPIR_proctable);
+}
+
+extern void
+mpir_set_executable_names(const char *executable_name)
+{
+	int i;
+
+	for (i = 0; i < MPIR_proctable_size; i++) {
+		MPIR_proctable[i].executable_name = xstrdup(executable_name);
+		if (MPIR_proctable[i].executable_name == NULL)
+			fatal("Unable to set MPI_proctable executable_name:"
+			      " %m");
+	}
+}
+
+extern void
+mpir_dump_proctable()
+{
+	MPIR_PROCDESC *tv;
+	int i;
+
+	for (i = 0; i < MPIR_proctable_size; i++) {
+		tv = &MPIR_proctable[i];
+		if (!tv)
+			break;
+		info("task:%d, host:%s, pid:%d, executable:%s",
+		     i, tv->host_name, tv->pid, tv->executable_name);
+	}
+}
+
+static int
+_update_task_mask(int low_num, int high_num, int ntasks, bitstr_t *task_mask)
+{
+	int i;
+
+	if (low_num > high_num) {
+		error("Invalid task range, %d-%d", low_num, high_num);
+		return -1;
+	}
+	if (low_num < 0) {
+		error("Invalid task id, %d < 0", low_num);
+		return -1;
+	}
+	if (high_num >= ntasks) {
+		error("Invalid task id, %d >= ntasks", high_num);
+		return -1;
+	}
+	for (i=low_num; i<=high_num; i++) {
+		if (bit_test(task_mask, i)) {
+			error("Duplicate record for task %d", i);
+			return -1;
+		}
+		bit_set(task_mask, i);
+	}
+	return 0;
+}
+
+static int
+_validate_ranks(char *ranks, int ntasks, bitstr_t *task_mask)
+{
+	char *range = NULL, *p = NULL;
+	char *ptrptr = NULL, *upper = NULL;
+	int low_num, high_num;
+
+	if (ranks[0] == '*' && ranks[1] == '\0') {
+		low_num = 0;
+		high_num = ntasks - 1;
+		return _update_task_mask(low_num, high_num, ntasks, task_mask);
+	}
+
+	for (range = strtok_r(ranks, ",", &ptrptr); range != NULL;
+			range = strtok_r(NULL, ",", &ptrptr)) {
+		p = range;
+		while (*p != '\0' && isdigit (*p))
+			p ++;
+
+		if (*p == '\0') { /* single rank */
+			low_num  = atoi(range);
+			high_num = low_num;
+		} else if (*p == '-') { /* lower-upper */
+			upper = ++ p;
+			while (isdigit (*p))
+				p ++;
+			if (*p != '\0') {
+				error ("Invalid task range specification");
+				return -1;
+			}
+			low_num  = atoi(range);
+			high_num = atoi(upper);
+		} else {
+			error ("Invalid task range specification (%s)",
+				range);
+			return -1;
+		}
+
+		if (_update_task_mask(low_num, high_num, ntasks, task_mask))
+			return -1;
+	}
+	return 0;
+}
+
+/*
+ * Verify that we have a valid executable program specified for each task
+ *	when the --multi-prog option is used.
+ *
+ * Return 0 on success, -1 otherwise
+ */
+extern int
+verify_multi_name(char *config_fname, int ntasks)
+{
+	FILE *config_fd;
+	char line[256];
+	char *ranks, *exec_name, *p, *ptrptr;
+	int line_num = 0, i, rc = 0;
+	bitstr_t *task_mask;
+
+	if (ntasks <= 0) {
+		error("Invalid task count %d", ntasks);
+		return -1;
+	}
+
+	config_fd = fopen(config_fname, "r");
+	if (config_fd == NULL) {
+		error("Unable to open configuration file %s", config_fname);
+		return -1;
+	}
+
+	task_mask = bit_alloc(ntasks);
+	while (fgets(line, sizeof(line), config_fd)) {
+		line_num ++;
+		if (strlen (line) >= (sizeof(line) - 1)) {
+			error ("Line %d of configuration file %s too long", 
+				line_num, config_fname);
+			rc = -1;
+			goto fini;
+		} 
+		p = line;
+		while (*p != '\0' && isspace (*p)) /* remove leading spaces */
+			p ++;
+		
+		if (*p == '#') /* only whole-line comments handled */
+			continue;
+
+		if (*p == '\0') /* blank line ignored */
+			continue;
+
+		ranks = strtok_r(p, " \t\n", &ptrptr);
+		exec_name = strtok_r(NULL, " \t\n", &ptrptr);
+		if (!ranks || !exec_name) {
+			error("Line %d of configuration file %s invalid", 
+				line_num, config_fname);
+			rc = -1;
+			goto fini;
+		}
+		if (_validate_ranks(ranks, ntasks, task_mask)) {
+			error("Line %d of configuration file %s invalid", 
+				line_num, config_fname);
+			rc = -1;
+			goto fini;
+		}
+	}
+
+	for (i=0; i<ntasks; i++) {
+		if (!bit_test(task_mask, i)) {
+			error("Configuration file %s invalid, "
+				"no record for task id %d", 
+				config_fname, i);
+			rc = -1;
+			goto fini;
+		}
+	}
+
+fini:	fclose(config_fd);
+	bit_free(task_mask);
+	return rc;
 }

@@ -1,11 +1,10 @@
 /*****************************************************************************\
  *  src/common/slurm_cred.h  - SLURM job credential operations
- *  $Id$
  *****************************************************************************
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <grondona1@llnl.gov>.
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -129,11 +128,17 @@ int  slurm_cred_ctx_unpack(slurm_cred_ctx_t ctx, Buf buffer);
 typedef struct {
 	uint32_t jobid;
 	uint32_t stepid;
+	uint32_t job_mem;	/* MB of memory reserved per node OR
+				 * real memory per CPU | MEM_PER_CPU,
+				 * default=0 (no limit) */
 	uid_t    uid;
 	char    *hostlist;
 	uint32_t alloc_lps_cnt;
-        uint32_t *alloc_lps;
+	uint16_t *alloc_lps;
 } slurm_cred_arg_t;
+
+/* Terminate the plugin and release all memory. */
+int slurm_crypto_fini(void);
 
 /*
  * Create a slurm credential using the values in `arg.'
@@ -160,10 +165,23 @@ slurm_cred_t slurm_cred_copy(slurm_cred_t cred);
  */
 slurm_cred_t slurm_cred_faker(slurm_cred_arg_t *arg);
 
+/* Free the credential arguments as loaded by either
+ * slurm_cred_get_args() or slurm_cred_verify() */
+void slurm_cred_free_args(slurm_cred_arg_t *arg);
+
+/* Make a copy of the credential's arguements */
+int slurm_cred_get_args(slurm_cred_t cred, slurm_cred_arg_t *arg);
+
 /*
  * Verify the signed credential `cred,' and return cred contents in
  * the cred_arg structure. The credential is cached and cannot be reused.
- * 
+ *
+ * Will perform at least the following checks:
+ *   - Credential signature is valid
+ *   - Credential has not expired
+ *   - If credential is reissue will purge the old credential
+ *   - Credential has not been revoked
+ *   - Credential has not been replayed
  */
 int slurm_cred_verify(slurm_cred_ctx_t ctx, slurm_cred_t cred, 
 		      slurm_cred_arg_t *arg);
@@ -174,6 +192,14 @@ int slurm_cred_verify(slurm_cred_ctx_t ctx, slurm_cred_t cred,
  *  to be rewound, SLURM_SUCCESS otherwise.
  */
 int slurm_cred_rewind(slurm_cred_ctx_t ctx, slurm_cred_t cred);
+
+/*
+ * Check to see if this credential is a reissue of an existing credential
+ * (this can happen, for instance, with "scontrol restart").  If
+ * this credential is a reissue, then the old credential is cleared
+ * from the cred context "ctx".
+ */
+void slurm_cred_handle_reissue(slurm_cred_ctx_t ctx, slurm_cred_t cred);
 
 /*
  * Revoke all credentials for job id jobid
@@ -248,6 +274,11 @@ int slurm_cred_get_signature(slurm_cred_t cred, char **datap, int *len);
  */
 void slurm_cred_print(slurm_cred_t cred);
 
+/*
+ * Get count of allocated LPS (processors) by node
+ */
+int slurm_cred_get_alloc_lps(slurm_cred_t cred, char **nodes, 
+			     uint32_t *alloc_lps_cnt, uint16_t **alloc_lps);
 #ifdef DISABLE_LOCALTIME
 extern char * timestr (const time_t *tp, char *buf, size_t n);
 #endif

@@ -5,7 +5,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -63,7 +63,6 @@
 static int _get_env_val(char **env, const char *name, unsigned long *valp,
 		bool *u_req_propagate);
 static int _set_limit(char **env, slurm_rlimits_info_t *rli);
-static int _set_umask(char **env);
 
 /*
  * Set user resource limits using the values of the environment variables
@@ -77,11 +76,46 @@ static int _set_umask(char **env);
 int set_user_limits(slurmd_job_t *job)
 {
 	slurm_rlimits_info_t *rli;
+	struct rlimit r;
+	rlim_t task_mem_bytes;
 
 	for (rli = get_slurm_rlimits_info(); rli->name; rli++)
 		_set_limit( job->env, rli );
 
-	_set_umask(job->env);
+	/* Set soft and hard memory and data size limit for this process, 
+	 * handle job limit (for all spawned processes) in slurmd */
+	task_mem_bytes  = job->job_mem;	/* MB */
+	task_mem_bytes *= (1024 * 1024);
+#ifdef RLIMIT_AS
+	if ((task_mem_bytes) && (getrlimit(RLIMIT_AS, &r) == 0) &&
+	    (r.rlim_max > task_mem_bytes)) {
+		r.rlim_max =  r.rlim_cur = task_mem_bytes;
+		if (setrlimit(RLIMIT_AS, &r)) {
+			/* Indicates that limit has already been exceeded */
+			fatal("setrlimit(RLIMIT_AS, %u MB): %m", job->job_mem);
+		} else
+			info("Set task_mem(%u MB)", job->job_mem);
+#if 0
+		getrlimit(RLIMIT_AS, &r);
+		info("task memory limits: %u %u", r.rlim_cur, r.rlim_max);
+#endif
+	}
+#endif
+#ifdef RLIMIT_DATA
+	if ((task_mem_bytes) && (getrlimit(RLIMIT_DATA, &r) == 0) &&
+	    (r.rlim_max > task_mem_bytes)) {
+		r.rlim_max =  r.rlim_cur = task_mem_bytes;
+		if (setrlimit(RLIMIT_DATA, &r)) {
+			/* Indicates that limit has already been exceeded */
+			fatal("setrlimit(RLIMIT_DATA, %u MB): %m", job->job_mem);
+		} else
+			info("Set task_data(%u MB)", job->job_mem);
+#if 0
+		getrlimit(RLIMIT_DATA, &r);
+		info("task DATA limits: %u %u", r.rlim_cur, r.rlim_max);
+#endif
+	}
+#endif
 	return SLURM_SUCCESS;
 }
 
@@ -98,13 +132,13 @@ static char * rlim_to_string (unsigned long rlim, char *buf, size_t n)
 }
 
 /* Set umask using value of env var SLURM_UMASK */
-static int
-_set_umask(char **env)
+extern int
+set_umask(slurmd_job_t *job)
 {
 	mode_t mask;
 	char *val;
 	
-	if (!(val = getenvp(env, "SLURM_UMASK"))) {
+	if (!(val = getenvp(job->env, "SLURM_UMASK"))) {
 		debug("Couldn't find SLURM_UMASK in environment");
 		return SLURM_ERROR;
 	}
@@ -158,8 +192,8 @@ _set_limit(char **env, slurm_rlimits_info_t *rli)
 	 * Nothing to do if the rlimit won't change
 	 */
 	if (r.rlim_cur == (rlim_t) env_value) {
-		debug2( "_set_limit: %s setrlimit %s is unnecessary (same val)",
-			u_req_propagate?"user":"conf", rlimit_name );
+		debug2( "_set_limit: %s setrlimit %s no change in value: %u",
+			u_req_propagate?"user":"conf", rlimit_name, r.rlim_cur);
 		return SLURM_SUCCESS;
 	}
 
@@ -174,13 +208,17 @@ _set_limit(char **env, slurm_rlimits_info_t *rli)
 		/*
 		 * Report an error only if the user requested propagate 
 		 */
-		if (u_req_propagate)
+		if (u_req_propagate) {
 			error( "Can't propagate %s of %s from submit host: %m",
 				rlimit_name,
 				r.rlim_cur == RLIM_INFINITY ? "'unlimited'" :
 				rlim_to_string( r.rlim_cur, cur, sizeof(cur)));
-		debug2( "_set_limit: %s setrlimit %s failed: %m",
-				u_req_propagate?"user":"conf", rlimit_name );
+		} else {
+			verbose("Can't propagate %s of %s from submit host: %m",
+				rlimit_name,
+				r.rlim_cur == RLIM_INFINITY ? "'unlimited'" :
+				rlim_to_string( r.rlim_cur, cur, sizeof(cur)));
+		}
 		return SLURM_ERROR;
 	}
 	debug2( "_set_limit: %s setrlimit %s succeeded",

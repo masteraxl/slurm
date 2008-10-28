@@ -4,7 +4,7 @@
  *  Copyright (C) 2002-2006 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -55,7 +55,6 @@ typedef struct env_options {
 	char *nodelist;		/* nodelist in string form */
 	char **env;             /* job environment */
 	uint16_t comm_port;	/* srun's communication port */
-	char *comm_hostname;	/* srun's hostname */
 	slurm_addr *cli;	/* launch node address */
 	slurm_addr *self;
 	int jobid;		/* assigned job id */
@@ -64,8 +63,16 @@ typedef struct env_options {
 	int localid;		/* local task id (within node) */
 	int nodeid;
 	int cpus_per_task;	/* --cpus-per-task=n, -c n	*/
+	int ntasks_per_node;	/* --ntasks-per-node=n		*/
+	int ntasks_per_socket;	/* --ntasks-per-socket=n	*/
+	int ntasks_per_core;	/* --ntasks-per-core=n		*/
 	int cpus_on_node;
 	pid_t task_pid;
+	char *sgtids;		/* global ranks array of integers */	
+	uint16_t pty_port;	/* used to communicate window size changes */
+	uint8_t ws_col;		/* window size, columns */
+	uint8_t ws_row;		/* window size, row count */
+	char *ckpt_path;	/* --ckpt-path=                 */
 } env_t;
 
 
@@ -91,12 +98,14 @@ int     setup_env(env_t *env);
  *	SLURM_JOB_NUM_NODES
  *	SLURM_JOB_NODELIST
  *	SLURM_JOB_CPUS_PER_NODE
+ *	LOADLBATCH (AIX only)
  *
  * Sets OBSOLETE variables:
  *	? probably only needed for users...
  */
 void env_array_for_job(char ***dest,
-		       const resource_allocation_response_msg_t *alloc);
+		       const resource_allocation_response_msg_t *alloc,
+		       job_desc_msg_t *desc);
 
 /*
  * Set in "dest" the environment variables relevant to a SLURM batch
@@ -110,6 +119,9 @@ void env_array_for_job(char ***dest,
  *	SLURM_JOB_NUM_NODES
  *	SLURM_JOB_NODELIST
  *	SLURM_JOB_CPUS_PER_NODE
+ *	ENVIRONMENT=BATCH
+ *	HOSTNAME
+ *	LOADLBATCH (AIX only)
  *
  * Sets OBSOLETE variables:
  *	SLURM_JOBID
@@ -118,7 +130,9 @@ void env_array_for_job(char ***dest,
  *	SLURM_TASKS_PER_NODE <- poorly named, really CPUs per node
  *	? probably only needed for users...
  */
-void env_array_for_batch_job(char ***dest, const batch_job_launch_msg_t *batch);
+extern void env_array_for_batch_job(char ***dest, 
+				    const batch_job_launch_msg_t *batch,
+				    const char* node_name);
 
 /*
  * Set in "dest the environment variables relevant to a SLURM job step,
@@ -132,7 +146,6 @@ void env_array_for_batch_job(char ***dest, const batch_job_launch_msg_t *batch);
  *	SLURM_STEP_NUM_NODES
  *	SLURM_STEP_NUM_TASKS
  *	SLURM_STEP_TASKS_PER_NODE
- *	SLURM_STEP_LAUNCHER_HOSTNAME
  *	SLURM_STEP_LAUNCHER_PORT
  *	SLURM_STEP_LAUNCHER_IPADDR
  *
@@ -150,9 +163,7 @@ void env_array_for_batch_job(char ***dest, const batch_job_launch_msg_t *batch);
 void
 env_array_for_step(char ***dest,
 		   const job_step_create_response_msg_t *step,
-		   const char *launcher_hostname,
-		   uint16_t launcher_port,
-		   const char *ip_addr_str);
+		   uint16_t launcher_port);
 
 /*
  * Return an empty environment variable array (contains a single
@@ -185,7 +196,19 @@ void env_array_free(char **env_array);
  * Return 1 on success, and 0 on error.
  */
 int env_array_append(char ***array_ptr, const char *name,
-		     const char *value_fmt, ...);
+		     const char *value);
+
+/*
+ * Append a single environment variable to an environment variable array,
+ * if and only if a variable by that name does not already exist in the
+ * array.
+ *
+ * "value_fmt" supports printf-style formatting.
+ *
+ * Return 1 on success, and 0 on error.
+ */
+int env_array_append_fmt(char ***array_ptr, const char *name,
+			 const char *value_fmt, ...);
 
 /*
  * Append a single environment variable to an environment variable array
@@ -204,15 +227,51 @@ int env_array_overwrite(char ***array_ptr, const char *name,
  * by the same name is found in the array, it is overwritten with the
  * new value.  The "value_fmt" string may contain printf-style options.
  *
+ * "value_fmt" supports printf-style formatting.
+ *
  * Return 1 on success, and 0 on error.
  */
 int env_array_overwrite_fmt(char ***array_ptr, const char *name,
 			    const char *value_fmt, ...);
 
 /*
- * Set all of the environment variables in a supplied environment
- * variable array.
+ * Set in the running process's environment all of the environment
+ * variables in a supplied environment variable array.
  */
 void env_array_set_environment(char **env_array);
+
+/*
+ * Return an array of strings representing the specified user's default
+ * environment variables following a two-prongged approach.
+ * 1. Execute (more or less): "/bin/su - <username> -c /usr/bin/env"
+ *    Depending upon the user's login scripts, this may take a very
+ *    long time to complete or possibly never return
+ * 2. Load the user environment from a cache file. This is used
+ *    in the event that option 1 times out.
+ *
+ * timeout value is in seconds or zero for default (8 secs)
+ * mode is 1 for short ("su <user>"), 2 for long ("su - <user>")
+ * On error, returns NULL.
+ *
+ * NOTE: The calling process must have an effective uid of root for
+ * this function to succeed.
+ */
+char **env_array_user_default(const char *username, int timeout, int mode);
+
+/*
+ * The cpus-per-node representation in SLURM (and perhaps tasks-per-node
+ * in the future) is stored in a compressed format comprised of two
+ * equal-length arrays, and an integer holding the array length. In one 
+ * array an element represents a count (number of cpus, number of tasks,
+ * etc.), and the corresponding element in the other array contains the
+ * number of times the count is repeated sequentially in the uncompressed
+ * something-per-node array.
+ *
+ * This function returns the string representation of the compressed
+ * array.  Free with xfree().
+ */
+char *uint32_compressed_to_str(uint32_t array_len,
+			       const uint16_t *array,
+			       const uint32_t *array_reps);
 
 #endif

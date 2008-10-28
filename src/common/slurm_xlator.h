@@ -8,7 +8,7 @@
  *  the SLURM function. By renaming the functions, inappropriate linking 
  *  should be avoided.
  *
- *  All SLURM functions referenced from the switch and auth plugins should
+ *  All SLURM functions referenced from the switch, auth, and mpi plugins should
  *  have aliases established. Functions not referenced from the plugins 
  *  need not be aliased.
  *
@@ -30,7 +30,7 @@
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <grondona1@llnl.gov>, Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -113,6 +113,12 @@
 #define bit_nffs		slurm_bit_nffs
 #define bit_copybits		slurm_bit_copybits
 
+/* fd.[ch] functions */
+#define fd_read_n		slurm_fd_read_n
+#define fd_write_n		slurm_fd_write_n
+#define fd_set_blocking		slurm_fd_set_blocking
+#define fd_set_nonblocking	slurm_fd_set_nonblocking
+
 /* hostlist.[ch] functions */
 #define	hostlist_create		slurm_hostlist_create
 #define	hostlist_copy		slurm_hostlist_copy
@@ -173,7 +179,7 @@
 #define	list_insert		slurm_list_insert
 #define	list_find		slurm_list_find
 #define	list_remove		slurm_list_remove
-#define	list_delete		slurm_list_delete
+#define	list_delete_item	slurm_list_delete_item
 #define	list_install_fork_handlers slurm_list_install_fork_handlers
 
 /* log.[ch] functions */
@@ -202,6 +208,11 @@
 /* macros.h functions
  * None exported today. 
  * The header file used only for #define values. */
+
+/* net.[ch] functions */
+#define net_stream_listen	slurm_net_stream_listen
+#define net_accept_stream	slurm_net_accept_stream
+#define net_set_low_water	slurm_net_set_low_water
 
 /* pack.[ch] functions */
 #define	create_buf		slurm_create_buf
@@ -233,6 +244,15 @@
 #define	setenvf 		slurm_setenvpf
 #define	unsetenvp		slurm_unsetenvp
 #define	getenvp			slurm_getenvp
+#define env_array_create	slurm_env_array_create
+#define env_array_merge		slurm_env_array_merge
+#define env_array_copy		slurm_env_array_copy
+#define env_array_free		slurm_env_array_free
+#define env_array_append	slurm_env_array_append
+#define env_array_append_fmt	slurm_env_array_append_fmt
+#define env_array_overwrite	slurm_env_array_overwrite
+#define env_array_overwrite_fmt slurm_env_array_overwrite_fmt
+
 
 /* slurm_auth.[ch] functions
  * None exported today. 

@@ -4,7 +4,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  Much of this code was derived or adapted from the log.c component of 
  *  openssh which contains the following notices:
@@ -44,6 +44,14 @@
 
 #ifndef _LOG_H
 #define _LOG_H
+
+#ifdef HAVE_CONFIG_H
+#  include "config.h"
+#endif
+
+#ifdef HAVE_SYS_SYSLOG_H
+#  include <sys/syslog.h>
+#endif
 
 #include <syslog.h> 	
 #include <stdio.h>

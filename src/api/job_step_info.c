@@ -6,7 +6,7 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>, 
  *             Joey Ekstrom <ekstrom1@llnl.gov>,  et. al.
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -128,9 +128,20 @@ slurm_sprint_job_step_info ( job_step_info_t * job_step_ptr,
 
 	/****** Line 2 ******/
 	snprintf(tmp_line, sizeof(tmp_line),
-		"Partition=%s Nodes=%s Name=%s Network=%s\n\n", 
+		"Partition=%s Nodes=%s Name=%s Network=%s Checkpoint=%u", 
 		job_step_ptr->partition, job_step_ptr->nodes,
-		job_step_ptr->name, job_step_ptr->network);
+		job_step_ptr->name, job_step_ptr->network,
+		job_step_ptr->ckpt_interval);
+	xstrcat(out, tmp_line);
+	if (one_liner)
+		xstrcat(out, " ");
+	else
+		xstrcat(out, "\n   ");
+
+	/****** Line 3 ******/
+	snprintf(tmp_line, sizeof(tmp_line),
+		"CheckpointPath=%s\n\n", 
+		 job_step_ptr->ckpt_path);
 	xstrcat(out, tmp_line);
 
 	return out;
@@ -158,6 +169,9 @@ slurm_get_job_steps (time_t update_time, uint32_t job_id, uint32_t step_id,
 	slurm_msg_t req_msg;
 	slurm_msg_t resp_msg;
 	job_step_info_request_msg_t req;
+
+	slurm_msg_t_init(&req_msg);
+	slurm_msg_t_init(&resp_msg);
 
 	req.last_update  = update_time;
 	req.job_id	= job_id;
@@ -194,6 +208,9 @@ slurm_job_step_layout_get(uint32_t job_id, uint32_t step_id)
 	job_step_id_msg_t data;
 	slurm_msg_t req, resp;
 	int errnum;
+
+	slurm_msg_t_init(&req);
+	slurm_msg_t_init(&resp);
 
 	req.msg_type = REQUEST_STEP_LAYOUT;
 	req.data = &data;

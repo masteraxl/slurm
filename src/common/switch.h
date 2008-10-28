@@ -1,10 +1,11 @@
 /*****************************************************************************\
  *  src/common/switch.h - Generic switch (interconnect) info for slurm
  *****************************************************************************
- *  Copyright (C) 2002-2006 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>.
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -93,12 +94,6 @@ extern int  switch_restore(char *dir_name, bool recover);
  */
 extern int  switch_clear(void);
 
-/* report if resource fragmentation is important. if so, delay scheduling a 
- * new job while another is in the process of terminating.
- * RET          - true if fragmentation is important
- */
-extern bool switch_no_frag(void);
-
 /* return the number of a switch-specific error code */
 extern int switch_get_errno(void);
 
@@ -128,7 +123,7 @@ extern int  switch_alloc_jobinfo (switch_jobinfo_t *jobinfo);
  * NOTE: storage must be freed using g_switch_free_jobinfo
  */
 extern int  switch_build_jobinfo (switch_jobinfo_t jobinfo, 
-		char *nodelist, uint32_t *tasks_per_node, 
+		char *nodelist, uint16_t *tasks_per_node, 
 		int cyclic_alloc, char *network);
 
 /* copy a switch job credential

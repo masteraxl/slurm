@@ -14,7 +14,7 @@
 # Copyright (C) 2002 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-217948.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -50,7 +50,7 @@ print_header $test_id
 set got_login 0
 spawn $bin_id -un
 expect {
-        -re "($alpha_numeric)" {
+        -re "($alpha_numeric_under)" {
 		set my_login $expect_out(1,string)
 		set got_login 1
 		exp_continue
@@ -71,19 +71,18 @@ if { $got_login == 0 } {
 make_bash_script $file_in "$srun $bin_sleep $max_job_delay"
 
 #
-# Spawn a srun batch job
+# Spawn a sbatch job
 #
-spawn $srun --batch --output=/dev/null --error=/dev/null --hold -t5 $file_in
+set sbatch_pid [spawn $sbatch --output=/dev/null --error=/dev/null --hold -t5 $file_in]
 expect {
-	-re "jobid ($number) submitted" {
+	-re "Submitted batch job ($number)" {
 		set job_id $expect_out(1,string)
 		exp_continue
 	}
 	timeout {
 		send_user "\nFAILURE: srun not responding\n"
-		kill_srun
+		slow_kill $sbatch_pid
 		set exit_code 1
-		exp_continue
 	}
 	eof {
 		wait
@@ -101,7 +100,7 @@ exec $bin_rm -f $file_in
 set matches  0
 spawn $scancel --interactive $job_id
 expect {
-	-re "Cancel job_id=$job_id .* partition=($alpha_numeric) .*\? " {
+	-re "Cancel job_id=$job_id .* partition=($alpha_numeric_under) .*\? " {
 		set default_part $expect_out(1,string)
 		send "n\n"
 		exp_continue

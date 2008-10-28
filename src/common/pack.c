@@ -2,11 +2,12 @@
  *  pack.c - lowest level un/pack functions
  *  NOTE: The memory buffer will expand as needed using xrealloc()
  *****************************************************************************
- *  Copyright (C) 2002 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Jim Garlick <garlick@llnl.gov>, 
  *             Morris Jette <jette1@llnl.gov>, et. al.
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -47,7 +48,6 @@
 #include <string.h>
 #include <time.h>
 #include <inttypes.h>
-
 #include <slurm/slurm_errno.h>
 
 #include "src/common/pack.h"
@@ -65,12 +65,16 @@ strong_alias(init_buf,		slurm_init_buf);
 strong_alias(xfer_buf_data,	slurm_xfer_buf_data);
 strong_alias(pack_time,		slurm_pack_time);
 strong_alias(unpack_time,	slurm_unpack_time);
+strong_alias(pack64,		slurm_pack64);
+strong_alias(unpack64,		slurm_unpack64);
 strong_alias(pack32,		slurm_pack32);
 strong_alias(unpack32,		slurm_unpack32);
 strong_alias(pack16,		slurm_pack16);
 strong_alias(unpack16,		slurm_unpack16);
 strong_alias(pack8,		slurm_pack8);
 strong_alias(unpack8,		slurm_unpack8);
+strong_alias(pack16_array,      slurm_pack16_array);
+strong_alias(unpack16_array,    slurm_unpack16_array);
 strong_alias(pack32_array,	slurm_pack32_array);
 strong_alias(unpack32_array,	slurm_unpack32_array);
 strong_alias(packmem,		slurm_packmem);
@@ -89,6 +93,11 @@ strong_alias(unpackmem_array,	slurm_unpackmem_array);
 Buf create_buf(char *data, int size)
 {
 	Buf my_buf;
+
+	if (size > MAX_BUF_SIZE) {
+		error("create_buf: buffer size too large");
+		return NULL;
+	}
 
 	my_buf = xmalloc(sizeof(struct slurm_buf));
 	my_buf->magic = BUF_MAGIC;
@@ -111,6 +120,11 @@ void free_buf(Buf my_buf)
 /* Grow a buffer by the specified amount */
 void grow_buf (Buf buffer, int size)
 {
+	if (buffer->size > (MAX_BUF_SIZE - size)) {
+		error("grow_buf: buffer size too large");
+		return;
+	}
+
 	buffer->size += size;
 	xrealloc(buffer->head, buffer->size);
 }
@@ -119,6 +133,11 @@ void grow_buf (Buf buffer, int size)
 Buf init_buf(int size)
 {
 	Buf my_buf;
+
+	if (size > MAX_BUF_SIZE) {
+		error("init_buf: buffer size too large");
+		return NULL;
+	}
 
 	my_buf = xmalloc(sizeof(struct slurm_buf));
 	my_buf->magic = BUF_MAGIC;
@@ -150,6 +169,10 @@ void pack_time(time_t val, Buf buffer)
 	int64_t n64 = HTON_int64((int64_t) val);
 
 	if (remaining_buf(buffer) < sizeof(n64)) {
+		if (buffer->size > (MAX_BUF_SIZE - BUF_SIZE)) {
+			error("pack_time: buffer size too large");
+			return;
+		}
 		buffer->size += BUF_SIZE;
 		xrealloc(buffer->head, buffer->size);
 	}
@@ -173,6 +196,43 @@ int unpack_time(time_t * valp, Buf buffer)
 
 
 /*
+ * Given a 64-bit integer in host byte order, convert to network byte order
+ * store in buffer, and adjust buffer counters.
+ */
+void pack64(uint64_t val, Buf buffer)
+{
+	uint64_t nl =  HTON_uint64(val);
+
+	if (remaining_buf(buffer) < sizeof(nl)) {
+		if (buffer->size > (MAX_BUF_SIZE - BUF_SIZE)) {
+			error("pack64: buffer size too large");
+			return;
+		}
+		buffer->size += BUF_SIZE;
+		xrealloc(buffer->head, buffer->size);
+	}
+
+	memcpy(&buffer->head[buffer->processed], &nl, sizeof(nl));
+	buffer->processed += sizeof(nl);
+}
+
+/*
+ * Given a buffer containing a network byte order 64-bit integer,
+ * store a host integer at 'valp', and adjust buffer counters.
+ */
+int unpack64(uint64_t * valp, Buf buffer)
+{
+	uint64_t nl;
+	if (remaining_buf(buffer) < sizeof(nl))
+		return SLURM_ERROR;
+	
+	memcpy(&nl, &buffer->head[buffer->processed], sizeof(nl));
+	*valp = NTOH_uint64(nl);
+	buffer->processed += sizeof(nl);
+	return SLURM_SUCCESS;
+}
+
+/*
  * Given a 32-bit integer in host byte order, convert to network byte order
  * store in buffer, and adjust buffer counters.
  */
@@ -181,6 +241,10 @@ void pack32(uint32_t val, Buf buffer)
 	uint32_t nl = htonl(val);
 
 	if (remaining_buf(buffer) < sizeof(nl)) {
+		if (buffer->size > (MAX_BUF_SIZE - BUF_SIZE)) {
+			error("pack32: buffer size too large");
+			return;
+		}
 		buffer->size += BUF_SIZE;
 		xrealloc(buffer->head, buffer->size);
 	}
@@ -202,6 +266,35 @@ int unpack32(uint32_t * valp, Buf buffer)
 	memcpy(&nl, &buffer->head[buffer->processed], sizeof(nl));
 	*valp = ntohl(nl);
 	buffer->processed += sizeof(nl);
+	return SLURM_SUCCESS;
+}
+
+/* Given a *uint16_t, it will pack an array of size_val */
+void pack16_array(uint16_t * valp, uint32_t size_val, Buf buffer)
+{
+	uint32_t i = 0;
+
+	pack32(size_val, buffer);
+
+	for (i = 0; i < size_val; i++) {
+		pack16(*(valp + i), buffer);
+	}
+}
+
+/* Given a int ptr, it will unpack an array of size_val
+ */
+int unpack16_array(uint16_t ** valp, uint32_t * size_val, Buf buffer)
+{
+	uint32_t i = 0;
+
+	if (unpack32(size_val, buffer))
+		return SLURM_ERROR;
+
+	*valp = xmalloc((*size_val) * sizeof(uint16_t));
+	for (i = 0; i < *size_val; i++) {
+		if (unpack16((*valp) + i, buffer))
+			return SLURM_ERROR;
+	}
 	return SLURM_SUCCESS;
 }
 
@@ -243,6 +336,10 @@ void pack16(uint16_t val, Buf buffer)
 	uint16_t ns = htons(val);
 
 	if (remaining_buf(buffer) < sizeof(ns)) {
+		if (buffer->size > (MAX_BUF_SIZE - BUF_SIZE)) {
+			error("pack16: buffer size too large");
+			return;
+		}
 		buffer->size += BUF_SIZE;
 		xrealloc(buffer->head, buffer->size);
 	}
@@ -275,6 +372,10 @@ int unpack16(uint16_t * valp, Buf buffer)
 void pack8(uint8_t val, Buf buffer)
 {
 	if (remaining_buf(buffer) < sizeof(uint8_t)) {
+		if (buffer->size > (MAX_BUF_SIZE - BUF_SIZE)) {
+			error("pack8: buffer size too large");
+			return;
+		}
 		buffer->size += BUF_SIZE;
 		xrealloc(buffer->head, buffer->size);
 	}
@@ -302,11 +403,15 @@ int unpack8(uint8_t * valp, Buf buffer)
  * size_val to network byte order and store at buffer followed by 
  * the data at valp. Adjust buffer counters.
  */
-void packmem(char *valp, uint16_t size_val, Buf buffer)
+void packmem(char *valp, uint32_t size_val, Buf buffer)
 {
-	uint16_t ns = htons(size_val);
+	uint32_t ns = htonl(size_val);
 
 	if (remaining_buf(buffer) < (sizeof(ns) + size_val)) {
+		if (buffer->size > (MAX_BUF_SIZE -  size_val - BUF_SIZE)) {
+			error("packmem: buffer size too large");
+			return;
+		}
 		buffer->size += (size_val + BUF_SIZE);
 		xrealloc(buffer->head, buffer->size);
 	}
@@ -329,15 +434,15 @@ void packmem(char *valp, uint16_t size_val, Buf buffer)
  * NOTE: valp is set to point into the buffer bufp, a copy of 
  *	the data is not made
  */
-int unpackmem_ptr(char **valp, uint16_t * size_valp, Buf buffer)
+int unpackmem_ptr(char **valp, uint32_t * size_valp, Buf buffer)
 {
-	uint16_t ns;
+	uint32_t ns;
 
 	if (remaining_buf(buffer) < sizeof(ns))
 		return SLURM_ERROR;
 
 	memcpy(&ns, &buffer->head[buffer->processed], sizeof(ns));
-	*size_valp = ntohs(ns);
+	*size_valp = ntohl(ns);
 	buffer->processed += sizeof(ns);
 
 	if (*size_valp > 0) {
@@ -359,15 +464,15 @@ int unpackmem_ptr(char **valp, uint16_t * size_valp, Buf buffer)
  * NOTE: The caller is responsible for the management of valp and 
  * insuring it has sufficient size
  */
-int unpackmem(char *valp, uint16_t * size_valp, Buf buffer)
+int unpackmem(char *valp, uint32_t * size_valp, Buf buffer)
 {
-	uint16_t ns;
+	uint32_t ns;
 
 	if (remaining_buf(buffer) < sizeof(ns))
 		return SLURM_ERROR;
 
 	memcpy(&ns, &buffer->head[buffer->processed], sizeof(ns));
-	*size_valp = ntohs(ns);
+	*size_valp = ntohl(ns);
 	buffer->processed += sizeof(ns);
 
 	if (*size_valp > 0) {
@@ -389,15 +494,15 @@ int unpackmem(char *valp, uint16_t * size_valp, Buf buffer)
  *	the caller is responsible for calling xfree() on *valp
  *	if non-NULL (set to NULL on zero size buffer value)
  */
-int unpackmem_xmalloc(char **valp, uint16_t * size_valp, Buf buffer)
+int unpackmem_xmalloc(char **valp, uint32_t * size_valp, Buf buffer)
 {
-	uint16_t ns;
+	uint32_t ns;
 
 	if (remaining_buf(buffer) < sizeof(ns))
 		return SLURM_ERROR;
 
 	memcpy(&ns, &buffer->head[buffer->processed], sizeof(ns));
-	*size_valp = ntohs(ns);
+	*size_valp = ntohl(ns);
 	buffer->processed += sizeof(ns);
 
 	if (*size_valp > 0) {
@@ -421,15 +526,15 @@ int unpackmem_xmalloc(char **valp, uint16_t * size_valp, Buf buffer)
  *	the caller is responsible for calling free() on *valp
  *	if non-NULL (set to NULL on zero size buffer value)
  */
-int unpackmem_malloc(char **valp, uint16_t * size_valp, Buf buffer)
+int unpackmem_malloc(char **valp, uint32_t * size_valp, Buf buffer)
 {
-	uint16_t ns;
+	uint32_t ns;
 
 	if (remaining_buf(buffer) < sizeof(ns))
 		return SLURM_ERROR;
 
 	memcpy(&ns, &buffer->head[buffer->processed], sizeof(ns));
-	*size_valp = ntohs(ns);
+	*size_valp = ntohl(ns);
 	buffer->processed += sizeof(ns);
 
 	if (*size_valp > 0) {
@@ -449,12 +554,16 @@ int unpackmem_malloc(char **valp, uint16_t * size_valp, Buf buffer)
  * (size_val), convert size_val to network byte order and store in the  
  * buffer followed by the data at valp. Adjust buffer counters. 
  */
-void packstr_array(char **valp, uint16_t size_val, Buf buffer)
+void packstr_array(char **valp, uint32_t size_val, Buf buffer)
 {
 	int i;
-	uint16_t ns = htons(size_val);
+	uint32_t ns = htonl(size_val);
 
 	if (remaining_buf(buffer) < sizeof(ns)) {
+		if (buffer->size > (MAX_BUF_SIZE - BUF_SIZE)) {
+			error("packstr_array: buffer size too large");
+			return;
+		}
 		buffer->size += BUF_SIZE;
 		xrealloc(buffer->head, buffer->size);
 	}
@@ -476,23 +585,23 @@ void packstr_array(char **valp, uint16_t size_val, Buf buffer)
  *	the caller is responsible for calling xfree on *valp
  *	if non-NULL (set to NULL on zero size buffer value)
  */
-int unpackstr_array(char ***valp, uint16_t * size_valp, Buf buffer)
+int unpackstr_array(char ***valp, uint32_t * size_valp, Buf buffer)
 {
 	int i;
-	uint16_t ns;
-	uint16_t uint16_tmp;
+	uint32_t ns;
+	uint32_t uint32_tmp;
 
 	if (remaining_buf(buffer) < sizeof(ns))
 		return SLURM_ERROR;
 
 	memcpy(&ns, &buffer->head[buffer->processed], sizeof(ns));
-	*size_valp = ntohs(ns);
+	*size_valp = ntohl(ns);
 	buffer->processed += sizeof(ns);
 
 	if (*size_valp > 0) {
 		*valp = xmalloc(sizeof(char *) * (*size_valp + 1));
 		for (i = 0; i < *size_valp; i++) {
-			if (unpackmem_xmalloc(&(*valp)[i], &uint16_tmp, buffer))
+			if (unpackmem_xmalloc(&(*valp)[i], &uint32_tmp, buffer))
 				return SLURM_ERROR;
 		}
 		(*valp)[i] = NULL;	/* NULL terminated array so that execle */
@@ -509,6 +618,10 @@ int unpackstr_array(char ***valp, uint16_t * size_valp, Buf buffer)
 void packmem_array(char *valp, uint32_t size_val, Buf buffer)
 {
 	if (remaining_buf(buffer) < size_val) {
+		if (buffer->size > (MAX_BUF_SIZE - size_val - BUF_SIZE)) {
+			error("packmem_array: buffer size too large");
+			return;
+		}
 		buffer->size += (size_val + BUF_SIZE);
 		xrealloc(buffer->head, buffer->size);
 	}

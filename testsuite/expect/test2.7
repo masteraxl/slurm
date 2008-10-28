@@ -10,7 +10,7 @@
 # Copyright (C) 2002-2006 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-217948.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -52,17 +52,16 @@ make_bash_script $file_in "$scontrol pidinfo \$\$"
 #
 # Spawn a srun batch job that uses stdout/err and confirm their contents
 #
-spawn $srun --batch --output=$file_out --error=$file_err -t1 $file_in
+set srun_pid [spawn $sbatch --output=$file_out --error=$file_err -t1 $file_in]
 expect {
-	-re "jobid ($number) submitted" {
+	-re "Submitted batch job ($number)" {
 		set job_id $expect_out(1,string)
 		exp_continue
 	}
 	timeout {
 		send_user "\nFAILURE: srun not responding\n"
-		kill_srun
+		slow_kill $srun_pid
 		set exit_code 1
-		exp_continue
 	}
 	eof {
 		wait
@@ -88,7 +87,6 @@ if {[wait_for_job $job_id "DONE"] != 0} {
 # Verify job_id in output file
 #
 set rem_time 999
-set delta 999
 if {[wait_for_file $file_out] == 0} {
 	spawn $bin_cat $file_out
 	expect {
@@ -100,10 +98,6 @@ if {[wait_for_file $file_out] == 0} {
 			set rem_time $expect_out(1,string)
 			exp_continue
 		}
-		-re "slurm_get_rem_time calls in ($number) seconds" {
-			set delta $expect_out(1,string)
-			exp_continue
-		}
 		eof {
 			wait
 		}
@@ -113,12 +107,8 @@ if {$rem_time > 60} {
 	send_user "\nFAILURE: job remaining time is wrong $rem_time\n"
 	set exit_code 1
 }
-if {$rem_time < 59} {
+if {$rem_time < 58} {
 	send_user "\nFAILURE: job remaining time seems too small\n"
-	set exit_code 1
-}
-if {$delta > 1} {
-	send_user "\nFAILURE: slurm_get_rem_time calls too slow\n"
 	set exit_code 1
 }
 

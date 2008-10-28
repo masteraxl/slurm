@@ -4,7 +4,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <mgrondona@llnl.gov>.
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -47,7 +47,7 @@ pdebug_trace_process(slurmd_job_t *job, pid_t pid)
 	 *  child's ptrace(PTRACE_TRACEME), then SIGSTOP, and 
 	 *  ptrace(PTRACE_DETACH). This requires a kernel patch,
 	 *  which you may already have in place for TotalView.
-	 *  If not, apply the kernel patch in etc/ptrace.patch
+	 *  If not, apply the kernel patch in contribs/ptrace.patch
 	 */
 
 	if (job->task_flags & TASK_PARALLEL_DEBUG) {

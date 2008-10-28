@@ -70,9 +70,11 @@ fi
 export LD_LIBRARY_PATH="$LIBDIR:$LD_LIBRARY_PATH"
 
 start() {
-    echo -n "starting $1: " 
+    prog=$1
+    shift
+    echo -n "starting $prog: " 
     unset HOME MAIL USER USERNAME 
-    $STARTPROC $SBINDIR/$1 $2
+    $STARTPROC $SBINDIR/$prog $*
     rc_status -v
     echo
     touch /var/lock/subsys/slurm
@@ -93,6 +95,7 @@ startall() {
     done
 }
 
+#
 # status() with slight modifications to take into account
 # instantiations of job manager slurmd's, which should not be
 # counted as "running"
@@ -124,7 +127,13 @@ slurmstatus() {
                 fi     
             done
         elif [ "$rpid" != "" -a "$pid" = "" ]; then
-            echo $"${base} dead but pid file exists"
+#           Due to change in user id, pid file may persist 
+#           after slurmctld terminates
+            if [ "$base" != "slurmctld" ] ; then
+               echo $"${base} dead but pid file exists"
+            else
+               echo $"${base} is stopped"
+            fi
             return 1
         fi 
 
@@ -140,6 +149,24 @@ slurmstatus() {
     return 3
 }
 
+#
+# stop slurm daemons, 
+# wait for termination to complete (up to 10 seconds) before returning
+#
+slurmstop() {
+    for prog in `$BINDIR/scontrol show daemons`; do
+       stop $prog
+
+       for i in 1 2 3 4
+       do
+          sleep $i
+          slurmstatus $prog
+          if [ $? != 0 ]; then
+             break
+          fi
+       done
+    done
+}
 
 #
 # The pathname substitution in daemon command assumes prefix and
@@ -158,9 +185,7 @@ case "$1" in
         startall
         ;;
     stop)
-	for prog in `$BINDIR/scontrol show daemons`; do
-	    stop $prog
-	done
+	slurmstop
         ;;
     status)
 	for prog in `$BINDIR/scontrol show daemons`; do
@@ -169,7 +194,7 @@ case "$1" in
         ;;
     restart)
         $0 stop
-	$0 start
+        $0 start
         ;;
     condrestart)
         if [ -f /var/lock/subsys/slurm ]; then

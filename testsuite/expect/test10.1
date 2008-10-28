@@ -10,7 +10,7 @@
 # Copyright (C) 2002 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Danny Auble <da@llnl.gov>
-# UCRL-CODE-217948.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -37,10 +37,14 @@ set matches     0
 
 print_header $test_id
 
+if {[file exists $smap] == 0} {
+	send_user "\nWARNING: smap not installed\n"
+	exit 0
+}
+
 #
 # Report the smap usage format
 #
- 
 spawn $smap --usage  
 expect {
 	-re "Usage: .*seconds.*" {

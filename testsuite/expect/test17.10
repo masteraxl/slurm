@@ -13,7 +13,7 @@
 # Copyright (C) 2002-2006 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-217948.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -104,7 +104,7 @@ expect {
 		}
 		exp_continue
 	}
-	-re "MinMemory=($number)" {
+	-re "MinMemoryNode=($number)" {
 		set read_mem $expect_out(1,string)
 		if {$read_mem == $mem_size} {
 			incr matches

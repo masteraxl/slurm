@@ -11,7 +11,7 @@
 # Copyright (C) 2002-2006 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-217948.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -78,7 +78,7 @@ expect {
 		incr matches -10
 		exp_continue
 	}
-	-re "($end_of_line)($alpha_numeric)(\[ \*\]) *up" {
+	-re "($end_of_line)($alpha_numeric_under)(\[ \*\]) *up" {
 		if (![string compare $expect_out(3,string) "*"]) {
 			set def_part 1
 			set def_part_name $expect_out(2,string)

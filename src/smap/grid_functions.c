@@ -5,7 +5,7 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
  *
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -16,7 +16,7 @@
  *  any later version.
  *
  *  In addition, as a special exception, the copyright holders give permission 
- *  to link the code of portions of this program with the OpenSSL library under 
+ *  to link the code of portions of this program with the OpenSSL library under
  *  certain conditions as described in each individual source file, and 
  *  distribute linked combinations including the two. You must obey the GNU 
  *  General Public License in all respects for all of the code used other than 
@@ -46,9 +46,9 @@ extern int set_grid(int start, int end, int count)
 	for (y = DIM_SIZE[Y] - 1; y >= 0; y--) {
 		for (z = 0; z < DIM_SIZE[Z]; z++) {
 			for (x = 0; x < DIM_SIZE[X]; x++) {
-				if ((ba_system_ptr->grid[x][y][z].indecies 
+				if ((ba_system_ptr->grid[x][y][z].index 
 				     < start)
-				||  (ba_system_ptr->grid[x][y][z].indecies 
+				||  (ba_system_ptr->grid[x][y][z].index 
 				     > end)) 
 					continue;
 				if ((ba_system_ptr->grid[x][y][z].state 
@@ -56,7 +56,7 @@ extern int set_grid(int start, int end, int count)
 				    ||  (ba_system_ptr->grid[x][y][z].state 
 					 & NODE_STATE_DRAIN))
 					continue;
-				
+
 				ba_system_ptr->grid[x][y][z].letter = 
 					letters[count%62];
 				ba_system_ptr->grid[x][y][z].color = 
@@ -66,8 +66,8 @@ extern int set_grid(int start, int end, int count)
 	}
 #else
 	for (x = 0; x < DIM_SIZE[X]; x++) {
-		if ((ba_system_ptr->grid[x].indecies < start)
-		    ||  (ba_system_ptr->grid[x].indecies > end)) 
+		if ((ba_system_ptr->grid[x].index < start)
+		    ||  (ba_system_ptr->grid[x].index > end)) 
 			continue;
 		if ((ba_system_ptr->grid[x].state == NODE_STATE_DOWN)
 		    ||  (ba_system_ptr->grid[x].state & NODE_STATE_DRAIN))
@@ -101,11 +101,16 @@ extern int set_grid_bg(int *start, int *end, int count, int set)
 	for (x = start[X]; x <= end[X]; x++) {
 		for (y = start[Y]; y <= end[Y]; y++) {
 			for (z = start[Z]; z <= end[Z]; z++) {
+				/* set the color and letter of the
+				   block if the set flag is specified
+				   or if the letter hasn't been set yet
+				*/
 				if(set 
 				   || ((ba_system_ptr->grid[x][y][z].letter
 					== '.')
 				       && (ba_system_ptr->grid[x][y][z].letter 
 					   != '#'))) {
+					
 						ba_system_ptr->
 							grid[x][y][z].letter = 
 							letters[count%62];
@@ -160,14 +165,14 @@ extern void print_grid(int dir)
 						  grid[x][y][z].color, 
                                                   7);
 
-				wattron(ba_system_ptr->grid_win,
+				wattron(grid_win,
 					COLOR_PAIR(ba_system_ptr->
 						   grid[x][y][z].color));
 
-				mvwprintw(ba_system_ptr->grid_win,
+				mvwprintw(grid_win,
 					  grid_ycord, grid_xcord, "%c",
 					  ba_system_ptr->grid[x][y][z].letter);
-				wattroff(ba_system_ptr->grid_win,
+				wattroff(grid_win,
 					 COLOR_PAIR(ba_system_ptr->
 						    grid[x][y][z].color));
 				grid_xcord++;
@@ -191,21 +196,21 @@ extern void print_grid(int dir)
 				  ba_system_ptr->grid[x].color, 
 				  7);
 		
-		wattron(ba_system_ptr->grid_win,
+		wattron(grid_win,
 			COLOR_PAIR(ba_system_ptr->grid[x].color));
 		
-		mvwprintw(ba_system_ptr->grid_win,
+		mvwprintw(grid_win,
 			  grid_ycord, grid_xcord, "%c",
 			  ba_system_ptr->grid[x].letter);
-		wattroff(ba_system_ptr->grid_win,
+		wattroff(grid_win,
 			 COLOR_PAIR(ba_system_ptr->grid[x].color));
 		
 		grid_xcord++;
-		if(grid_xcord==ba_system_ptr->grid_win->_maxx) {
+		if(grid_xcord==grid_win->_maxx) {
 			grid_xcord=1;
 			grid_ycord++;
 		}
-		if(grid_ycord==ba_system_ptr->grid_win->_maxy) {
+		if(grid_ycord==grid_win->_maxy) {
 			break;
 		}
 	}

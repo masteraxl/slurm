@@ -5,7 +5,7 @@
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -192,8 +192,11 @@ extern int slurm_ckpt_op ( uint16_t op, uint16_t data,
 			if (check_ptr->disabled)
 				rc = ESLURM_DISABLED;
 			else {
-				if (check_ptr->reply_cnt < check_ptr->node_cnt)
+				if ((check_ptr->reply_cnt < check_ptr->node_cnt)
+				    && event_time) {
+					/* Return time of last event */
 					*event_time = check_ptr->time_stamp;
+				}
 				rc = SLURM_SUCCESS;
 			}
 			break;
@@ -260,7 +263,9 @@ extern int slurm_ckpt_comp ( struct step_record * step_ptr, time_t event_time,
 		return ESLURM_ALREADY_DONE;
 
 	if (error_code > check_ptr->error_code) {
-		info("slurm_ckpt_comp error %u: %s", error_code, error_msg);
+		info("slurm_ckpt_comp for step %u.%u error %u: %s", 
+			step_ptr->job_ptr->job_id, step_ptr->step_id,
+			error_code, error_msg);
 		check_ptr->error_code = error_code;
 		xfree(check_ptr->error_msg);
 		check_ptr->error_msg = xstrdup(error_msg);
@@ -272,7 +277,7 @@ extern int slurm_ckpt_comp ( struct step_record * step_ptr, time_t event_time,
 	if (check_ptr->reply_cnt++ == check_ptr->node_cnt) {
 		time_t now = time(NULL);
 		long delay = (long) difftime(now, check_ptr->time_stamp);
-		info("Checkpoint complete for job %u.%u in %ld seconds",
+		info("slurm_ckpt_comp for step %u.%u in %ld secs",
 			step_ptr->job_ptr->job_id, step_ptr->step_id,
 			delay);
 		check_ptr->time_stamp = now;
@@ -313,7 +318,7 @@ extern int slurm_ckpt_pack_job(check_jobinfo_t jobinfo, Buf buffer)
 
 extern int slurm_ckpt_unpack_job(check_jobinfo_t jobinfo, Buf buffer)
 {
-	uint16_t uint16_tmp;
+	uint32_t uint32_tmp;
 	struct check_job_info *check_ptr =
 		(struct check_job_info *)jobinfo;
 
@@ -323,7 +328,7 @@ extern int slurm_ckpt_unpack_job(check_jobinfo_t jobinfo, Buf buffer)
 	safe_unpack16(&check_ptr->wait_time, buffer);
 
 	safe_unpack32(&check_ptr->error_code, buffer);
-	safe_unpackstr_xmalloc(&check_ptr->error_msg, &uint16_tmp, buffer);
+	safe_unpackstr_xmalloc(&check_ptr->error_msg, &uint32_tmp, buffer);
 	safe_unpack_time(&check_ptr->time_stamp, buffer);
 	
 	return SLURM_SUCCESS; 
@@ -349,9 +354,7 @@ static void _send_sig(uint32_t job_id, uint32_t step_id, uint16_t signal,
 	agent_args->msg_type		= REQUEST_SIGNAL_TASKS;
 	agent_args->retry		= 1;
 	agent_args->msg_args		= kill_tasks_msg;
-	agent_args->slurm_addr		= xmalloc(sizeof(slurm_addr));
-	agent_args->slurm_addr[0]	= node_addr;
-	agent_args->node_names		= xstrdup(node_name);
+	agent_args->hostlist = hostlist_create(node_name);
 	agent_args->node_count		= 1;
 
 	agent_queue_request(agent_args);
@@ -384,8 +387,6 @@ static int _step_sig(struct step_record * step_ptr, uint16_t wait,
 			continue;
 		if (check_ptr->node_cnt++ > 0)
 			continue;
-		check_ptr->time_stamp = time(NULL);
-		check_ptr->wait_time  = wait;
 		_send_sig(step_ptr->job_ptr->job_id, step_ptr->step_id,
 			signal, node_record_table_ptr[i].name,
 			node_record_table_ptr[i].slurm_addr);
@@ -400,6 +401,9 @@ static int _step_sig(struct step_record * step_ptr, uint16_t wait,
 			step_ptr->step_id);
 		return ESLURM_INVALID_NODE_NAME;
 	}
+
+	check_ptr->time_stamp = time(NULL);
+	check_ptr->wait_time  = wait;
 
 	info("checkpoint requested for job %u.%u", job_ptr->job_id,
 		step_ptr->step_id);
@@ -429,7 +433,7 @@ static void *_ckpt_agent_thr(void *arg)
 			info("checkpoint timeout for %u.%u", 
 				rec->job_id, rec->step_id);
 			_ckpt_signal_step(rec);
-			list_delete(iter);
+			list_delete_item(iter);
 		}
 		slurm_mutex_unlock(&ckpt_agent_mutex);
 		list_iterator_destroy(iter);
@@ -495,7 +499,7 @@ static void _ckpt_dequeue_timeout(uint32_t job_id, uint32_t step_id,
 		||  (start_time && (rec->start_time != start_time)))
 			continue;
 		/* debug("dequeue %u.%u", job_id, step_id); */
-		list_delete(iter);
+		list_delete_item(iter);
 		break;
 	}
 	list_iterator_destroy(iter);
@@ -503,3 +507,8 @@ static void _ckpt_dequeue_timeout(uint32_t job_id, uint32_t step_id,
 	slurm_mutex_unlock(&ckpt_agent_mutex);
 }
 
+extern int slurm_ckpt_task_comp ( struct step_record * step_ptr, uint32_t task_id,
+				  time_t event_time, uint32_t error_code, char *error_msg )
+{
+	return SLURM_SUCCESS;
+}

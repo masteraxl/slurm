@@ -4,7 +4,7 @@
  *  Copyright (C) 2004 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -15,7 +15,7 @@
  *  any later version.
  *
  *  In addition, as a special exception, the copyright holders give permission 
- *  to link the code of portions of this program with the OpenSSL library under 
+ *  to link the code of portions of this program with the OpenSSL library under
  *  certain conditions as described in each individual source file, and 
  *  distribute linked combinations including the two. You must obey the GNU 
  *  General Public License in all respects for all of the code used other than 
@@ -58,6 +58,26 @@
 #  include <getopt.h>
 #else
 #  include "src/common/getopt.h"
+#endif
+
+#if HAVE_CURSES_H
+#  include <curses.h>
+#endif
+#if HAVE_NCURSES_H
+#  include <ncurses.h>
+#  ifndef HAVE_CURSES_H
+#     define HAVE_CURSES_H
+#  endif
+#endif
+
+/*
+ * On some systems (read AIX), curses.h includes term.h which does this
+ *    #define lines cur_term-> _c3
+ * This makes the symbol "lines" unusable. There is a similar #define
+ * "columns", "bell", "tone", "pulse", "hangup" and many, many more!!
+ */
+#ifdef lines
+#  undef lines
 #endif
 
 #include <stdlib.h>
@@ -109,6 +129,12 @@ typedef struct {
 
 } smap_parameters_t;
 
+extern WINDOW *grid_win;
+extern WINDOW *text_win;
+
+extern int main_xcord;
+extern int main_ycord;
+
 extern smap_parameters_t params;
 extern int text_line_cnt;
 
@@ -124,7 +150,6 @@ extern int set_grid_bg(int *start, int *end, int count, int set);
 extern void print_grid(int dir);
 
 extern void parse_command_line(int argc, char *argv[]);
-extern void snprint_time(char *buf, size_t buf_size, time_t time);
 extern void print_date();
 extern void clear_window(WINDOW *win);
 

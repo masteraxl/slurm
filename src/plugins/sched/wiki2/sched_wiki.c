@@ -1,10 +1,11 @@
 /*****************************************************************************\
  *  sched_wiki.c - Wiki plugin for Moab and Maui schedulers.
  *****************************************************************************
- *  Copyright (C) 2006 The Regents of the University of California.
+ *  Copyright (C) 2006-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Morris Jette <jette1@llnl.gov>
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -36,7 +37,6 @@
 \*****************************************************************************/
 
 #include <stdio.h>
-#include <slurm/slurm_errno.h>
 
 #include "src/common/plugin.h"
 #include "src/common/log.h"
@@ -44,7 +44,7 @@
 
 const char		plugin_name[]	= "Wiki (Maui and Moab) Scheduler plugin";
 const char		plugin_type[]	= "sched/wiki2";
-const uint32_t		plugin_version	= 90;
+const uint32_t		plugin_version	= 100;
 
 /* A plugin-global errno. */
 static int plugin_errno = SLURM_SUCCESS;
@@ -54,7 +54,7 @@ static int plugin_errno = SLURM_SUCCESS;
 /**************************************************************************/
 extern int init( void )
 {
-	verbose( "Wiki scheduler plugin loaded" );
+	verbose( "Wiki2 scheduler plugin loaded" );
 	return spawn_msg_thread();
 }
 
@@ -72,7 +72,23 @@ extern void fini( void )
 /***************************************************************************/
 extern int slurm_sched_plugin_schedule( void )
 {
-	/* No action required */
+	(void) event_notify(1234, "Requested by Slurm");
+	return SLURM_SUCCESS;
+}
+
+/***************************************************************************/
+/*  TAG(                   slurm_sched_plugin_newalloc                   ) */
+/***************************************************************************/
+extern int slurm_sched_plugin_newalloc( struct job_record *job_ptr )
+{
+	return SLURM_SUCCESS;
+}
+
+/***************************************************************************/
+/*  TAG(                   slurm_sched_plugin_freealloc                  ) */
+/***************************************************************************/
+extern int slurm_sched_plugin_freealloc( struct job_record *job_ptr )
+{
 	return SLURM_SUCCESS;
 }
 
@@ -80,15 +96,36 @@ extern int slurm_sched_plugin_schedule( void )
 /**************************************************************************/
 /* TAG(                   slurm_sched_plugin_initial_priority           ) */ 
 /**************************************************************************/
-extern uint32_t slurm_sched_plugin_initial_priority( uint32_t last_prio )
+extern uint32_t 
+slurm_sched_plugin_initial_priority( uint32_t last_prio, 
+				     struct job_record *job_ptr )
 {
+	(void) event_notify(1234, "Job submit");
+
+	if ((job_ptr->job_id >= first_job_id) && exclude_part_ptr[0]) {
+		/* Interactive job (initiated by srun) in partition
+		 * excluded from Moab scheduling */
+		int i;
+		static int exclude_prio = 100000000;
+		for (i=0; i<EXC_PART_CNT; i++) {
+			if (exclude_part_ptr[i] == NULL)
+				break;
+			if (exclude_part_ptr[i] == job_ptr->part_ptr) {
+				debug("Scheduiling job %u directly (no Moab)", 
+					job_ptr->job_id);
+				return (exclude_prio--);
+			}
+		}
+		return 0;
+	}
+
 	if (init_prio_mode == PRIO_DECREMENT) {
 		if (last_prio >= 2)
 			return (last_prio - 1);
 		else
 			return 1;
-	} else 
-		return 0;
+	}
+	return 0;
 }
 
 /**************************************************************************/
@@ -97,6 +134,24 @@ extern uint32_t slurm_sched_plugin_initial_priority( uint32_t last_prio )
 void slurm_sched_plugin_job_is_pending( void )
 {
 	/* No action required */
+}
+
+/**************************************************************************/
+/* TAG(              slurm_sched_plugin_reconfig                        ) */
+/**************************************************************************/
+int slurm_sched_plugin_reconfig( void )
+{
+	int rc = parse_wiki_config();
+	(void) event_notify(1235, "Partition change");
+	return rc;
+}
+
+/**************************************************************************/
+/* TAG(              slurm_sched_plugin_partition_change                ) */
+/**************************************************************************/
+void slurm_sched_plugin_partition_change( void )
+{
+	(void) event_notify(1235, "Partition change");
 }
 
 /**************************************************************************/
@@ -115,3 +170,18 @@ char *slurm_sched_strerror( int errnum )
 	return NULL;
 }
 
+/**************************************************************************/
+/* TAG(              slurm_sched_plugin_requeue                         ) */
+/**************************************************************************/
+void slurm_sched_plugin_requeue( struct job_record *job_ptr, char *reason )
+{
+        wiki_job_requeue(job_ptr, reason);
+}
+
+/**************************************************************************/
+/* TAG(              slurm_sched_get_conf                               ) */
+/**************************************************************************/
+char *slurm_sched_get_conf( void )
+{
+	return get_wiki_conf();
+}

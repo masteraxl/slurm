@@ -9,7 +9,7 @@ EXTRA_DIST = \
 	mpi-testscripts/barrier_timed.c	\
 	mpi-testscripts/Makefile	\
 	mpi-testscripts/script.slurm.sh	\
-	globals.example			\
+	globals				\
 	pkill				\
 	README				\
 	regression			\
@@ -31,7 +31,6 @@ EXTRA_DIST = \
 	test1.16			\
 	test1.17			\
 	test1.18			\
-	test1.18.prog.c			\
 	test1.19			\
 	test1.20			\
 	test1.21			\
@@ -52,7 +51,6 @@ EXTRA_DIST = \
 	test1.34			\
 	test1.35			\
 	test1.36			\
-	test1.37			\
 	test1.38			\
 	test1.39			\
 	test1.39.prog.c			\
@@ -61,7 +59,6 @@ EXTRA_DIST = \
 	test1.42			\
 	test1.43			\
 	test1.44			\
-	test1.45			\
 	test1.46			\
 	test1.47			\
 	test1.48			\
@@ -69,16 +66,17 @@ EXTRA_DIST = \
 	test1.50			\
 	test1.51			\
 	test1.52			\
-	test1.53			\
 	test1.54			\
 	test1.55			\
 	test1.56			\
+	test1.57			\
+	test1.58			\
+	test1.59			\
 	test1.80			\
 	test1.81			\
 	test1.82			\
 	test1.83			\
 	test1.84			\
-	test1.85			\
 	test1.86			\
 	test1.87			\
 	test1.88			\
@@ -87,6 +85,10 @@ EXTRA_DIST = \
 	test1.89.prog.c			\
 	test1.90			\
 	test1.90.prog.c			\
+	test1.91			\
+	test1.91.prog.c			\
+	test1.92			\
+	test1.93			\
 	test2.1				\
 	test2.2				\
 	test2.3				\
@@ -97,6 +99,7 @@ EXTRA_DIST = \
 	test2.8				\
 	test2.9				\
 	test2.10			\
+	test2.11			\
 	test3.1				\
 	test3.2				\
 	test3.3				\
@@ -106,6 +109,8 @@ EXTRA_DIST = \
 	test3.7				\
 	test3.7.prog.c			\
 	test3.8				\
+	test3.9				\
+	test3.10			\
 	test4.1				\
 	test4.2				\
 	test4.3				\
@@ -132,11 +137,14 @@ EXTRA_DIST = \
 	test6.5				\
 	test6.6				\
 	test6.7				\
+	test6.7.prog.c			\
 	test6.8				\
 	test6.9				\
 	test6.10			\
 	test6.11			\
 	test6.12			\
+	test6.13			\
+	test6.13.prog.c			\
 	test7.1				\
 	test7.2				\
 	test7.2.prog.c			\
@@ -144,13 +152,29 @@ EXTRA_DIST = \
 	test7.3.io.c			\
 	test7.3.prog.c			\
 	test7.4				\
-	test7.4.sh			\
 	test7.4.prog.c			\
+	test7.6				\
+	test7.6.prog.c			\
+	test7.7				\
+	test7.7.crypto.c		\
+	test7.7.prog.c			\
+	test7.8				\
+	test7.8.prog.c			\
+	test7.9				\
+	test7.9.prog.c			\
+	test7.10			\
+	test7.11			\
+	test7.11.prog.c			\
 	test8.1				\
 	test8.2				\
 	test8.3				\
 	test8.4				\
 	test8.4.prog.c			\
+	test8.5				\
+	test8.6				\
+	test8.7				\
+	test8.7.crypto.c		\
+	test8.7.prog.c			\
 	test9.1				\
 	test9.2				\
 	test9.3				\
@@ -192,6 +216,98 @@ EXTRA_DIST = \
 	test14.6			\
 	test14.7			\
 	test14.8			\
+	test15.1			\
+	test15.2			\
+	test15.3			\
+	test15.4			\
+	test15.5			\
+	test15.6			\
+	test15.7			\
+	test15.8			\
+	test15.9			\
+	test15.10			\
+	test15.11			\
+	test15.12			\
+	test15.13			\
+	test15.14			\
+	test15.15			\
+	test15.16			\
+	test15.17			\
+	test15.18			\
+	test15.19			\
+	test15.20			\
+	test15.21			\
+	test15.22			\
+	test15.23			\
+	test15.24			\
+	test15.25			\
+	test16.1			\
+	test16.2			\
+	test16.3			\
+	test16.4			\
+	test16.4.prog.c			\
+	test17.1			\
+	test17.2			\
+	test17.3			\
+	test17.4			\
+	test17.5			\
+	test17.6			\
+	test17.7			\
+	test17.8			\
+	test17.9			\
+	test17.10			\
+	test17.11			\
+	test17.12			\
+	test17.13			\
+	test17.14			\
+	test17.15			\
+	test17.15.prog.c		\
+	test17.16			\
+	test17.17			\
+	test17.18			\
+	test17.19			\
+	test17.20			\
+	test17.21			\
+	test17.22			\
+	test17.23			\
+	test17.24			\
+	test17.25			\
+	test17.26			\
+	test17.27			\
+	test17.28			\
+	test17.29			\
+	test17.31			\
+	test17.32			\
+	test17.33			\
+	test19.1			\
+	test19.2			\
+	test19.3			\
+	test19.4			\
+	test19.5			\
+	test19.6			\
+	test19.7			\
+	test21.1			\
+	test21.2			\
+	test21.3			\
+	test21.4			\
+	test21.5			\
+	test21.6			\
+	test21.7			\
+	test21.8			\
+	test21.9			\
+	test21.10			\
+	test21.11			\
+	test21.12			\
+	test21.13			\
+	test21.14			\
+	test21.15			\
+	test21.16			\
+	test21.17			\
+	test21.18			\
+	test21.19			\
+	test21.20			\
+	test21.21			\
+	test21.22			\
 	usleep
 
 distclean-local:

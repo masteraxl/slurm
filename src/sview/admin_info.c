@@ -6,7 +6,7 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
  *
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -29,7 +29,6 @@
 #include "src/sview/sview.h"
 
 #define _DEBUG 0
-DEF_TIMERS;
 
 enum { 
 	SORTID_POS = POS_LOC,
@@ -38,7 +37,7 @@ enum {
 	SORTID_TIMELIMIT, 
 	SORTID_NODES, 
 	SORTID_NODELIST, 
-	SORTID_PARTITION_CNT
+	SORTID_CNT
 };
 
 static display_data_t display_data_admin[] = {
@@ -77,7 +76,7 @@ extern void set_menus_admin(void *arg, GtkTreePath *path,
 	popup_info_t *popup_win = (popup_info_t *)arg;
 	switch(type) {
 	case TAB_CLICKED:
-		make_fields_menu(menu, display_data_admin);
+		make_fields_menu(menu, display_data_admin, SORTID_CNT);
 		break;
 	case ROW_CLICKED:
 		make_options_menu(tree_view, path, menu, options_data_admin);

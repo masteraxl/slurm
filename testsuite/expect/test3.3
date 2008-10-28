@@ -10,7 +10,7 @@
 # Copyright (C) 2002 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-217948.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -46,14 +46,14 @@ print_header $test_id
 #
 spawn $scontrol show node  
 expect {
-        -re "NodeName=($alpha_numeric) State=IDLE " {
+        -re "NodeName=($alpha_numeric_under) State=IDLE " {
                 if {[string compare $node_name ""] == 0} {
                         set node_name $expect_out(1,string)
                         set node_old_state "IDLE"
                 }
                 exp_continue
         }
-        -re "NodeName=($alpha_numeric) State=ALLOCATED " {
+        -re "NodeName=($alpha_numeric_under) State=ALLOCATED " {
                 if {[string compare $node_name ""] == 0} {
                         set node_name $expect_out(1,string)
                         set node_old_state "ALLOCATED" 
@@ -82,7 +82,7 @@ if {[string compare $node_name ""] == 0} {
 #
 spawn $scontrol update NodeName=$node_name State=DRAIN Reason=TESTING
 expect {
-	-re "slurm_update error: ($alpha_numeric) ($alpha_numeric)" {
+	-re "slurm_update error: ($alpha_numeric_under) ($alpha_numeric_under)" {
 		set access_err 0
 		set err_msg1 $expect_out(1,string)
 		set err_msg2 $expect_out(2,string)
@@ -112,7 +112,8 @@ expect {
 #
 # Validate node's new state
 #
-set read_state 0
+set read_state  0
+set reason_code ""
 spawn $scontrol show node $node_name
 expect {
 	-re "State=($alpha_cap).DRAIN" {

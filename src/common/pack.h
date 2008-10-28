@@ -2,10 +2,11 @@
  *  pack.h - definitions for lowest level un/pack functions. all functions 
  *	utilize a Buf structure. Call init_buf, un/pack, and free_buf
  *****************************************************************************
- *  Copyright (C) 2002 The Regents of the University of California.
+ *  Copyright (C) 2002-2007 The Regents of the University of California.
+ *  Copyright (C) 2008 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Kevin Tew <tew1@llnl.gov>, Morris Jette <jette1@llnl.gov>, et. al.
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -58,6 +59,7 @@
 
 #define BUF_MAGIC 0x42554545
 #define BUF_SIZE (16 * 1024)
+#define MAX_BUF_SIZE ((uint32_t) 0xffff0000)	/* avoid going over 32-bits */
 
 struct slurm_buf {
 	uint32_t magic;
@@ -83,6 +85,9 @@ void	*xfer_buf_data(Buf my_buf);
 void	pack_time(time_t val, Buf buffer);
 int	unpack_time(time_t *valp, Buf buffer);
 
+void 	pack64(uint64_t val, Buf buffer);
+int	unpack64(uint64_t *valp, Buf buffer);
+
 void 	pack32(uint32_t val, Buf buffer);
 int	unpack32(uint32_t *valp, Buf buffer);
 
@@ -92,17 +97,20 @@ int	unpack16(uint16_t *valp, Buf buffer);
 void	pack8(uint8_t val, Buf buffer);
 int	unpack8(uint8_t *valp, Buf buffer);
 
+void    pack16_array(uint16_t *valp, uint32_t size_val, Buf buffer);
+int     unpack16_array(uint16_t **valp, uint32_t* size_val, Buf buffer);
+
 void	pack32_array(uint32_t *valp, uint32_t size_val, Buf buffer);
-int	unpack32_array( uint32_t **valp, uint32_t* size_val, Buf buffer);
+int	unpack32_array(uint32_t **valp, uint32_t* size_val, Buf buffer);
 
-void	packmem(char *valp, uint16_t size_val, Buf buffer);
-int	unpackmem(char *valp, uint16_t *size_valp, Buf buffer);
-int	unpackmem_ptr(char **valp, uint16_t *size_valp, Buf buffer);
-int	unpackmem_xmalloc(char **valp, uint16_t *size_valp, Buf buffer);
-int	unpackmem_malloc(char **valp, uint16_t *size_valp, Buf buffer);
+void	packmem(char *valp, uint32_t size_val, Buf buffer);
+int	unpackmem(char *valp, uint32_t *size_valp, Buf buffer);
+int	unpackmem_ptr(char **valp, uint32_t *size_valp, Buf buffer);
+int	unpackmem_xmalloc(char **valp, uint32_t *size_valp, Buf buffer);
+int	unpackmem_malloc(char **valp, uint32_t *size_valp, Buf buffer);
 
-void	packstr_array(char **valp, uint16_t size_val, Buf buffer);
-int	unpackstr_array(char ***valp, uint16_t* size_val, Buf buffer);
+void	packstr_array(char **valp, uint32_t size_val, Buf buffer);
+int	unpackstr_array(char ***valp, uint32_t* size_val, Buf buffer);
 
 void	packmem_array(char *valp, uint32_t size_val, Buf buffer);
 int	unpackmem_array(char *valp, uint32_t size_valp, Buf buffer);
@@ -118,6 +126,20 @@ int	unpackmem_array(char *valp, uint32_t size_valp, Buf buffer);
 	assert(sizeof(*valp) == sizeof(time_t));	\
 	assert(buf->magic == BUF_MAGIC);		\
         if (unpack_time(valp,buf))			\
+		goto unpack_error;			\
+} while (0)
+
+#define safe_pack64(val,buf) do {			\
+	assert(sizeof(val) == sizeof(uint64_t)); 	\
+	assert(buf->magic == BUF_MAGIC);		\
+	pack64(val,buf);				\
+} while (0)
+
+#define safe_unpack64(valp,buf) do {			\
+	assert((valp) != NULL); 			\
+	assert(sizeof(*valp) == sizeof(uint64_t));      \
+	assert(buf->magic == BUF_MAGIC);		\
+        if (unpack64(valp,buf))				\
 		goto unpack_error;			\
 } while (0)
 
@@ -169,6 +191,14 @@ int	unpackmem_array(char *valp, uint32_t size_valp, Buf buffer);
 	pack32_array(array,size_val,buf);		\
 } while (0)				
 
+#define safe_unpack16_array(valp,size_valp,buf) do {    \
+        assert(valp != NULL);                           \
+        assert(sizeof(*size_valp) == sizeof(uint32_t)); \
+        assert(buf->magic == BUF_MAGIC);                \
+        if (unpack16_array(valp,size_valp,buf))         \
+                goto unpack_error;                      \
+} while (0)
+
 #define safe_unpack32_array(valp,size_valp,buf) do {	\
 	assert(valp != NULL);				\
 	assert(sizeof(*size_valp) == sizeof(uint32_t)); \
@@ -178,7 +208,7 @@ int	unpackmem_array(char *valp, uint32_t size_valp, Buf buffer);
 } while (0)
 
 #define safe_packmem(valp,size_val,buf) do {		\
-	assert(sizeof(size_val) == sizeof(uint16_t)); 	\
+	assert(sizeof(size_val) == sizeof(uint32_t)); 	\
 	assert(size_val == 0 || valp != NULL);		\
 	assert(buf->magic == BUF_MAGIC);		\
 	packmem(valp,size_val,buf);			\
@@ -186,7 +216,7 @@ int	unpackmem_array(char *valp, uint32_t size_valp, Buf buffer);
 
 #define safe_unpackmem(valp,size_valp,buf) do {		\
 	assert(valp != NULL);		                \
-	assert(sizeof(*size_valp) == sizeof(uint16_t)); \
+	assert(sizeof(*size_valp) == sizeof(uint32_t)); \
 	assert(buf->magic == BUF_MAGIC);		\
 	if (unpackmem(valp,size_valp,buf))		\
 		goto unpack_error;			\
@@ -194,7 +224,7 @@ int	unpackmem_array(char *valp, uint32_t size_valp, Buf buffer);
 
 #define safe_unpackmem_ptr(valp,size_valp,buf) do {	\
 	assert(valp != NULL);				\
-	assert(sizeof(*size_valp) == sizeof(uint16_t)); \
+	assert(sizeof(*size_valp) == sizeof(uint32_t)); \
 	assert(buf->magic == BUF_MAGIC);		\
 	if (unpackmem_ptr(valp,size_valp,buf))		\
 		goto unpack_error;			\
@@ -202,7 +232,7 @@ int	unpackmem_array(char *valp, uint32_t size_valp, Buf buffer);
 
 #define safe_unpackmem_xmalloc(valp,size_valp,buf) do {	\
 	assert(valp != NULL);				\
-	assert(sizeof(*size_valp) == sizeof(uint16_t)); \
+	assert(sizeof(*size_valp) == sizeof(uint32_t)); \
 	assert(buf->magic == BUF_MAGIC);		\
 	if (unpackmem_xmalloc(valp,size_valp,buf))	\
 		goto unpack_error;			\
@@ -210,7 +240,7 @@ int	unpackmem_array(char *valp, uint32_t size_valp, Buf buffer);
 
 #define safe_unpackmem_malloc(valp,size_valp,buf) do {	\
 	assert(valp != NULL);				\
-	assert(sizeof(*size_valp) == sizeof(uint16_t)); \
+	assert(sizeof(*size_valp) == sizeof(uint32_t)); \
 	assert(buf->magic == BUF_MAGIC);		\
 	if (unpackmem_malloc(valp,size_valp,buf))	\
 		goto unpack_error;			\
@@ -218,40 +248,41 @@ int	unpackmem_array(char *valp, uint32_t size_valp, Buf buffer);
 
 #define safe_pack_bit_fmt(bitmap,max_len,buf) do {	\
 	assert(buf->magic == BUF_MAGIC);		\
-	assert(max_len < 0xffff);			\
+	assert(max_len < 0xffffffff);			\
 	if (bitmap) {					\
 		char _tmp_str[max_len];			\
 		uint32_t _size;				\
 		bit_fmt(_tmp_str,max_len,bitmap);	\
 		_size = strlen(_tmp_str)+1;		\
-		packmem(_tmp_str,(uint16_t)_size,buf);	\
+		packmem(_tmp_str,_size,buf);	\
 	} else						\
-		packmem(NULL,(uint16_t)0,buf);		\
+		packmem(NULL,(uint32_t)0,buf);		\
 } while (0)				
 
 #define safe_packstr(str,max_len,buf) do {		\
 	uint32_t _size;					\
 	assert(buf->magic == BUF_MAGIC);		\
-	assert(max_len <= 0xffff);			\
+	assert(sizeof(*max_len) === sizeof(uint32_t));	\
 	_size = (str ? strlen(str)+1 : 0);		\
 	assert(_size == 0 || str != NULL);		\
 	if (_size <= max_len)				\
-		packmem(str,(uint16_t)_size,buf);	\
+		packmem(str,_size,buf);	\
 	else {						\
 		char tmp_str[max_len];			\
 		strncpy(tmp_str, str, max_len-1);	\
 		tmp_str[max_len - 1] = (char) NULL;	\
-		packmem(tmp_str,(uint16_t)max_len,buf);	\
+		packmem(tmp_str,max_len,buf);	\
 	}						\
 } while (0)				
 
 #define packstr(str,buf) do {				\
-	uint32_t _size;					\
-	_size = (uint32_t)(str ? strlen(str)+1 : 0);	\
-        assert(_size == 0 || str != NULL);		\
-	assert(_size <= 0xffff);			\
+	uint32_t _size = 0;				\
+	if((char *)str != NULL)				\
+		_size = (uint32_t)strlen(str)+1;	\
+        assert(_size == 0 || str != NULL);             	\
+	assert(_size <= 0xffffffff);			\
 	assert(buf->magic == BUF_MAGIC);		\
-	packmem(str,(uint16_t)_size,buf);		\
+	packmem(str,(uint32_t)_size,buf);		\
 } while (0)				
 
 #define packnull(buf) do { \
@@ -267,9 +298,9 @@ int	unpackmem_array(char *valp, uint32_t size_valp, Buf buffer);
 		uint32_t _size;				\
 		bit_fmt(_tmp_str,0xfffe,bitmap);	\
 		_size = strlen(_tmp_str)+1;		\
-		packmem(_tmp_str,(uint16_t)_size,buf);	\
+		packmem(_tmp_str,_size,buf);	\
 	} else						\
-		packmem(NULL,(uint16_t)0,buf);		\
+		packmem(NULL,(uint32_t)0,buf);		\
 } while (0)				
 
 #define unpackstr_ptr		                        \
@@ -289,6 +320,7 @@ int	unpackmem_array(char *valp, uint32_t size_valp, Buf buffer);
 
 #define safe_packstr_array(array,size_val,buf) do {	\
 	assert(size_val == 0 || array != NULL);		\
+	assert(sizeof(*size_valp) == sizeof(uint32_t)); \
 	assert(buf->magic == BUF_MAGIC);		\
 	packstr_array(array,size_val,buf);		\
 } while (0)				
@@ -296,7 +328,7 @@ int	unpackmem_array(char *valp, uint32_t size_valp, Buf buffer);
 #define safe_unpackstr_array(valp,size_valp,buf) do {	\
 	assert(valp != NULL);				\
 	assert(size_valp != NULL);			\
-	assert(sizeof(*size_valp) == sizeof(uint16_t)); \
+	assert(sizeof(*size_valp) == sizeof(uint32_t)); \
 	assert(buf->magic == BUF_MAGIC);		\
 	if (unpackstr_array(valp,size_valp,buf))	\
 		goto unpack_error;			\

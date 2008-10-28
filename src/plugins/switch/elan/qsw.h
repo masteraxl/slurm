@@ -4,7 +4,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Jim Garlick <garlick@llnl.gov>
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -110,7 +110,7 @@ int		qsw_pack_jobinfo(qsw_jobinfo_t j, Buf buffer);
 int		qsw_unpack_jobinfo(qsw_jobinfo_t j, Buf buffer);
 
 int 		qsw_setup_jobinfo(qsw_jobinfo_t j, int ntasks, 
-			bitstr_t *nodeset, uint32_t *tasks_per_node,
+			bitstr_t *nodeset, uint16_t *tasks_per_node,
 			int cyclic_alloc);
 void		qsw_teardown_jobinfo(qsw_jobinfo_t j);
 
@@ -136,6 +136,6 @@ char *		qsw_capability_string(qsw_jobinfo_t j, char *buf, size_t len);
 void		qsw_print_jobinfo(FILE *fp, struct qsw_jobinfo *jobinfo);
 
 		/* Return  Elan shared memory state key */
-int             qsw_statkey (qsw_jobinfo_t jobinfo);
+int             qsw_statkey (qsw_jobinfo_t jobinfo, int *keyp);
 
 #endif /* _QSW_INCLUDED */

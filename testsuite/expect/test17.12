@@ -11,7 +11,7 @@
 # Copyright (C) 2002-2006 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-217948.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -35,7 +35,14 @@ source ./globals
 set test_id     "17.12"
 set exit_code   0
 set file_in     "test$test_id.input"
+
 print_header $test_id
+
+if {[test_wiki_sched] == 1} {
+	send_user "\nWARNING: not compatable with sched/wiki (Maui)\n"
+	send_user "         or sched/wiki2 (Moab) schedulers\n"
+	exit $exit_code
+}
 
 #
 # Delete left-over input script
@@ -53,13 +60,14 @@ set err_msg     0
 set timeout $max_job_delay
 spawn $sbatch -N1 --constraint=invalid,constraint -t1 $file_in  
 expect {
-	-re "configuration is not available" {
+	-re "error:.*Invalid feature specification" {
 		send_user "This error is expected, no worries\n"
 		set err_msg 1
 		exp_continue
 	}
 	-re "Submitted batch job ($number)" {
 		send_user "\nFAILURE: sbatch job submitted with invalid constraint\n"
+		cancel_job $expect_out(1,string)
 		set exit_code 1
 		exp_continue
 	}

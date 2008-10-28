@@ -10,7 +10,7 @@
 # Copyright (C) 2002 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-217948.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -38,20 +38,21 @@ set job_id       0
 
 print_header $test_id
 
+make_bash_script "id_script" { $bin_id }
+
 #
 # Submit a job so we have something to work with
 #
-spawn $srun --batch --output=/dev/null --error=/dev/null --hold -t1 $bin_id
+set sbatch_pid [spawn $sbatch --output=/dev/null --error=/dev/null --hold -t1 id_script]
 expect {
-	-re "jobid ($number) submitted" {
+	-re "Submitted batch job ($number)" {
 		set job_id $expect_out(1,string)
 		exp_continue
 	}
 	timeout {
 		send_user "\nFAILURE: srun not responding\n"
-		kill_srun
+		slow_kill $sbatch_pid
 		set exit_code 1
-		exp_continue
 	}
 	eof {
 		wait
@@ -65,7 +66,7 @@ if {$job_id == 0} {
 #
 # Test basic scancel
 #
-spawn $scancel $job_id
+spawn $scancel -v $job_id
 expect {
 	-re "error" {
 		set exit_code 1
@@ -84,7 +85,7 @@ expect {
 # Test basic scancel with job already killed
 #
 set matches 0
-spawn $scancel $job_id
+spawn $scancel -v $job_id
 expect {
 	-re "error:" {
 		send_user "This error is expected, no worries\n"
@@ -122,6 +123,7 @@ expect {
 }
 
 if {$exit_code == 0} {
+	exec $bin_rm -f id_script
 	send_user "\nSUCCESS\n"
 }
 exit $exit_code

@@ -4,7 +4,7 @@
  *  Copyright (C) 2002 The Regents of the University of California.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Danny Auble <da@llnl.gov>
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -15,7 +15,7 @@
  *  any later version.
  *
  *  In addition, as a special exception, the copyright holders give permission 
- *  to link the code of portions of this program with the OpenSSL library under 
+ *  to link the code of portions of this program with the OpenSSL library under
  *  certain conditions as described in each individual source file, and 
  *  distribute linked combinations including the two. You must obey the GNU 
  *  General Public License in all respects for all of the code used other than 
@@ -122,42 +122,17 @@ extern void parse_command_line(int argc, char *argv[])
 
 }
 
-extern void snprint_time(char *buf, size_t buf_size, time_t time)
-{
-	if (time == INFINITE) {
-		snprintf(buf, buf_size, "UNLIMITED");
-	} else {
-		long days, hours, minutes, seconds;
-		seconds = time % 60;
-		minutes = (time / 60) % 60;
-		hours = (time / 3600) % 24;
-		days = time / 86400;
-
-		if (days)
-			snprintf(buf, buf_size,
-				"%ld-%2.2ld:%2.2ld:%2.2ld",
-				days, hours, minutes, seconds);
-		else if (hours)
-			snprintf(buf, buf_size,
-				"%ld:%2.2ld:%2.2ld", 
-				hours, minutes, seconds);
-		else
-			snprintf(buf, buf_size,
-				"%ld:%2.2ld", minutes,seconds);
-	}
-}
-
 extern void print_date()
 {
-	ba_system_ptr->now_time = time(NULL);
+	time_t now_time = time(NULL);
 
 	if (params.commandline) {
-		printf("%s", ctime(&ba_system_ptr->now_time));
+		printf("%s", ctime(&now_time));
 	} else {
-		mvwprintw(ba_system_ptr->text_win, ba_system_ptr->ycord,
-			  ba_system_ptr->xcord, "%s",
-			  ctime(&ba_system_ptr->now_time));
-		ba_system_ptr->ycord++;
+		mvwprintw(text_win, main_ycord,
+			  main_xcord, "%s",
+			  ctime(&now_time));
+		main_ycord++;
 	}
 }
 

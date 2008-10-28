@@ -6,7 +6,7 @@
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
  *  Written by Mark Grondona <grondona1@llnl.gov>,
  *    Christopher J. Morrone <morrone2@llnl.gov>, et. al.
- *  UCRL-CODE-217948.
+ *  LLNL-CODE-402394.
  *  
  *  This file is part of SLURM, a resource management program.
  *  For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -65,7 +65,14 @@ typedef struct sbatch_options {
 	char *ctrl_comm_ifhn;
 	bool labelio;
 	slurm_step_io_fds_t fds;
-	bool info_only;
+	bool layout_only;
+	bool debugger_test;
+	uint32_t input_filter;
+	bool input_filter_set;
+	uint32_t output_filter;
+	bool output_filter_set;
+	uint32_t error_filter;
+	bool error_filter_set;
 } opt_t;
 
 extern opt_t opt;

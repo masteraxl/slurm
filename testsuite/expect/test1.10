@@ -10,7 +10,7 @@
 # Copyright (C) 2002-2006 The Regents of the University of California.
 # Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
 # Written by Morris Jette <jette1@llnl.gov>
-# UCRL-CODE-217948.
+# LLNL-CODE-402394.
 # 
 # This file is part of SLURM, a resource management program.
 # For details, see <http://www.llnl.gov/linux/slurm/>.
@@ -44,7 +44,7 @@ print_header $test_id
 #
 set debug_offset [expr $debug_set - 2]
 set timeout $max_job_delay
-spawn $srun -N1 -d$debug_offset -t1 /invalid_executable  
+set srun_pid [spawn $srun -N1 -d$debug_offset -t1 /invalid_executable ]
 expect {
 	-re "debug level = ($number)" {
 		set debug_get $expect_out(1,string)
@@ -52,9 +52,8 @@ expect {
 	}
 	timeout {
 		send_user "\nFAILURE: srun not responding\n"
-		kill_srun
+		slow_kill $srun_pid
 		set exit_code 1
-		exp_continue
 	}
 }
 
