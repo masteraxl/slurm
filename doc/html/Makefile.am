@@ -19,9 +19,10 @@ generated_html = \
 	gang_scheduling.html \
 	help.html \
 	ibm.html \
-	job_priority.html \
+	priority_multifactor.html \
+	priority_plugins.html \
 	jobacct_gatherplugins.html \
-	jobacct_storageplugins.html \
+	accounting_storageplugins.html \
 	jobcompplugins.html \
 	mail.html \
 	maui.html \

@@ -70,7 +70,7 @@ exec $bin_chmod 700 $file_prog
 #
 # Create an allocation
 #
-set salloc_pid [spawn $salloc -N1 --verbose -t2 $bin_bash]
+set salloc_pid [spawn $salloc -N1 --exclusive --verbose -t2 $bin_bash]
 
 #
 # Run a job step to get allocated processor count and affinity
@@ -156,7 +156,7 @@ if {$task_mask != $task_cnt} {
 set verbose_cnt 0
 send "$srun -c1 --cpu_bind=verbose,map_cpu:0 $file_prog\n"
 expect {
-	-re "cpu_bind=MAP" {
+	-re "cpu_bind=MAP|cpu_bind_threads=MAP" {
 		incr verbose_cnt
 		exp_continue
 	}

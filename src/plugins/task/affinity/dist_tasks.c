@@ -47,7 +47,9 @@
 #include <numa.h>
 #endif
 
-static char *_alloc_mask(launch_tasks_request_msg_t *req);
+static char *_alloc_mask(launch_tasks_request_msg_t *req,
+			 int *whole_node_cnt, int *whole_socket_cnt, 
+			 int *whole_core_cnt, int *whole_thread_cnt,		 				 int *part_socket_cnt, int *part_core_cnt);
 static bitstr_t *_get_avail_map(launch_tasks_request_msg_t *req,
 				uint16_t *hw_sockets, uint16_t *hw_cores,
 				uint16_t *hw_threads);
@@ -55,6 +57,8 @@ static bitstr_t *_get_avail_map(launch_tasks_request_msg_t *req,
 static int _task_layout_lllp_block(launch_tasks_request_msg_t *req,
 				   uint32_t node_id, bitstr_t ***masks_p);
 static int _task_layout_lllp_cyclic(launch_tasks_request_msg_t *req,
+				    uint32_t node_id, bitstr_t ***masks_p);
+static int _task_layout_lllp_multi(launch_tasks_request_msg_t *req, 
 				    uint32_t node_id, bitstr_t ***masks_p);
 
 static void _lllp_map_abstract_masks(const uint32_t maxtasks,
@@ -175,54 +179,76 @@ void lllp_distribution(launch_tasks_request_msg_t *req, uint32_t node_id)
 	bitstr_t **masks = NULL;
 	char buf_type[100];
 	int maxtasks = req->tasks_to_launch[(int)node_id];
+	int whole_nodes, whole_sockets, whole_cores, whole_threads;
+	int part_sockets, part_cores;
         const uint32_t *gtid = req->global_task_ids[(int)node_id];
-	uint16_t bind_mode;
+	uint16_t bind_entity, bind_mode;
 
 	bind_mode = CPU_BIND_NONE   | 
 		    CPU_BIND_MASK   | CPU_BIND_RANK   | CPU_BIND_MAP |
 		    CPU_BIND_LDMASK | CPU_BIND_LDRANK | CPU_BIND_LDMAP;
 	if (req->cpu_bind_type & bind_mode) {	/* explicit user mapping */
-		char *avail_mask = _alloc_mask(req);
-		if (avail_mask) {	/* step missing some CPUs */
+		char *avail_mask = _alloc_mask(req,
+					       &whole_nodes,  &whole_sockets, 
+					       &whole_cores,  &whole_threads,
+					       &part_sockets, &part_cores);
+		if ((whole_nodes == 0) && avail_mask) {
 			xfree(req->cpu_bind);
 			req->cpu_bind = avail_mask;
 			req->cpu_bind_type &= (~bind_mode);
 			req->cpu_bind_type |= CPU_BIND_MASK;
-		}
+		} else
+			xfree(avail_mask);
 		slurm_sprint_cpu_bind_type(buf_type, req->cpu_bind_type);
 		info("lllp_distribution jobid [%u] manual binding: %s",
 		     req->job_id, buf_type);
 		return;
 	}
 
-	if (!((req->cpu_bind_type & CPU_BIND_TO_THREADS) ||
-	      (req->cpu_bind_type & CPU_BIND_TO_CORES)   ||
-	      (req->cpu_bind_type & CPU_BIND_TO_SOCKETS) ||
-	      (req->cpu_bind_type & CPU_BIND_TO_LDOMS))) {
-		char *avail_mask = _alloc_mask(req);
-		if (avail_mask) {	/* step missing some CPUs */
+	bind_entity = CPU_BIND_TO_THREADS | CPU_BIND_TO_CORES |
+		      CPU_BIND_TO_SOCKETS | CPU_BIND_TO_LDOMS;
+	if (!(req->cpu_bind_type & bind_entity)) {
+		int max_tasks = req->tasks_to_launch[(int)node_id];
+		char *avail_mask = _alloc_mask(req,
+					       &whole_nodes,  &whole_sockets, 
+					       &whole_cores,  &whole_threads,
+					       &part_sockets, &part_cores);
+		debug("binding tasks:%d to "
+		      "nodes:%d sockets:%d:%d cores:%d:%d threads:%d",
+		      max_tasks, whole_nodes, whole_sockets ,part_sockets,
+		      whole_cores, part_cores, whole_threads);
+		if ((max_tasks == whole_sockets) && (part_sockets == 0)) {
+			req->cpu_bind_type |= CPU_BIND_TO_SOCKETS;
+			goto make_auto;
+		}
+		if ((max_tasks == whole_cores) && (part_cores == 0)) {
+			req->cpu_bind_type |= CPU_BIND_TO_CORES;
+			goto make_auto;
+		}
+		if (max_tasks == whole_threads) {
+			req->cpu_bind_type |= CPU_BIND_TO_THREADS;
+			goto make_auto;
+		}
+		if ((whole_nodes == 0) && avail_mask) {
 			xfree(req->cpu_bind);
 			req->cpu_bind = avail_mask;
 			req->cpu_bind_type |= CPU_BIND_MASK;
-		}
+		} else
+			xfree(avail_mask);
 		slurm_sprint_cpu_bind_type(buf_type, req->cpu_bind_type);
 		info("lllp_distribution jobid [%u] auto binding off: %s",
 		     req->job_id, buf_type);
 		return;
-	}
 
-	/* We are still thinking about this. Does this make sense?
-	if (req->task_dist == SLURM_DIST_ARBITRARY) {
-		req->cpu_bind_type >= CPU_BIND_NONE;
-		info("lllp_distribution jobid [%u] -m hostfile - auto binding off ",
-		     req->job_id);
-		return;
+  make_auto:	xfree(avail_mask);
+		slurm_sprint_cpu_bind_type(buf_type, req->cpu_bind_type);
+		info("lllp_distribution jobid [%u] implicit auto binding: "
+		     "%s, dist %d", req->job_id, buf_type, req->task_dist);
+	} else {
+		slurm_sprint_cpu_bind_type(buf_type, req->cpu_bind_type);
+		info("lllp_distribution jobid [%u] auto binding: %s, dist %d",
+		     req->job_id, buf_type, req->task_dist);
 	}
-	*/
-
-	slurm_sprint_cpu_bind_type(buf_type, req->cpu_bind_type);
-	info("lllp_distribution jobid [%u] auto binding: %s, dist %d",
-	     req->job_id, buf_type, req->task_dist);
 
 	switch (req->task_dist) {
 	case SLURM_DIST_BLOCK_BLOCK:
@@ -238,7 +264,10 @@ void lllp_distribution(launch_tasks_request_msg_t *req, uint32_t node_id)
 		rc = _task_layout_lllp_cyclic(req, node_id, &masks); 
 		break;
 	default:
-		rc = _task_layout_lllp_cyclic(req, node_id, &masks); 
+		if (req->cpus_per_task > 1)
+			rc = _task_layout_lllp_multi(req, node_id, &masks);
+		else
+			rc = _task_layout_lllp_cyclic(req, node_id, &masks);
 		req->task_dist = SLURM_DIST_BLOCK_CYCLIC;
 		break;
 	}
@@ -344,31 +373,66 @@ static void _enforce_limits(launch_tasks_request_msg_t *req, bitstr_t *mask,
 }
 
 /* Determine which CPUs a job step can use. 
- * Return NULL of all CPUs are available, 
- *	otherwise return a string representation of the available mask
+ * OUT whole_<entity>_count - returns count of whole <entities> in this 
+ *                            allocation for this node
+ * OUT part__<entity>_count - returns count of partial <entities> in this 
+ *                            allocation for this node
+ * RET - a string representation of the available mask or NULL on errlr
  * NOTE: Caller must xfree() the return value. */
-static char *_alloc_mask(launch_tasks_request_msg_t *req)
+static char *_alloc_mask(launch_tasks_request_msg_t *req,
+			 int *whole_node_cnt,  int *whole_socket_cnt, 
+			 int *whole_core_cnt,  int *whole_thread_cnt,
+			 int *part_socket_cnt, int *part_core_cnt)
 {
 	uint16_t sockets, cores, threads;
-	int i, mask;
-	bool miss = false;
+	int c, s, t, i, mask;
+	int c_miss, s_miss, t_miss, c_hit, t_hit;
 	bitstr_t *alloc_bitmap;
 	char *str_mask;
+
+	*whole_node_cnt   = 0;
+	*whole_socket_cnt = 0;
+	*whole_core_cnt   = 0;
+	*whole_thread_cnt = 0;
+	*part_socket_cnt  = 0;
+	*part_core_cnt    = 0;
 
 	alloc_bitmap = _get_avail_map(req, &sockets, &cores, &threads);
 	if (!alloc_bitmap)
 		return NULL;
 
-	for (i=0, mask=0; i<(sockets*cores*threads); i++) {
-		if (bit_test(alloc_bitmap, i))
-			mask |= (1 << i);
-		else
-			miss = true;
+	i = mask = 0;
+	for (s=0, s_miss=false; s<sockets; s++) {
+		for (c=0, c_hit=c_miss=false; c<cores; c++) {
+			for (t=0, t_hit=t_miss=false; t<cores; t++) {
+				if (bit_test(alloc_bitmap, i)) {
+					mask |= (1 << i);
+					(*whole_thread_cnt)++;
+					t_hit = true;
+					c_hit = true;
+				} else
+					t_miss = true;
+				i++;
+			}
+			if (!t_miss)
+				(*whole_core_cnt)++;
+			else {
+				if (t_hit)
+					(*part_core_cnt)++;
+				c_miss = true;
+			}
+		}
+		if (!c_miss)
+			(*whole_socket_cnt)++;
+		else {
+			if (c_hit)
+				(*part_socket_cnt)++;
+			s_miss = true;
+		}
 	}
+	if (!s_miss)
+		(*whole_node_cnt)++;
 	bit_free(alloc_bitmap);
-
-	if (!miss)
-		return NULL;
 
 	str_mask = xmalloc(16);
 	snprintf(str_mask, 16, "%x", mask);
@@ -506,6 +570,82 @@ static void _expand_masks(uint16_t cpu_bind_type, const uint32_t maxtasks,
 	}
 }
 
+/* 
+ * _task_layout_lllp_multi
+ *
+ * A variant of _task_layout_lllp_cyclic for use with allocations having 
+ * more than one CPU per task, put the tasks as close as possible (fill 
+ * core rather than going next socket for the extra task)
+ *
+ */
+static int _task_layout_lllp_multi(launch_tasks_request_msg_t *req, 
+				    uint32_t node_id, bitstr_t ***masks_p)
+{
+	int last_taskcount = -1, taskcount = 0;
+	uint16_t c, i, s, t, hw_sockets = 0, hw_cores = 0, hw_threads = 0;
+	uint16_t num_threads, num_cores, num_sockets;
+	int size, maxtasks = req->tasks_to_launch[(int)node_id];
+	bitstr_t *avail_map;
+	bitstr_t **masks = NULL;
+	
+	info ("_task_layout_lllp_multi ");
+
+	avail_map = _get_avail_map(req, &hw_sockets, &hw_cores, &hw_threads);
+	if (!avail_map)
+		return SLURM_ERROR;
+	
+	*masks_p = xmalloc(maxtasks * sizeof(bitstr_t*));
+	masks = *masks_p;
+	
+	size = bit_set_count(avail_map);
+	if (!size || size < req->cpus_per_task) {
+		error("task/affinity: no set bits in avail_map!");
+		bit_free(avail_map);
+		return SLURM_ERROR;
+	}
+	
+	size = bit_size(avail_map);
+	num_sockets = MIN(req->max_sockets, hw_sockets);
+	num_cores   = MIN(req->max_cores, hw_cores);
+	num_threads = MIN(req->max_threads, hw_threads);
+	i = 0;
+	while (taskcount < maxtasks) {
+		if (taskcount == last_taskcount)
+			fatal("_task_layout_lllp_multi failure");
+		last_taskcount = taskcount; 
+		for (s = 0; s < hw_sockets; s++) {
+			for (c = 0; c < hw_cores; c++) {
+				for (t = 0; t < num_threads; t++) {
+					uint16_t bit = s*(hw_cores*hw_threads) +
+							c*(hw_threads) + t;
+					if (bit_test(avail_map, bit) == 0)
+						continue;
+					if (masks[taskcount] == NULL)
+						masks[taskcount] =
+						    (bitstr_t *)bit_alloc(size);
+					bit_set(masks[taskcount], bit);
+					if (++i < req->cpus_per_task)
+						continue;
+					i = 0;
+					if (++taskcount >= maxtasks)
+						break;
+				}
+				if (taskcount >= maxtasks)
+					break;
+			}
+			if (taskcount >= maxtasks)
+				break;
+		}
+	}
+	bit_free(avail_map);
+	
+	/* last step: expand the masks to bind each task
+	 * to the requested resource */
+	_expand_masks(req->cpu_bind_type, maxtasks, masks,
+			hw_sockets, hw_cores, hw_threads);
+
+	return SLURM_SUCCESS;
+}
 
 /* 
  * _task_layout_lllp_cyclic
@@ -561,9 +701,8 @@ static int _task_layout_lllp_cyclic(launch_tasks_request_msg_t *req,
 	num_threads = MIN(req->max_threads, hw_threads);
 	i = 0;
 	while (taskcount < maxtasks) {
-		if (taskcount == last_taskcount) {
+		if (taskcount == last_taskcount)
 			fatal("_task_layout_lllp_cyclic failure");
-		}
 		last_taskcount = taskcount; 
 		for (t = 0; t < num_threads; t++) {
 			for (c = 0; c < hw_cores; c++) {

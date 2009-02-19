@@ -527,7 +527,7 @@ static void _build_select_struct(struct job_record *job_ptr, bitstr_t *bitmap)
  *	satisfy the request are cleared, other left set
  * IN min_nodes - minimum count of nodes
  * IN req_nodes - requested (or desired) count of nodes
- * IN max_nodes - maximum count of nodes (0==don't care)
+ * IN max_nodes - maximum count of nodes
  * IN mode - SELECT_MODE_RUN_NOW: try to schedule job now
  *           SELECT_MODE_TEST_ONLY: test if job can ever run
  *           SELECT_MODE_WILL_RUN: determine when and where job can run
@@ -815,21 +815,34 @@ static int _find_job_mate(struct job_record *job_ptr, bitstr_t *bitmap,
 {
 	ListIterator job_iterator;
 	struct job_record *job_scan_ptr;
+	int rc = EINVAL;
 
 	job_iterator = list_iterator_create(job_list);
 	while ((job_scan_ptr = (struct job_record *) list_next(job_iterator))) {
-		if ((job_scan_ptr->part_ptr == job_ptr->part_ptr) &&
-		    (job_scan_ptr->job_state == JOB_RUNNING) &&
-		    (job_scan_ptr->node_cnt == req_nodes) &&
-		    (job_scan_ptr->total_procs >= job_ptr->num_procs) &&
-		    bit_super_set(job_scan_ptr->node_bitmap, bitmap)) {
-			bit_and(bitmap, job_scan_ptr->node_bitmap);
-			job_ptr->total_procs = job_scan_ptr->total_procs;
-			return SLURM_SUCCESS;
-		}
+		if ((job_scan_ptr->part_ptr  != job_ptr->part_ptr) ||
+		    (job_scan_ptr->job_state != JOB_RUNNING) ||
+		    (job_scan_ptr->node_cnt  != req_nodes) ||
+		    (job_scan_ptr->total_procs < job_ptr->num_procs) ||
+		    (!bit_super_set(job_scan_ptr->node_bitmap, bitmap)))
+			continue;
+
+		if (job_ptr->details->req_node_bitmap &&
+		    (!bit_super_set(job_ptr->details->req_node_bitmap,
+				    job_scan_ptr->node_bitmap)))
+			continue;	/* Required nodes missing from job */
+
+		if (job_ptr->details->exc_node_bitmap &&
+		    (bit_overlap(job_ptr->details->exc_node_bitmap,
+				 job_scan_ptr->node_bitmap) != 0))
+			continue;	/* Excluded nodes in this job */
+
+		bit_and(bitmap, job_scan_ptr->node_bitmap);
+		job_ptr->total_procs = job_scan_ptr->total_procs;
+		rc = SLURM_SUCCESS;
+		break;
 	}
 	list_iterator_destroy(job_iterator);
-	return EINVAL;
+	return rc;
 }
 
 /* _job_test - does most of the real work for select_p_job_test(), which 
