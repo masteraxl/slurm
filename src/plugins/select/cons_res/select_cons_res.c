@@ -847,7 +847,12 @@ static int _add_job_to_res(struct job_record *job_ptr, int action)
 	
 	/* add cores */
 	if (action != 1) {
-
+		/* FIX ME: Couldn't we just put the part_ptr from the
+		 * controller in the p_ptr so we don't have to keep
+		 * track of things that may change here?  That way we
+		 * could just do a quick pointer check instead of a
+		 * strcmp here. 
+		 */
 		for (p_ptr = select_part_record; p_ptr; p_ptr = p_ptr->next) {
 			if (strcmp(p_ptr->name, job_ptr->part_ptr->name) == 0)
 				break;
@@ -1353,7 +1358,7 @@ static int _will_run_test(struct job_record *job_ptr, bitstr_t *bitmap,
 	/* Remove the running jobs one at a time from exp_node_cr and try
 	 * scheduling the pending job after each one */
 	job_iterator = list_iterator_create(cr_job_list);
-	while ((tmp_job_pptr = (struct job_record **) list_next(job_iterator))) {
+	while ((tmp_job_pptr = list_next(job_iterator))) {
 		tmp_job_ptr = *tmp_job_pptr;
 		_rm_job_from_res(future_part, future_usage, tmp_job_ptr, 0);
 		bit_or(bitmap, orig_map);
@@ -1418,16 +1423,60 @@ extern int select_p_job_resume(struct job_record *job_ptr)
 }
 
 
-extern int select_p_pack_node_info(time_t last_query_time,
+extern int select_p_pack_select_info(time_t last_query_time,
 				   Buf * buffer_ptr)
 {
 	/* This function is always invalid on normal Linux clusters */
 	return SLURM_ERROR;
 }
 
+extern int select_p_select_nodeinfo_pack(select_nodeinfo_t *nodeinfo, 
+					 Buf *buffer)
+{
+	return SLURM_SUCCESS;
+}
 
-extern int select_p_get_select_nodeinfo(struct node_record *node_ptr,
-					enum select_data_info dinfo,
+extern int select_p_select_nodeinfo_unpack(select_nodeinfo_t **nodeinfo, 
+					   Buf buffer)
+{
+	return SLURM_SUCCESS;
+}
+
+extern select_nodeinfo_t *select_p_select_nodeinfo_alloc(void)
+{
+	return NULL;
+}
+
+extern int select_p_select_nodeinfo_free(select_nodeinfo_t nodeinfo)
+{
+	return SLURM_SUCCESS;
+}
+
+extern int select_p_select_nodeinfo_set_all(void)
+{
+	return SLURM_SUCCESS;
+}
+
+extern int select_p_select_nodeinfo_set(struct job_record *job_ptr)
+{
+	xassert(job_ptr);
+	xassert(job_ptr->magic == JOB_MAGIC);
+
+	if (!IS_JOB_RUNNING(job_ptr) && !IS_JOB_SUSPENDED(job_ptr))
+		return SLURM_SUCCESS;
+	
+	return _add_job_to_res(job_ptr, 0);
+}
+
+extern int select_p_select_nodeinfo_get(select_nodeinfo_t *nodeinfo, 
+					enum select_nodedata_info dinfo,
+					void *data)
+{
+       return SLURM_SUCCESS;
+}
+
+extern int select_p_select_nodeinfo_get(struct node_record *node_ptr,
+					enum select_nodedata_info dinfo,
 					void *data)
 {
 	uint32_t n, i, c, start, end;
@@ -1478,24 +1527,65 @@ extern int select_p_get_select_nodeinfo(struct node_record *node_ptr,
 	return SLURM_SUCCESS;
 }
 
-
-extern int select_p_update_nodeinfo(struct job_record *job_ptr)
-{
-	xassert(job_ptr);
-	xassert(job_ptr->magic == JOB_MAGIC);
-
-	if (!IS_JOB_RUNNING(job_ptr) && !IS_JOB_SUSPENDED(job_ptr))
-		return SLURM_SUCCESS;
-	
-	return _add_job_to_res(job_ptr, 0);
-}
-
-extern int select_p_update_block (update_part_msg_t *part_desc_ptr)
+extern int select_g_select_jobinfo_alloc (select_jobinfo_t *jobinfo)
 {
 	return SLURM_SUCCESS;
 }
 
+extern int select_g_select_jobinfo_free(select_jobinfo_t *jobinfo)
+{
+	return SLURM_SUCCESS;
+}
+
+extern int select_g_select_jobinfo_set(select_jobinfo_t *jobinfo,
+		enum select_jobdata_type data_type, void *data)
+{
+	return SLURM_SUCCESS;
+}
+
+extern int select_g_select_jobinfo_get(select_jobinfo_t *jobinfo,
+		enum select_jobdata_type data_type, void *data)
+{
+	return SLURM_ERROR;
+}
+
+extern select_jobinfo_t select_g_select_jobinfo_copy(select_jobinfo_t *jobinfo)
+{
+	return NULL;
+}
+
+extern int select_g_select_jobinfo_pack(select_jobinfo_t *jobinfo, Buf buffer)
+{
+	return SLURM_SUCCESS;
+}
+
+extern int select_g_select_jobinfo_unpack(select_jobinfo_t *jobinfo, Buf buffer)
+{
+	return SLURM_SUCCESS;
+}
+
+extern char *select_p_select_jobinfo_sprint(select_jobinfo_t *jobinfo,
+					    char *buf, size_t size, int mode)
+{
+	if (buf && size) {
+		buf[0] = '\0';
+		return buf;
+	} else
+		return NULL;
+}
+
+extern char *select_g_select_jobinfo_xstrdup(
+	select_jobinfo_t *jobinfo, int mode)
+{
+	return NULL;
+}
+
 extern int select_p_update_sub_node (update_part_msg_t *part_desc_ptr)
+{
+	return SLURM_SUCCESS;
+}
+
+extern int select_p_update_block (update_part_msg_t *part_desc_ptr)
 {
 	return SLURM_SUCCESS;
 }
@@ -1611,17 +1701,16 @@ static int _synchronize_bitmaps(struct job_record *job_ptr,
 }
 
 
-extern int select_p_get_info_from_plugin(enum select_data_info info,
+extern int select_p_get_info_from_plugin(enum select_plugindata_info info,
 					 struct job_record *job_ptr, void *data)
 {
 	int rc = SLURM_SUCCESS;
-
+	bitstr_t **bitmap = (bitstr_t **) data;
+	uint32_t *tmp_32 = (uint32_t *) data;
+	bitstr_t *tmp_bitmap = NULL;
+	
 	switch (info) {
 	case SELECT_BITMAP:
-	{
-		bitstr_t **bitmap = (bitstr_t **) data;
-		bitstr_t *tmp_bitmap = NULL;
-		
 		rc = _synchronize_bitmaps(job_ptr, &tmp_bitmap);
 		if (rc != SLURM_SUCCESS) {
 			FREE_NULL_BITMAP(tmp_bitmap);
@@ -1632,13 +1721,12 @@ extern int select_p_get_info_from_plugin(enum select_data_info info,
 					 * using FREE_NULL_BITMAP(bitmap);*/
 		tmp_bitmap = 0;
 		break;
-	}
 	case SELECT_CR_PLUGIN:
-	{
-		uint32_t *tmp_32 = (uint32_t *) data;
 		*tmp_32 = 1;
 		break;
-	}
+	case SELECT_CONFIG_INFO:
+		*tmp_list = NULL;
+		break;		
 	default:
 		error("select_g_get_info_from_plugin info %d invalid",
 		      info);

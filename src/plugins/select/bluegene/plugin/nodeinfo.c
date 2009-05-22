@@ -1,11 +1,9 @@
 /*****************************************************************************\
- *  node_select_info.c - get the node select plugin state information of slurm
- *
- *  $Id$
+ *  nodeinfo.c - functions used for the select_nodeinfo_t structure
  *****************************************************************************
- *  Copyright (C) 2005 The Regents of the University of California.
+ *  Copyright (C) 2009 Lawrence Livermore National Security.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
- *  Written by Morris Jette <jette1@llnl.gov>
+ *  Written by Danny Auble <da@llnl.gov> et. al.
  *  CODE-OCEC-09-009. All rights reserved.
  *  
  *  This file is part of SLURM, a resource management program.
@@ -38,72 +36,41 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
-#ifdef HAVE_CONFIG_H
-#  include "config.h"
-#endif
+#include "nodeinfo.h"
 
-#ifdef HAVE_SYS_SYSLOG_H
-#  include <sys/syslog.h>
-#endif
-
-#include <errno.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <syslog.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <unistd.h>
-
-#include <slurm/slurm.h>
-
-#include "src/api/node_select_info.h"
-#include "src/common/slurm_protocol_api.h"
-
-/*
- * slurm_load_node_select - issue RPC to get slurm all node select plugin 
- *	information if changed since update_time 
- * IN update_time - time of current configuration data
- * IN node_select_info_msg_pptr - place to store a node select configuration 
- *	pointer
- * RET 0 or a slurm error code
- * NOTE: free the response using slurm_free_node_select_info_msg
- */
-extern int slurm_load_node_select (time_t update_time, 
-		node_select_info_msg_t **node_select_info_msg_pptr)
+extern int select_nodeinfo_pack(select_nodeinfo_t *nodeinfo, Buf buffer);
 {
-        int rc;
-        slurm_msg_t req_msg;
-        slurm_msg_t resp_msg;
-	node_info_select_request_msg_t req;
+	return SLURM_SUCCESS;
+}
 
-	slurm_msg_t_init(&req_msg);
-	slurm_msg_t_init(&resp_msg);
+extern int select_nodeinfo_unpack(select_nodeinfo_t **nodeinfo, Buf buffer);
+{
+	return SLURM_SUCCESS;
+}
 
-        req.last_update  = update_time;
-        req_msg.msg_type = REQUEST_NODE_SELECT_INFO;
-        req_msg.data     = &req;
-	
-	if (slurm_send_recv_controller_msg(&req_msg, &resp_msg) < 0)
-		return SLURM_ERROR;
-	
-	switch (resp_msg.msg_type) {
-	case RESPONSE_NODE_SELECT_INFO:
-		*node_select_info_msg_pptr = (node_select_info_msg_t *) 
-			resp_msg.data;
-		break;
-	case RESPONSE_SLURM_RC:
-		rc = ((return_code_msg_t *) resp_msg.data)->return_code;
-		slurm_free_return_code_msg(resp_msg.data);	
-		if (rc) 
-			slurm_seterrno_ret(rc);
-		*node_select_info_msg_pptr = NULL;
-		break;
-	default:
-		*node_select_info_msg_pptr = NULL;
-		slurm_seterrno_ret(SLURM_UNEXPECTED_MSG_ERROR);
-		break;
-	}
+extern select_nodeinfo_t *select_nodeinfo_alloc(void);
+{
+	return NULL;
+}
 
-        return SLURM_SUCCESS;
+extern int select_nodeinfo_free(select_nodeinfo_t *nodeinfo);
+{
+	return SLURM_SUCCESS;
+}
+
+extern int select_nodeinfo_set_all(void)
+{
+	return SLURM_SUCCESS;
+}
+
+extern int select_nodeinfo_set(struct job_record *job_ptr)
+{
+	return SLURM_SUCCESS;
+}
+
+extern int select_nodeinfo_get(select_nodeinfo_t *nodeinfo, 
+			       enum select_nodedata_type dinfo,
+			       void *data)
+{
+       return SLURM_SUCCESS;
 }

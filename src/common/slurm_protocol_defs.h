@@ -602,7 +602,7 @@ typedef struct kill_job_msg {
 	uint32_t job_uid;
 	time_t   time;		/* slurmctld's time of request */
 	char *nodes;
-	select_jobinfo_t select_jobinfo;	/* opaque data type */
+	select_jobinfo_t *select_jobinfo;	/* opaque data type */
 } kill_job_msg_t;
 
 typedef struct signal_job_msg {
@@ -661,7 +661,7 @@ typedef struct batch_job_launch_msg {
 	uint32_t envc;		/* element count in environment */
 	char **environment;	/* environment variables to set for job, 
 				 *   name=value pairs, one per line */
-	select_jobinfo_t select_jobinfo;	/* opaque data type */
+	select_jobinfo_t *select_jobinfo;	/* opaque data type */
 	slurm_cred_t cred;
 	uint8_t open_mode;	/* stdout/err append or truncate */
 	uint8_t overcommit;	/* if resources being over subscribed */

@@ -643,7 +643,7 @@ static void _dump_job_state(struct job_record *dump_job_ptr, Buf buffer)
 	packstr(dump_job_ptr->mail_user, buffer);
 	packstr(dump_job_ptr->resv_name, buffer);
 
-	select_g_pack_jobinfo(dump_job_ptr->select_jobinfo, buffer);
+	select_g_select_jobinfo_pack(dump_job_ptr->select_jobinfo, buffer);
 	pack_select_job_res(dump_job_ptr->select_job, buffer);
 
 	pack16(dump_job_ptr->ckpt_interval, buffer);
@@ -689,7 +689,7 @@ static int _load_job_state(Buf buffer)
 	struct job_record *job_ptr;
 	struct part_record *part_ptr;
 	int error_code;
-	select_jobinfo_t select_jobinfo = NULL;
+	select_jobinfo_t *select_jobinfo = NULL;
 	select_job_res_t select_job = NULL;
 	check_jobinfo_t check_job = NULL;
 	acct_association_rec_t assoc_rec;
@@ -749,8 +749,7 @@ static int _load_job_state(Buf buffer)
 	safe_unpackstr_xmalloc(&mail_user, &name_len, buffer);
 	safe_unpackstr_xmalloc(&resv_name, &name_len, buffer);
 
-	if (select_g_alloc_jobinfo(&select_jobinfo)
-	    ||  select_g_unpack_jobinfo(select_jobinfo, buffer))
+	if (select_g_select_jobinfo_unpack(&select_jobinfo, buffer))
 		goto unpack_error;
 	if (unpack_select_job_res(&select_job, buffer))
 		goto unpack_error;
@@ -993,7 +992,7 @@ unpack_error:
 	xfree(resv_name);
 	xfree(state_desc);
 	xfree(wckey);
-	select_g_free_jobinfo(&select_jobinfo);
+	select_g_select_jobinfo_free(select_jobinfo);
 	checkpoint_free_jobinfo(check_job);
 	return SLURM_FAILURE;
 }
@@ -1672,7 +1671,7 @@ void dump_job_desc(job_desc_msg_t * job_specs)
 	       job_specs->mem_bind_type, job_specs->mem_bind,
 	       job_specs->plane_size);
 
-	select_g_sprint_jobinfo(job_specs->select_jobinfo, 
+	select_g_select_jobinfo_sprint(job_specs->select_jobinfo, 
 				buf, sizeof(buf), SELECT_PRINT_MIXED);
 	if (buf[0] != '\0')
 		debug3("   %s", buf);
@@ -2386,8 +2385,8 @@ static int _job_create(job_desc_msg_t * job_desc, int allocate, int will_run,
 	       job_desc->min_nodes, job_desc->max_nodes,
 	       job_desc->num_procs);
 	select_g_alter_node_cnt(SELECT_SET_NODE_CNT, job_desc);
-	select_g_get_jobinfo(job_desc->select_jobinfo,
-			     SELECT_DATA_MAX_PROCS, &max_procs);
+	select_g_select_jobinfo_get(job_desc->select_jobinfo,
+			     SELECT_JOBDATA_MAX_PROCS, &max_procs);
 	debug3("after alteration asking for nodes %u-%u procs %u-%u", 
 	       job_desc->min_nodes, job_desc->max_nodes,
 	       job_desc->num_procs, max_procs);
@@ -2450,14 +2449,14 @@ static int _job_create(job_desc_msg_t * job_desc, int allocate, int will_run,
 		job_desc->min_nodes = 1;
 
 #if SYSTEM_DIMENSIONS
-	select_g_get_jobinfo(job_desc->select_jobinfo,
-			     SELECT_DATA_GEOMETRY, &geo);
+	select_g_select_jobinfo_get(job_desc->select_jobinfo,
+			     SELECT_JOBDATA_GEOMETRY, &geo);
 	if (geo[0] == (uint16_t) NO_VAL) {
 		for (i=0; i<SYSTEM_DIMENSIONS; i++) {
 			geo[i] = 0;
 		}
-		select_g_set_jobinfo(job_desc->select_jobinfo,
-				     SELECT_DATA_GEOMETRY, &geo);
+		select_g_select_jobinfo_set(job_desc->select_jobinfo,
+				     SELECT_JOBDATA_GEOMETRY, &geo);
 	} else if (geo[0] != 0) {
 		uint32_t i, tot = 1;
 		for (i=0; i<SYSTEM_DIMENSIONS; i++)
@@ -2470,26 +2469,26 @@ static int _job_create(job_desc_msg_t * job_desc, int allocate, int will_run,
 		}
 		job_desc->min_nodes = tot;
 	}
-	select_g_get_jobinfo(job_desc->select_jobinfo,
-			     SELECT_DATA_REBOOT, &reboot);
+	select_g_select_jobinfo_get(job_desc->select_jobinfo,
+			     SELECT_JOBDATA_REBOOT, &reboot);
 	if (reboot == (uint16_t) NO_VAL) {
 		reboot = 0;	/* default is no reboot */
-		select_g_set_jobinfo(job_desc->select_jobinfo,
-				     SELECT_DATA_REBOOT, &reboot);
+		select_g_select_jobinfo_set(job_desc->select_jobinfo,
+				     SELECT_JOBDATA_REBOOT, &reboot);
 	}
-	select_g_get_jobinfo(job_desc->select_jobinfo,
-			     SELECT_DATA_ROTATE, &rotate);
+	select_g_select_jobinfo_get(job_desc->select_jobinfo,
+			     SELECT_JOBDATA_ROTATE, &rotate);
 	if (rotate == (uint16_t) NO_VAL) {
 		rotate = 1;	/* refault is to rotate */
-		select_g_set_jobinfo(job_desc->select_jobinfo,
-				     SELECT_DATA_ROTATE, &rotate);
+		select_g_select_jobinfo_set(job_desc->select_jobinfo,
+				     SELECT_JOBDATA_ROTATE, &rotate);
 	}
-	select_g_get_jobinfo(job_desc->select_jobinfo,
-			     SELECT_DATA_CONN_TYPE, &conn_type);
+	select_g_select_jobinfo_get(job_desc->select_jobinfo,
+			     SELECT_JOBDATA_CONN_TYPE, &conn_type);
 	if (conn_type == (uint16_t) NO_VAL) {
 		conn_type = (uint16_t) SELECT_TORUS;
-		select_g_set_jobinfo(job_desc->select_jobinfo,
-				     SELECT_DATA_CONN_TYPE, &conn_type);
+		select_g_select_jobinfo_set(job_desc->select_jobinfo,
+				     SELECT_JOBDATA_CONN_TYPE, &conn_type);
 	}
 #endif
 
@@ -3314,7 +3313,7 @@ _copy_job_desc_to_job_record(job_desc_msg_t * job_desc,
 	if (job_desc->begin_time > time(NULL))
 		detail_ptr->begin_time = job_desc->begin_time;
 	job_ptr->select_jobinfo = 
-		select_g_copy_jobinfo(job_desc->select_jobinfo);
+		select_g_select_jobinfo_copy(job_desc->select_jobinfo);
 
 	if (job_desc->ckpt_dir)
 		detail_ptr->ckpt_dir = xstrdup(job_desc->ckpt_dir);
@@ -3762,7 +3761,7 @@ static void _list_delete_job(void *job_entry)
 	xfree(job_ptr->resp_host);
 	xfree(job_ptr->resv_name);
 	free_select_job_res(&job_ptr->select_job);
-	select_g_free_jobinfo(&job_ptr->select_jobinfo);
+	select_g_select_jobinfo_free(job_ptr->select_jobinfo);
 	xfree(job_ptr->state_desc);
 	if (job_ptr->step_list) {
 		delete_step_records(job_ptr, 0);
@@ -4003,7 +4002,7 @@ void pack_job(struct job_record *dump_job_ptr, Buf buffer)
 	pack_bit_fmt(dump_job_ptr->node_bitmap, buffer);
 	pack32(dump_job_ptr->num_procs, buffer);
 	
-	select_g_pack_jobinfo(dump_job_ptr->select_jobinfo, buffer);
+	select_g_select_jobinfo_pack(dump_job_ptr->select_jobinfo, buffer);
 
 	detail_ptr = dump_job_ptr->details;
 	/* A few details are always dumped here */
@@ -4249,7 +4248,7 @@ void reset_job_bitmaps(void)
 	 * we can only do after ALL job's states and bitmaps are set
 	 * (i.e. it needs to be in this second loop) */
 	while ((job_ptr = (struct job_record *) list_next(job_iterator))) {
-		if (select_g_update_nodeinfo(job_ptr) != SLURM_SUCCESS) {
+		if (select_g_select_nodeinfo_set(job_ptr) != SLURM_SUCCESS) {
 			error("select_g_update_nodeinfo(%u): %m", 
 				job_ptr->job_id);
 		}
@@ -4422,16 +4421,20 @@ static bool _top_priority(struct job_record *job_ptr)
 	bool top;
 
 #ifdef HAVE_BG
-	uint16_t static_part = 0;
-	int rc;
+	static uint16_t static_part = (uint16_t)NO_VAL;
+	int rc = SLURM_SUCCESS;
 
 	/* On BlueGene with static partitioning, we don't want to delay
 	 * jobs based upon priority since jobs of different sizes can 
 	 * execute on different sets of nodes. While sched/backfill would
 	 * eventually start the job if delayed here based upon priority,
 	 * that could delay the initiation of a job by a few seconds. */
-	rc = select_g_get_info_from_plugin(SELECT_STATIC_PART, job_ptr, 
-					   &static_part);
+	if(static_part == (uint16_t)NO_VAL) {
+		/* Since this never changes we can just set it once
+		   and not look at it again. */
+		rc = select_g_get_info_from_plugin(SELECT_STATIC_PART, job_ptr, 
+						   &static_part);
+	}
 	if ((rc == SLURM_SUCCESS) && (static_part == 1))
 		return true;
 #endif
@@ -5178,34 +5181,34 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 	 uint16_t geometry[SYSTEM_DIMENSIONS] = {(uint16_t) NO_VAL};
 	 char *image = NULL;
 
-	 select_g_get_jobinfo(job_specs->select_jobinfo,
-			      SELECT_DATA_ROTATE, &rotate);
+	 select_g_select_jobinfo_get(job_specs->select_jobinfo,
+			      SELECT_JOBDATA_ROTATE, &rotate);
 	 if (rotate != (uint16_t) NO_VAL) {
 		 if (!IS_JOB_PENDING(job_ptr))
 			 error_code = ESLURM_DISABLED;
 		 else {
 			 info("update_job: setting rotate to %u for "
 			      "jobid %u", rotate, job_ptr->job_id);
-			 select_g_set_jobinfo(job_ptr->select_jobinfo,
-					      SELECT_DATA_ROTATE, &rotate);
+			 select_g_select_jobinfo_set(job_ptr->select_jobinfo,
+					      SELECT_JOBDATA_ROTATE, &rotate);
 		 }
 	 }
 
-	 select_g_get_jobinfo(job_specs->select_jobinfo,
-			      SELECT_DATA_REBOOT, &reboot);
+	 select_g_select_jobinfo_get(job_specs->select_jobinfo,
+			      SELECT_JOBDATA_REBOOT, &reboot);
 	 if (reboot != (uint16_t) NO_VAL) {
 		if (!IS_JOB_PENDING(job_ptr))
 			error_code = ESLURM_DISABLED;
 		else {
 			info("update_job: setting reboot to %u for "
 			     "jobid %u", reboot, job_ptr->job_id);
-			select_g_set_jobinfo(job_ptr->select_jobinfo,
-					     SELECT_DATA_REBOOT, &reboot);
+			select_g_select_jobinfo_set(job_ptr->select_jobinfo,
+					     SELECT_JOBDATA_REBOOT, &reboot);
 		}
 	}
 	
-	 select_g_get_jobinfo(job_specs->select_jobinfo,
-			      SELECT_DATA_GEOMETRY, geometry);
+	 select_g_select_jobinfo_get(job_specs->select_jobinfo,
+			      SELECT_JOBDATA_GEOMETRY, geometry);
 	 if (geometry[0] != (uint16_t) NO_VAL) {
 		 if (!IS_JOB_PENDING(job_ptr))
 			 error_code = ESLURM_DISABLED;
@@ -5217,8 +5220,8 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 			      "min_nodes=%u for jobid %u", 
 			      geometry[0], geometry[1], 
 			      geometry[2], tot, job_ptr->job_id);
-			 select_g_set_jobinfo(job_ptr->select_jobinfo,
-					      SELECT_DATA_GEOMETRY, geometry);
+			 select_g_select_jobinfo_set(job_ptr->select_jobinfo,
+					      SELECT_JOBDATA_GEOMETRY, geometry);
 			 detail_ptr->min_nodes = tot;
 		 } else {
 			 error("Attempt to change geometry for job %u",
@@ -5226,8 +5229,8 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 			 error_code = ESLURM_ACCESS_DENIED;
 		 }
 	 }
-	 select_g_get_jobinfo(job_specs->select_jobinfo,
-			      SELECT_DATA_START, geometry);
+	 select_g_select_jobinfo_get(job_specs->select_jobinfo,
+			      SELECT_JOBDATA_START, geometry);
 	 if (geometry[0] != (uint16_t) NO_VAL) {
 		 if (!IS_JOB_PENDING(job_ptr))
 			 error_code = ESLURM_DISABLED;
@@ -5239,8 +5242,8 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 			      "for job %u", 
 			      geometry[0], geometry[1], 
 			      geometry[2], job_ptr->job_id);
-			 select_g_set_jobinfo(job_ptr->select_jobinfo,
-					      SELECT_DATA_GEOMETRY, geometry);
+			 select_g_select_jobinfo_set(job_ptr->select_jobinfo,
+					      SELECT_JOBDATA_GEOMETRY, geometry);
 			 detail_ptr->min_nodes = tot;
 		 } else {
 			 error("Attempt to change geometry for job %u",
@@ -5249,53 +5252,53 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 		 }
 	 }
 
-	 select_g_get_jobinfo(job_specs->select_jobinfo,
-			      SELECT_DATA_BLRTS_IMAGE, &image);
+	 select_g_select_jobinfo_get(job_specs->select_jobinfo,
+			      SELECT_JOBDATA_BLRTS_IMAGE, &image);
 	 if (image) {
 		 if (!IS_JOB_PENDING(job_ptr))
 			 error_code = ESLURM_DISABLED;
 		 else {
 			 info("update_job: setting BlrtsImage to %s for "
 			      "jobid %u", image, job_ptr->job_id);
-			 select_g_set_jobinfo(job_ptr->select_jobinfo,
-					      SELECT_DATA_BLRTS_IMAGE, image);
+			 select_g_select_jobinfo_set(job_ptr->select_jobinfo,
+					      SELECT_JOBDATA_BLRTS_IMAGE, image);
 		 }
 	 }
-	 select_g_get_jobinfo(job_specs->select_jobinfo,
-			      SELECT_DATA_LINUX_IMAGE, &image);
+	 select_g_select_jobinfo_get(job_specs->select_jobinfo,
+			      SELECT_JOBDATA_LINUX_IMAGE, &image);
 	 if (image) {
 		 if (!IS_JOB_PENDING(job_ptr))
 			 error_code = ESLURM_DISABLED;
 		 else {
 			 info("update_job: setting LinuxImage to %s for "
 			      "jobid %u", image, job_ptr->job_id);
-			 select_g_set_jobinfo(job_ptr->select_jobinfo,
-					      SELECT_DATA_LINUX_IMAGE, image);
+			 select_g_select_jobinfo_set(job_ptr->select_jobinfo,
+					      SELECT_JOBDATA_LINUX_IMAGE, image);
 		 }
 	 }
-	 select_g_get_jobinfo(job_specs->select_jobinfo,
-			      SELECT_DATA_MLOADER_IMAGE, &image);
+	 select_g_select_jobinfo_get(job_specs->select_jobinfo,
+			      SELECT_JOBDATA_MLOADER_IMAGE, &image);
 	 if (image) {
 		 if (!IS_JOB_PENDING(job_ptr))
 			 error_code = ESLURM_DISABLED;
 		 else {
 			 info("update_job: setting MloaderImage to %s for "
 			      "jobid %u", image, job_ptr->job_id);
-			 select_g_set_jobinfo(job_ptr->select_jobinfo,
-					      SELECT_DATA_MLOADER_IMAGE,
+			 select_g_select_jobinfo_set(job_ptr->select_jobinfo,
+					      SELECT_JOBDATA_MLOADER_IMAGE,
 					      image);
 		 }
 	 }
-	 select_g_get_jobinfo(job_specs->select_jobinfo,
-			      SELECT_DATA_RAMDISK_IMAGE, &image);
+	 select_g_select_jobinfo_get(job_specs->select_jobinfo,
+			      SELECT_JOBDATA_RAMDISK_IMAGE, &image);
 	 if (image) {
 		 if (!IS_JOB_PENDING(job_ptr))
 			 error_code = ESLURM_DISABLED;
 		 else {
 			 info("update_job: setting RamdiskImage to %s for "
 			      "jobid %u", image, job_ptr->job_id);
-			 select_g_set_jobinfo(job_ptr->select_jobinfo,
-					      SELECT_DATA_RAMDISK_IMAGE,
+			 select_g_select_jobinfo_set(job_ptr->select_jobinfo,
+					      SELECT_JOBDATA_RAMDISK_IMAGE,
 					      image);
 		 }
 	 }
@@ -5554,7 +5557,7 @@ abort_job_on_node(uint32_t job_id, struct job_record *job_ptr,
 	kill_req->nodes	        = xstrdup(node_ptr->name);
 	if (job_ptr) {  /* NULL if unknown */
 		kill_req->select_jobinfo = 
-			select_g_copy_jobinfo(job_ptr->select_jobinfo);
+			select_g_select_jobinfo_copy(job_ptr->select_jobinfo);
 	}
 
 	agent_info = xmalloc(sizeof(agent_arg_t));
@@ -5588,7 +5591,7 @@ kill_job_on_node(uint32_t job_id, struct job_record *job_ptr,
 	kill_req->nodes	        = xstrdup(node_ptr->name);
 	if (job_ptr) {  /* NULL if unknown */
 		kill_req->select_jobinfo = 
-			select_g_copy_jobinfo(job_ptr->select_jobinfo);
+			select_g_select_jobinfo_copy(job_ptr->select_jobinfo);
 		kill_req->job_state = job_ptr->job_state;
 	}
 
@@ -7230,29 +7233,29 @@ _copy_job_record_to_job_desc(struct job_record *job_ptr)
 #if 0
 	/* select_jobinfo is unused at job submit time, only it's 
 	 * components are set. We recover those from the structure below.
-	 * job_desc->select_jobinfo = select_g_copy_jobinfo(job_ptr->
+	 * job_desc->select_jobinfo = select_g_select_jobinfo_copy(job_ptr->
 							    select_jobinfo); */
 
 	/* The following fields are used only on BlueGene systems.
 	 * Since BlueGene does not use the checkpoint/restart logic today,
 	 * we do not them. */
-	select_g_get_jobinfo(job_ptr->select_jobinfo, SELECT_DATA_GEOMETRY, 
+	select_g_select_jobinfo_get(job_ptr->select_jobinfo, SELECT_JOBDATA_GEOMETRY, 
 			     &job_desc->geometry);
-	select_g_get_jobinfo(job_ptr->select_jobinfo, SELECT_DATA_CONN_TYPE, 
+	select_g_select_jobinfo_get(job_ptr->select_jobinfo, SELECT_JOBDATA_CONN_TYPE, 
 			     &job_desc->conn_type);
-	select_g_get_jobinfo(job_ptr->select_jobinfo, SELECT_DATA_REBOOT, 
+	select_g_select_jobinfo_get(job_ptr->select_jobinfo, SELECT_JOBDATA_REBOOT, 
 			     &job_desc->reboot);
-	select_g_get_jobinfo(job_ptr->select_jobinfo, SELECT_DATA_ROTATE, 
+	select_g_select_jobinfo_get(job_ptr->select_jobinfo, SELECT_JOBDATA_ROTATE, 
 			     &job_desc->rotate);
-	select_g_get_jobinfo(job_ptr->select_jobinfo, SELECT_DATA_BLRTS_IMAGE, 
+	select_g_select_jobinfo_get(job_ptr->select_jobinfo, SELECT_JOBDATA_BLRTS_IMAGE, 
 			     &job_desc->blrtsimage);
-	select_g_get_jobinfo(job_ptr->select_jobinfo, SELECT_DATA_LINUX_IMAGE, 
+	select_g_select_jobinfo_get(job_ptr->select_jobinfo, SELECT_JOBDATA_LINUX_IMAGE, 
 			     &job_desc->linuximage);
-	select_g_get_jobinfo(job_ptr->select_jobinfo, 
-			     SELECT_DATA_MLOADER_IMAGE, 
+	select_g_select_jobinfo_get(job_ptr->select_jobinfo, 
+			     SELECT_JOBDATA_MLOADER_IMAGE, 
 			     &job_desc->mloaderimage);
-	select_g_get_jobinfo(job_ptr->select_jobinfo, 
-			     SELECT_DATA_RAMDISK_IMAGE, 
+	select_g_select_jobinfo_get(job_ptr->select_jobinfo, 
+			     SELECT_JOBDATA_RAMDISK_IMAGE, 
 			     &job_desc->ramdiskimage);
 #endif
 

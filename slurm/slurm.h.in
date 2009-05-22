@@ -134,12 +134,19 @@ BEGIN_C_DECLS
    typedef struct switch_jobinfo *switch_jobinfo_t;	/* opaque data type */
 #endif
 
-/* Define select_jobinfo_t and select_job_res_t below 
+/* Define select_jobinfo_t, select_nodeinfo_t below 
+ * to avoid including extraneous slurm headers */
+#ifndef __select_job_res_t_defined
+#  define  __select_job_res_t_defined	/* Opaque data for select plugins */
+   typedef struct select_job_res *select_job_res_t;
+#endif
+
+/* Define select_jobinfo_t, select_nodeinfo_t below 
  * to avoid including extraneous slurm headers */
 #ifndef __select_jobinfo_t_defined
 #  define  __select_jobinfo_t_defined	/* Opaque data for select plugins */
-   typedef struct select_jobinfo *select_jobinfo_t;  /* for BlueGene */
-   typedef struct select_job_res *select_job_res_t;  /* for non-BlueGene */
+   typedef struct select_jobinfo select_jobinfo_t;  /* for BlueGene */
+   typedef struct select_nodeinfo select_nodeinfo_t;  /* for BlueGene */
 #endif
 
 /* Define jobacctinfo_t below to avoid including extraneous slurm headers */
@@ -274,23 +281,30 @@ enum node_use_type {
 	SELECT_NAV_MODE		/* either mode is acceptable */
 };
 
-enum select_data_type {
-	SELECT_DATA_START,	/* data-> uint16_t start[SYSTEM_DIMENSIONS] */
-	SELECT_DATA_GEOMETRY,	/* data-> uint16_t geometry[SYSTEM_DIMENSIONS] */
-	SELECT_DATA_ROTATE,	/* data-> uint16_t rotate */
-	SELECT_DATA_CONN_TYPE,	/* data-> uint16_t connection_type */
-	SELECT_DATA_BLOCK_ID,	/* data-> char *bg_block_id */
-	SELECT_DATA_NODES,	/* data-> char *nodes */
-	SELECT_DATA_IONODES,	/* data-> char *ionodes */
-	SELECT_DATA_NODE_CNT,	/* data-> uint32_t node_cnt */
-	SELECT_DATA_ALTERED,    /* data-> uint16_t altered */
-	SELECT_DATA_MAX_PROCS,	/* data-> uint32_t max_procs */
-	SELECT_DATA_BLRTS_IMAGE,/* data-> char *blrtsimage */
-	SELECT_DATA_LINUX_IMAGE,/* data-> char *linuximage */
-	SELECT_DATA_MLOADER_IMAGE,/* data-> char *mloaderimage */
-	SELECT_DATA_RAMDISK_IMAGE,/* data-> char *ramdiskimage */
-	SELECT_DATA_REBOOT,	/* data-> uint16_t reboot */
-	SELECT_DATA_RESV_ID,	/* data-> char *reservation_id */
+enum select_jobdata_type {
+	SELECT_JOBDATA_START,	/* data-> uint16_t start[SYSTEM_DIMENSIONS] */
+	SELECT_JOBDATA_GEOMETRY,	/* data-> uint16_t geometry[SYSTEM_DIMENSIONS] */
+	SELECT_JOBDATA_ROTATE,	/* data-> uint16_t rotate */
+	SELECT_JOBDATA_CONN_TYPE,	/* data-> uint16_t connection_type */
+	SELECT_JOBDATA_BLOCK_ID,	/* data-> char *bg_block_id */
+	SELECT_JOBDATA_NODES,	/* data-> char *nodes */
+	SELECT_JOBDATA_IONODES,	/* data-> char *ionodes */
+	SELECT_JOBDATA_NODE_CNT,	/* data-> uint32_t node_cnt */
+	SELECT_JOBDATA_ALTERED,    /* data-> uint16_t altered */
+	SELECT_JOBDATA_MAX_PROCS,	/* data-> uint32_t max_procs */
+	SELECT_JOBDATA_BLRTS_IMAGE,/* data-> char *blrtsimage */
+	SELECT_JOBDATA_LINUX_IMAGE,/* data-> char *linuximage */
+	SELECT_JOBDATA_MLOADER_IMAGE,/* data-> char *mloaderimage */
+	SELECT_JOBDATA_RAMDISK_IMAGE,/* data-> char *ramdiskimage */
+	SELECT_JOBDATA_REBOOT,	/* data-> uint16_t reboot */
+	SELECT_JOBDATA_RESV_ID,	/* data-> char *reservation_id */
+};
+
+enum select_nodedata_type {
+	SELECT_NODEDATA_ALLOC_CNT,  /* data-> uint16_t */
+	SELECT_NODEDATA_ALLOC_CHAR, /* data-> char * */
+	SELECT_NODEDATA_ERROR_CNT,  /* data-> uint16_t */
+	SELECT_NODEDATA_ERROR_CHAR, /* data-> char * */
 };
 
 enum select_print_mode {
@@ -620,7 +634,7 @@ typedef struct job_descriptor {	/* For submit, allocate, and update requests */
 
 /* End of Blue Gene specific values */
 
-	select_jobinfo_t select_jobinfo; /* opaque data type,
+	select_jobinfo_t *select_jobinfo; /* opaque data type,
 					  * SLURM internal use only */
 	char *wckey;            /* wckey for job */
 } job_desc_msg_t;
@@ -686,8 +700,8 @@ typedef struct job_info {
         uint16_t requeue;       /* enable or disable job requeue option */
 	uint16_t restart_cnt;	/* count of job restarts */
 	char *resv_name;	/* reservation name */
-	select_jobinfo_t select_jobinfo; /* opaque data type,
-				 * process using select_g_get_jobinfo() */
+	select_jobinfo_t *select_jobinfo; /* opaque data type,
+				 * process using slurm_get_select_jobinfo() */
 	uint16_t shared;	/* 1 if job can share nodes with other jobs */
 	time_t start_time;	/* time execution begins, actual or expected */
 	char *state_desc;	/* optional details for state_reason */
@@ -914,6 +928,10 @@ typedef struct node_info {
 	uint32_t tmp_disk;	/* configured MB of total disk in TMP_FS */
 	uint16_t used_cpus;	/* count of used cpus on this node */
 	uint32_t weight;	/* arbitrary priority of node for scheduling */
+	select_nodeinfo_t *select_nodeinfo;  /* opaque data structure,
+					     * use slurm_get_select_nodeinfo()
+					     * to access conents */
+
 } node_info_t;
 
 typedef struct node_info_msg {
@@ -976,8 +994,8 @@ typedef struct resource_allocation_response_msg {
 	uint32_t *cpu_count_reps;/* how many nodes have same cpu count */
 	uint32_t node_cnt;	/* count of nodes */
 	uint32_t error_code;	/* error code for warning message */
-	select_jobinfo_t select_jobinfo;	/* opaque data structure,
-			* use select_g_get_jobinfo() to access conents */
+	select_jobinfo_t *select_jobinfo;	/* opaque data structure,
+			* use slurm_get_select_jobinfo() to access conents */
 } resource_allocation_response_msg_t;
 
 typedef struct job_alloc_info_response_msg {
@@ -989,8 +1007,8 @@ typedef struct job_alloc_info_response_msg {
 	uint32_t node_cnt;	/* count of nodes */
 	slurm_addr *node_addr;	/* network addresses */
 	uint32_t error_code;	/* error code for warning message */
-	select_jobinfo_t select_jobinfo;	/* opaque data structure,
-			* use select_g_get_jobinfo() to access conents */
+	select_jobinfo_t *select_jobinfo;	/* opaque data structure,
+			* use slurm_get_select_jobinfo() to access conents */
 } job_alloc_info_response_msg_t;
 
 typedef struct partition_info_msg {
@@ -1832,8 +1850,9 @@ extern int slurm_update_job PARAMS(( job_desc_msg_t * job_msg )) ;
  * IN/OUT data - the data to enter into job credential
  * RET 0 or -1 on error
  */
-extern int slurm_get_select_jobinfo PARAMS((select_jobinfo_t jobinfo,
-		enum select_data_type data_type, void *data));
+extern int slurm_get_select_jobinfo PARAMS(
+	(select_jobinfo_t *jobinfo, enum select_jobdata_type data_type,
+	 void *data));
 
 /*
  * slurm_notify_job - send message to the job's stdout, 
@@ -1982,6 +2001,17 @@ extern char *slurm_sprint_node_table PARAMS(( node_info_t * node_ptr,
  * OUT update_node_msg - user defined node descriptor
  */
 void slurm_init_update_node_msg (update_node_msg_t * update_node_msg);
+
+/*
+ * slurm_get_select_nodeinfo - get data from a select node credential
+ * IN nodeinfo  - updated select node credential
+ * IN data_type - type of data to enter into node credential
+ * IN/OUT data - the data to enter into node credential
+ * RET 0 or -1 on error
+ */
+extern int slurm_get_select_nodeinfo PARAMS(
+	(select_nodeinfo_t *nodeinfo, enum select_nodedata_type data_type,
+	 void *data));
 
 /*
  * slurm_update_node - issue RPC to a node's configuration per request, 

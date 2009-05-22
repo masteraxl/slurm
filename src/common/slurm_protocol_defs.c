@@ -326,7 +326,7 @@ void slurm_free_job_desc_msg(job_desc_msg_t * msg)
 		xfree(msg->reservation);
 		xfree(msg->resp_host);
 		xfree(msg->script);
-		select_g_free_jobinfo(&msg->select_jobinfo);
+		select_g_select_jobinfo_free(msg->select_jobinfo);
 		xfree(msg->wckey);
 		xfree(msg->work_dir);
 		xfree(msg);
@@ -360,7 +360,7 @@ void slurm_free_job_launch_msg(batch_job_launch_msg_t * msg)
 			xfree(msg->environment);
 		}
 
-		select_g_free_jobinfo(&msg->select_jobinfo);
+		select_g_select_jobinfo_free(msg->select_jobinfo);
 		slurm_cred_destroy(msg->cred);
 
 		xfree(msg);
@@ -397,7 +397,7 @@ void slurm_free_job_info_members(job_info_t * job)
 		xfree(job->resv_name);
 		xfree(job->req_nodes);
 		xfree(job->req_node_inx);
-		select_g_free_jobinfo(&job->select_jobinfo);
+		select_g_select_jobinfo_free(job->select_jobinfo);
 		xfree(job->state_desc);
 		xfree(job->wckey);
 		xfree(job->work_dir);
@@ -518,7 +518,7 @@ void slurm_free_kill_job_msg(kill_job_msg_t * msg)
 {
 	if (msg) {
 		xfree(msg->nodes);
-		select_g_free_jobinfo(&msg->select_jobinfo);
+		select_g_select_jobinfo_free(msg->select_jobinfo);
 		xfree(msg);
 	}
 }
@@ -1116,7 +1116,7 @@ void slurm_free_resource_allocation_response_msg (
 				resource_allocation_response_msg_t * msg)
 {
 	if (msg) {
-		select_g_free_jobinfo(&msg->select_jobinfo);
+		select_g_select_jobinfo_free(msg->select_jobinfo);
 		xfree(msg->node_list);
 		xfree(msg->cpus_per_node);
 		xfree(msg->cpu_count_reps);
@@ -1133,7 +1133,7 @@ void slurm_free_resource_allocation_response_msg (
 void slurm_free_job_alloc_info_response_msg(job_alloc_info_response_msg_t *msg)
 {
 	if (msg) {
-		select_g_free_jobinfo(&msg->select_jobinfo);
+		select_g_select_jobinfo_free(msg->select_jobinfo);
 		xfree(msg->node_list);
 		xfree(msg->cpus_per_node);
 		xfree(msg->cpu_count_reps);

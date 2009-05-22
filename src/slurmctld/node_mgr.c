@@ -697,6 +697,8 @@ int init_node_conf (void)
 		xfree(node_record_table_ptr[i].os);
 		xfree(node_record_table_ptr[i].part_pptr);
 		xfree(node_record_table_ptr[i].reason);
+		select_g_select_nodeinfo_free(
+			node_record_table_ptr[i].select_nodeinfo);
 	}
 
 	node_record_count = 0;
@@ -852,6 +854,8 @@ extern void pack_all_node (char **buffer_ptr, int *buffer_size,
 	time_t now = time(NULL);
 	struct node_record *node_ptr = node_record_table_ptr;
 
+	select_g_select_nodeinfo_set_all();
+
 	/*
 	 * If Consumable Resources enabled, get allocated_cpus.
 	 * Otherwise, report either all cpus or zero cpus are in 
@@ -943,11 +947,18 @@ static void _pack_node (struct node_record *dump_node_ptr, uint32_t cr_flag,
 	}
 	pack32  (dump_node_ptr->config_ptr->weight, buffer);
 
+#ifdef HAVE_BG
+	/* remove the ifdef after the other plugins are finished */
+	select_g_select_nodeinfo_pack(dump_node_ptr->select_nodeinfo, buffer);
+#else
+	/* FIX ME!!!!!!!!!!!!!!!!!!!!!!!! THIS will not work!!!!!!! */
 	if (cr_flag == 1) {
 		uint16_t allocated_cpus;
 		int error_code;
-		error_code = select_g_get_select_nodeinfo(dump_node_ptr,
-				SELECT_ALLOC_CPUS, &allocated_cpus);
+		xassert(0);
+		error_code = select_g_select_nodeinfo_get(
+			dump_node_ptr->select_nodeinfo,
+			SELECT_ALLOC_CPUS, &allocated_cpus);
 		if (error_code != SLURM_SUCCESS) {
 			error ("_pack_node: error from "
 				"select_g_get_select_nodeinfo: %m");
@@ -963,7 +974,7 @@ static void _pack_node (struct node_record *dump_node_ptr, uint32_t cr_flag,
 	} else {
 		pack16((uint16_t) 0, buffer);
 	}
-
+#endif
 	packstr (dump_node_ptr->arch, buffer);
 	packstr (dump_node_ptr->config_ptr->feature, buffer);
 	packstr (dump_node_ptr->os, buffer);
@@ -2662,6 +2673,8 @@ void node_fini(void)
 		xfree(node_record_table_ptr[i].os);
 		xfree(node_record_table_ptr[i].part_pptr);
 		xfree(node_record_table_ptr[i].reason);
+		select_g_select_nodeinfo_free(
+			node_record_table_ptr[i].select_nodeinfo);
 	}
 
 	FREE_NULL_BITMAP(idle_node_bitmap);
