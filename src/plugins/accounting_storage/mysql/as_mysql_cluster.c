@@ -188,6 +188,7 @@ extern int as_mysql_add_clusters(mysql_conn_t *mysql_conn, uint32_t uid,
 		if((rc = create_cluster_tables(mysql_conn->db_conn,
 					       object->name))
 		   != SLURM_SUCCESS) {
+			info("got here");
 			xfree(extra);
 			xfree(cols);
 			xfree(vals);
@@ -251,7 +252,7 @@ extern int as_mysql_add_clusters(mysql_conn_t *mysql_conn, uint32_t uid,
 		 * read it every time here.
 		 */
 		assoc = xmalloc(sizeof(slurmdb_association_rec_t));
-		slurmdb_init_association_rec(assoc);
+		slurmdb_init_association_rec(assoc, 0);
 		list_append(assoc_list, assoc);
 
 		assoc->cluster = xstrdup(object->name);
@@ -269,9 +270,8 @@ extern int as_mysql_add_clusters(mysql_conn_t *mysql_conn, uint32_t uid,
 
 	list_destroy(assoc_list);
 
-	if(!added) {
+	if(!added)
 		reset_mysql_conn(mysql_conn);
-	}
 
 	return rc;
 }

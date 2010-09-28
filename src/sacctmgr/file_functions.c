@@ -706,7 +706,7 @@ static int _mod_assoc(sacctmgr_file_opts_t *file_opts,
 		return 0;
 		break;
 	}
-	slurmdb_init_association_rec(&mod_assoc);
+	slurmdb_init_association_rec(&mod_assoc, 0);
 	memset(&assoc_cond, 0, sizeof(slurmdb_association_cond_t));
 
 	if((file_opts->fairshare != NO_VAL)
@@ -996,8 +996,8 @@ static int _mod_cluster(sacctmgr_file_opts_t *file_opts,
 	slurmdb_cluster_rec_t mod_cluster;
 	slurmdb_cluster_cond_t cluster_cond;
 
-	slurmdb_init_cluster_rec(&mod_cluster);
-	slurmdb_init_cluster_cond(&cluster_cond);
+	slurmdb_init_cluster_rec(&mod_cluster, 0);
+	slurmdb_init_cluster_cond(&cluster_cond, 0);
 
 	if(file_opts->classification
 	   && (file_opts->classification != cluster->classification)) {
@@ -1503,7 +1503,7 @@ static slurmdb_association_rec_t *_set_assoc_up(sacctmgr_file_opts_t *file_opts,
 	}
 
 	assoc = xmalloc(sizeof(slurmdb_association_rec_t));
-	slurmdb_init_association_rec(assoc);
+	slurmdb_init_association_rec(assoc, 0);
 
 	switch(mod_type) {
 	case MOD_CLUSTER:
@@ -2039,7 +2039,7 @@ extern void load_sacctmgr_cfg_file (int argc, char *argv[])
 					break;
 				}
 
-				slurmdb_init_cluster_cond(&cluster_cond);
+				slurmdb_init_cluster_cond(&cluster_cond, 0);
 				cluster_cond.cluster_list = list_create(NULL);
 				list_append(cluster_cond.cluster_list,
 					    cluster_name);
@@ -2075,7 +2075,7 @@ extern void load_sacctmgr_cfg_file (int argc, char *argv[])
 
 				cluster = xmalloc(
 					sizeof(slurmdb_cluster_rec_t));
-				slurmdb_init_cluster_rec(cluster);
+				slurmdb_init_cluster_rec(cluster, 0);
 				list_append(cluster_list, cluster);
 				cluster->name = xstrdup(cluster_name);
 				if(file_opts->classification) {
@@ -2254,7 +2254,7 @@ extern void load_sacctmgr_cfg_file (int argc, char *argv[])
 				if(!assoc2) {
 					assoc2 = xmalloc(
 						sizeof(slurmdb_association_rec_t));
-					slurmdb_init_association_rec(assoc2);
+					slurmdb_init_association_rec(assoc2, 0);
 					list_append(mod_assoc_list, assoc2);
 					assoc2->cluster = xstrdup(cluster_name);
 					assoc2->acct = xstrdup(file_opts->name);
@@ -2360,7 +2360,7 @@ extern void load_sacctmgr_cfg_file (int argc, char *argv[])
 				if(!assoc2) {
 					assoc2 = xmalloc(
 						sizeof(slurmdb_association_rec_t));
-					slurmdb_init_association_rec(assoc2);
+					slurmdb_init_association_rec(assoc2, 0);
 					list_append(mod_assoc_list, assoc2);
 					assoc2->cluster = xstrdup(cluster_name);
 					assoc2->acct = xstrdup(parent);
