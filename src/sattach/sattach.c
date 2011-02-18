@@ -45,6 +45,7 @@
 #include <unistd.h>
 
 #include "src/common/bitstring.h"
+#include "src/common/list.h"
 #include "src/common/timers.h"
 #include "src/common/xassert.h"
 #include "src/common/xstring.h"
@@ -53,7 +54,7 @@
 #define _DEBUG 1
 #define BGQ_CNODE_DIM_CNT 5	/* Number of dimensions to manage */
 #define BGQ_CNODE_CNT     512	/* Number of c-nodes in a midplane */
-#define BGQ_GEO_TABLE_LEN 80	/* Number of possible geometries */
+#define BGQ_GEO_TABLE_LEN 60	/* Number of possible geometries */
 
 /* Number of elements in each dimension */
 static int bgq_cnode_dim_size[BGQ_CNODE_DIM_CNT] = {4, 4, 4, 4, 2};
@@ -293,6 +294,9 @@ static bool _incr_geo(int *geo)
 	return false;
 }
 
+/*
+ * Swap two records in the geometry table
+ */
 static void _swap_geo_table(int inx1, int inx2)
 {
 	int i, tmp;
@@ -308,21 +312,23 @@ static void _swap_geo_table(int inx1, int inx2)
 }
 
 /*
- * Sort a geo_table in order of decreasing node counts
+ * Sort a geo_table in order of increasing node counts
+ * Do bubble sort to preserve order
  */
 static void _sort_geo_table(void)
 {
-	int i, j, high_inx;
+	int i;
+	bool sorted = false;
 
-	for (i = 0; i < geo_table_cnt; i++) {
-		high_inx = i;
-		for (j = i + 1; j < geo_table_cnt; j++) {
-			if (geo_table[j].size > geo_table[high_inx].size)
-				high_inx = j;
+	do {
+		sorted = true;
+		for (i = 1; i < geo_table_cnt; i++) {
+			if (geo_table[i-1].size > geo_table[i].size) {
+				_swap_geo_table(i-1, i);
+				sorted = false;
+			}
 		}
-		if (high_inx != i)
-			_swap_geo_table(i, high_inx);
-	}
+	} while (!sorted);
 }
 
 /*
@@ -360,26 +366,52 @@ static void _build_geo_table(void)
 		geo_table[geo_table_cnt++].size = product;
 		if (geo_table_cnt >= BGQ_GEO_TABLE_LEN)
 			fatal("BGQ geometry table overflow");
-		/* Generate next geometry */
-	} while (_incr_geo(inx));
+	} while (_incr_geo(inx));	/* Generate next geometry */
 }
 
-static void _find_dims(int node_cnt)
+static void _geo_list_destroy(void *x)
+{
+	geo_table_t *my_geo = (geo_table_t *) x;
+	xfree(my_geo);
+}
+
+static int _geo_list_print(void *x, void *arg)
+{
+	geo_table_t *my_geo = (geo_table_t *) x;
+	info("%d %d %d %d %d : %d", my_geo->geo[0], my_geo->geo[1],
+	     my_geo->geo[2], my_geo->geo[3], my_geo->geo[4], my_geo->size);
+	return 0;
+}
+
+/*
+ * Find the possible geometries of a given size.
+ * Search from the bottom of the list to prefer geometries that more
+ * fully use a dimension (e.g. prefer "4,1,1,1,1" over "2,2,1,1,1").
+ */
+static List _find_dims(int node_cnt)
 {
 	int dim, i;
-	char dim_buf[16], out_buf[128];
+	geo_table_t *my_geo;
+	List my_list = NULL;
 
-	for (i = 0; i < geo_table_cnt; i++) {
-		if (geo_table[i].size != node_cnt)
+	for (i = geo_table_cnt-1; i >= 0; i--) {
+		if (geo_table[i].size < node_cnt)
+			break;
+		if (geo_table[i].size > node_cnt)
 			continue;
-		out_buf[0] = '\0';
-		for (dim = 0; dim < BGQ_CNODE_DIM_CNT; dim++) {
-			snprintf(dim_buf, sizeof(dim_buf), "%5d ",
-				 geo_table[i].geo[dim]);
-			strcat(out_buf, dim_buf);
+		if (my_list == NULL) {
+			my_list = list_create(_geo_list_destroy);
+			if (my_list == NULL)
+				fatal("list_create: malloc failure");
 		}
-		info("%s   node_cnt=%d", out_buf, node_cnt);
+		my_geo = xmalloc(sizeof(geo_table_t));
+		my_geo->size = geo_table[i].size;
+		for (dim = 0; dim < BGQ_CNODE_DIM_CNT; dim++) {
+			my_geo->geo[dim] = geo_table[i].geo[dim];
+		}
+		list_append(my_list, my_geo);
 	}
+	return my_list;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -408,6 +440,7 @@ int sattach(int argc, char *argv[])
 	char in_buf[32];
 	int map_cnt = 0, node_cnt;
 	int alloc_dims[BGQ_CNODE_DIM_CNT] = {1, 1, 1, 1, 1};
+	List my_geo_list;
 
 	START_TIMER;
 	_build_geo_table();
@@ -423,7 +456,13 @@ int sattach(int argc, char *argv[])
 		node_cnt = atoi(in_buf);
 		if (node_cnt == 0)
 			break;
-		_find_dims(node_cnt);
+		my_geo_list = _find_dims(node_cnt);
+		if (my_geo_list) {
+			list_for_each(my_geo_list, _geo_list_print, NULL);
+			list_destroy(my_geo_list);
+		} else {
+			error("no geometry of size %d", node_cnt);
+		}
 	}
 	exit(0);
 
