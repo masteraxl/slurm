@@ -50,11 +50,21 @@
 #include "src/common/xstring.h"
 #include "src/common/xmalloc.h"
 
+#define _DEBUG 1
 #define BGQ_CNODE_DIM_CNT 5	/* Number of dimensions to manage */
 #define BGQ_CNODE_CNT     512	/* Number of c-nodes in a midplane */
+#define BGQ_GEO_TABLE_LEN 80	/* Number of possible geometries */
 
 /* Number of elements in each dimension */
 static int bgq_cnode_dim_size[BGQ_CNODE_DIM_CNT] = {4, 4, 4, 4, 2};
+
+
+typedef struct geo_table {
+	int size;
+	int geo[BGQ_CNODE_DIM_CNT];
+} geo_table_t;
+geo_table_t geo_table[BGQ_GEO_TABLE_LEN];
+int geo_table_cnt = 0;
 
 /* Translate a 5-D coordinate into a 1-D offset in the cnode bitmap */
 static void _bgl_cnode_xlate_5d_1d(int *offset_1d, int *offset_5d)
@@ -253,6 +263,86 @@ extern int bgq_cnode_build_all(int *alloc_dims)
 	}
 	return map_cnt;
 }
+
+/* increment a geometry array, return false after reaching */
+static bool _incr_geo(int *geo)
+{
+	int dim, i;
+	for (dim = BGQ_CNODE_DIM_CNT - 1; dim >= 1; dim--) {
+		if ((geo[dim] < geo[dim-1]) &&
+		    (geo[dim] < bgq_cnode_dim_size[dim])) {
+			geo[dim]++;
+			for (i = dim + 1; i < BGQ_CNODE_DIM_CNT; i++)
+				geo[i] = 1;
+			return true;
+		}
+	}
+
+	if (++geo[0] <= bgq_cnode_dim_size[0]) {
+		for (dim = 1; dim < BGQ_CNODE_DIM_CNT; dim++) {
+			geo[dim] = 1;
+		}
+		return true;
+	}
+	
+	return false;
+}
+
+static void _build_table(void)
+{
+	int dim, inx[BGQ_CNODE_DIM_CNT], product;
+#if _DEBUG
+	char dim_buf[16], out_buf[128];
+#endif
+	for (dim = 0; dim < BGQ_CNODE_DIM_CNT; dim++)
+		inx[dim] = 1;
+
+	do {
+#if _DEBUG
+		out_buf[0] = '\0';
+#endif
+		/* Store new value */
+		product = 1;
+		for (dim = 0; dim < BGQ_CNODE_DIM_CNT; dim++) {
+			geo_table[geo_table_cnt].geo[dim] = inx[dim];
+			product *= inx[dim];
+#if _DEBUG
+			snprintf(dim_buf, sizeof(dim_buf), "%d ",
+				 geo_table[geo_table_cnt].geo[dim]);
+			strcat(out_buf, dim_buf);
+#endif
+		}
+		geo_table[geo_table_cnt++].size = product;
+		if (geo_table_cnt >= BGQ_GEO_TABLE_LEN)
+			fatal("BGQ geometry table overflow");
+#if _DEBUG
+		snprintf(dim_buf, sizeof(dim_buf), ": %d", product);
+	//		 geo_table[geo_table_cnt].size);
+		strcat(out_buf, dim_buf);
+		info("%s", out_buf);
+#endif
+		/* Generate next geometry */
+	} while (_incr_geo(inx));
+}
+
+static void _find_dims(int node_cnt)
+{
+	int dim, i;
+	char dim_buf[16], out_buf[128];
+
+	for (i = 0; i < geo_table_cnt; i++) {
+		if (geo_table[i].size != node_cnt)
+			continue;
+		out_buf[0] = '\0';
+		for (dim = 0; dim < BGQ_CNODE_DIM_CNT; dim++) {
+			snprintf(dim_buf, sizeof(dim_buf), "%5d ",
+				 geo_table[i].geo[dim]);
+			strcat(out_buf, dim_buf);
+		}
+		info("%s   node_cnt=%d", out_buf, node_cnt);
+	}
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 // Time to build various maps, with rotation
 // Size	Count	USec
@@ -276,21 +366,26 @@ extern int bgq_cnode_build_all(int *alloc_dims)
 int sattach(int argc, char *argv[])
 {
 	DEF_TIMERS;
-	int i, map_cnt = 0;
+	char in_buf[32];
+	int map_cnt = 0, node_cnt;
 	int alloc_dims[BGQ_CNODE_DIM_CNT] = {1, 1, 1, 1, 1};
 
-	if (argc < 2) {
-		info("Usage: elements required in each dimension: X[Y[Z[A[B]]]]");
-		exit(0);
-	}
+	START_TIMER;
+	_build_table();
+	END_TIMER;
+	info("built table: %s", TIME_STR);
 
-	for (i = 1; i < argc; i++) {
-		alloc_dims[i-1] = atoi(argv[i]);
-		if (alloc_dims[i-1] <= 0) {
-			info("Invalid input: %s", argv[i]);
-			exit(1);
-		}
+	while (1) {
+		printf("node_count: ");
+		if (gets(in_buf) == NULL)
+			break;
+		node_cnt = atoi(in_buf);
+		if (node_cnt == 0)
+			break;
+		_find_dims(node_cnt);
 	}
+	exit(0);
+
 
 	START_TIMER;
 	map_cnt += bgq_cnode_build_all(alloc_dims);
