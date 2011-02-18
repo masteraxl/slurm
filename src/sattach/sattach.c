@@ -44,6 +44,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <slurm/slurm_errno.h>
+
 #include "src/common/bitstring.h"
 #include "src/common/list.h"
 #include "src/common/timers.h"
@@ -51,7 +53,8 @@
 #include "src/common/xstring.h"
 #include "src/common/xmalloc.h"
 
-#define _DEBUG 1
+#define DISPLAY_1D        1
+#define DISPLAY_5D        0
 #define BGQ_CNODE_DIM_CNT 5	/* Number of dimensions to manage */
 #define BGQ_CNODE_CNT     512	/* Number of c-nodes in a midplane */
 #define BGQ_GEO_TABLE_LEN 60	/* Number of possible geometries */
@@ -94,6 +97,7 @@ static void _bgl_cnode_xlate_5d_1d(int *offset_1d, int *offset_5d)
 	*offset_1d = map_offset;
 }
 
+#if DISPLAY_5D
 /* Translate a 1-D offset in the cnode bitmap to a 5-D coordinate */
 static void _bgl_cnode_xlate_1d_5d(int offset_1d, int *offset_5d)
 {
@@ -107,6 +111,7 @@ static void _bgl_cnode_xlate_1d_5d(int offset_1d, int *offset_5d)
 		map_offset /= bgq_cnode_dim_size[i];
 	}
 }
+#endif
 
 /* Allocate a bgq cnode map. Use bgq_cnode_map_free() to free */
 extern bitstr_t *bgq_cnode_map_alloc(void)
@@ -176,6 +181,15 @@ extern void bgq_cnode_map_rm(bitstr_t *cnode_bitmap, bitstr_t *alloc_bitmap)
  */
 extern void bgq_cnode_map_print(bitstr_t *cnode_bitmap)
 {
+#if DISPLAY_1D
+{
+	char out_buf[256];
+	bit_fmt(out_buf, sizeof(out_buf), cnode_bitmap);
+	info("%s", out_buf);
+}
+#endif
+#if DISPLAY_5D
+{
 	int i, j, offset[BGQ_CNODE_DIM_CNT];
 
 	xassert(cnode_bitmap);
@@ -195,59 +209,43 @@ extern void bgq_cnode_map_print(bitstr_t *cnode_bitmap)
 		}
 	}
 }
+#endif
+}
 
 /*
- * Build bitmaps for all possible configurations of a specific c-node count
+ * Attempt to place a new allocation into an existing c-node state.
+ * Do not rotate or change the requested geometry, but do attempt to place
+ * it using all possible starting locations.
+ *
+ * cnode_bitmap IN - bitmap representing current system state, bits are set
+ *                   for currently allocated c-nodes
+ * alloc_cnode_bitmap OUT - bitmap representing where to place the allocation
+ *                          set only if RET == SLURM_SUCCESS
+ * geo_req IN - geometry required for the new allocation
+ * attempt_cnt OUT - number of job placements attempted
+ * RET - SLURM_SUCCESS if allocation can be made, otherwise SLURM_ERROR
  */
-extern int bgq_cnode_build_all(int *alloc_dims)
+extern int  bgq_cnode_test_all(bitstr_t *cnode_bitmap,
+			       bitstr_t **alloc_cnode_bitmap,
+			       geo_table_t *geo_req, int *attempt_cnt)
 {
-	int alloc_size = 1;	/* Total cnodes to be allocated */
-	int map_cnt = 0;	/* Number of bitmaps built */
+	int rc = SLURM_ERROR;
 	int i, j;
 	int start_offset[BGQ_CNODE_DIM_CNT], next_offset[BGQ_CNODE_DIM_CNT];
 	int tmp_offset[BGQ_CNODE_DIM_CNT];
-	bitstr_t *cnode_bitmap;
+	bitstr_t *new_bitmap;
 
-	xassert(alloc_dims);
-	for (j = 0; j < BGQ_CNODE_DIM_CNT; j++)
-		alloc_size *= alloc_dims[j];
-	xassert(alloc_size >= 1);
+	xassert(cnode_bitmap);
+	xassert(alloc_cnode_bitmap);
+	xassert(geo_req);
+	xassert(attempt_cnt);
+
+	*attempt_cnt = 0;
 	/* Start at location 00000 and move through all starting locations */
 	for (j = 0; j < BGQ_CNODE_DIM_CNT; j++)
 		start_offset[j] = 0;
 	for (i = 0; i < BGQ_CNODE_CNT; i++) {
-#if 0
-		int axis;
-		/* Cycle through rotations in each dimension. */
-		/* NOTE: This logic is only working for allocations
-		 * that have non-zero width in only one dimension. */
-		for (axis = 0; axis < BGQ_CNODE_DIM_CNT; axis++) {
-			int cnode_cnt;
-			if (bgq_cnode_dim_size[axis] < alloc_size)
-				continue;	/* too small */
-			if ((bgq_cnode_dim_size[axis] == alloc_size) &&
-			    (start_offset[axis] != 0))
-				continue;	/* already filled, no shift */
-			map_cnt++;
-			cnode_bitmap = bgq_cnode_map_alloc();
-			bgq_cnode_map_set(cnode_bitmap, start_offset);
-			for (cnode_cnt = 1; cnode_cnt < alloc_size;
-			     cnode_cnt++) {
-				for (j = 0; j < BGQ_CNODE_DIM_CNT; j++)
-					next_offset[j] = start_offset[j];
-				next_offset[axis] += cnode_cnt;
-				if (next_offset[axis] >=
-				    bgq_cnode_dim_size[axis])
-					next_offset[axis] = 0;
-				bgq_cnode_map_set(cnode_bitmap, next_offset);
-			}
-			//if (map_cnt < 10) { bgq_cnode_map_print(cnode_bitmap); info(" "); }
-			if (alloc_size == 1)	/* No need to rotate */
-				break;
-		}
-#endif
-		map_cnt++;
-		cnode_bitmap = bgq_cnode_map_alloc();
+		(*attempt_cnt)++;
 		for (j = 0; j < BGQ_CNODE_DIM_CNT; j++)
 			tmp_offset[j] = 0;
 		while (1) {
@@ -261,34 +259,65 @@ extern int bgq_cnode_build_all(int *alloc_dims)
 				}
 			}
 
-			/* Add a point on the grid */
-			bgq_cnode_map_set(cnode_bitmap, next_offset);
+			/* Test that point on the grid */
+			if (bgq_cnode_map_test(cnode_bitmap, next_offset))
+				break;
 
 			/* Increment tmp_offset */
 			for (j = 0; j < BGQ_CNODE_DIM_CNT; j++) {
 				tmp_offset[j]++;
-				if (tmp_offset[j] < alloc_dims[j])
+				if (tmp_offset[j] < geo_req->geo[j])
 					break;
 				tmp_offset[j] = 0;
 			}
-			if (j >= BGQ_CNODE_DIM_CNT)
+			if (j >= BGQ_CNODE_DIM_CNT) {
+				rc = SLURM_SUCCESS;
 				break;
-
+			}
 		}
-		if (map_cnt < 4) { bgq_cnode_map_print(cnode_bitmap); info(" "); }
+		if (rc == SLURM_SUCCESS)
+			break;
 
 		/* Move to next starting location */
 		for (j = 0; j < BGQ_CNODE_DIM_CNT; j++) {
-			if (alloc_dims[j] == bgq_cnode_dim_size[j])
-				continue;
+			if (geo_req->geo[j] == bgq_cnode_dim_size[j])
+				continue;	/* full axis used */
 			if (++start_offset[j] < bgq_cnode_dim_size[j])
-				break;
-			start_offset[j] = 0;
+				break;		/* sucess */
+			start_offset[j] = 0;	/* move to next dimension */
 		}
 		if (j >= BGQ_CNODE_DIM_CNT)
-			break;
+			return rc;		/* end of starting locations */
 	}
-	return map_cnt;
+
+	new_bitmap = bgq_cnode_map_alloc();
+	for (j = 0; j < BGQ_CNODE_DIM_CNT; j++)
+		tmp_offset[j] = 0;
+	while (1) {
+		/* Compute location of next entry on the grid */
+		for (j = 0; j < BGQ_CNODE_DIM_CNT; j++) {
+			next_offset[j] = start_offset[j] + tmp_offset[j];
+			if (next_offset[j] >= bgq_cnode_dim_size[j])
+				next_offset[j] -= bgq_cnode_dim_size[j];
+		}
+
+		bgq_cnode_map_set(new_bitmap, next_offset);
+
+		/* Increment tmp_offset */
+		for (j = 0; j < BGQ_CNODE_DIM_CNT; j++) {
+			tmp_offset[j]++;
+			if (tmp_offset[j] < geo_req->geo[j])
+				break;
+			tmp_offset[j] = 0;
+		}
+		if (j >= BGQ_CNODE_DIM_CNT) {
+			rc = SLURM_SUCCESS;
+			break;
+		}
+	}
+	*alloc_cnode_bitmap = new_bitmap;
+
+	return rc;
 }
 
 /*
@@ -476,10 +505,10 @@ static List _find_dims(int node_cnt)
 int sattach(int argc, char *argv[])
 {
 	DEF_TIMERS;
-	bitstr_t *cnode_bitmap;
+	bitstr_t *cnode_bitmap, *alloc_cnode_bitmap = NULL;
 	char in_buf[32];
-	int attempt_cnt, node_cnt;
-	int alloc_dims[BGQ_CNODE_DIM_CNT] = {1, 1, 1, 1, 1};
+	int attempt_cnt = 0, total_attempt_cnt;
+	int node_cnt, rc;
 	List my_geo_list;
 	ListIterator geo_iter;
 	geo_table_t *my_geo;
@@ -506,31 +535,44 @@ int sattach(int argc, char *argv[])
 			continue;
 		}
 
-		attempt_cnt = 0;
+		START_TIMER;
+		total_attempt_cnt = 0;
+		rc = SLURM_ERROR;
 		geo_iter = list_iterator_create(my_geo_list);
 		if (geo_iter == NULL)
 			fatal("list_iterator_create: malloc failure");
 		while ((my_geo = (geo_table_t *)list_next(geo_iter))) {
 			_geo_list_print(my_geo, "testing to allocate: ");
-/* FIXME: try to allocate here */
-/* If fit, then log add to allocation. */
-/* attempt_cnt += ? */
-			if (attempt_cnt >= MAX_ATTEMPT_CNT)
+			rc = bgq_cnode_test_all(cnode_bitmap,
+						&alloc_cnode_bitmap,
+						my_geo, &attempt_cnt);
+			if (rc == SLURM_SUCCESS) {
+				END_TIMER;
+				info("allocation successful at:");
+				bgq_cnode_map_print(alloc_cnode_bitmap);
+				bgq_cnode_map_add(cnode_bitmap,
+						  alloc_cnode_bitmap);
+				bgq_cnode_map_free(alloc_cnode_bitmap);
 				break;
+			}
+			total_attempt_cnt += attempt_cnt;
+			if (total_attempt_cnt >= MAX_ATTEMPT_CNT)
+				break;	/* Abandon effort */
 /* attempt to rotate geometry */
 /* try to allocate again */
 		}
+		if (rc != SLURM_SUCCESS) {
+			END_TIMER;
+			info("allocaiton unsuccessful after %d attempts",
+			     total_attempt_cnt);
+		}
 		list_iterator_destroy(geo_iter);
 		list_destroy(my_geo_list);
+		info("full system allocation:");
+		bgq_cnode_map_print(cnode_bitmap);
+		info("allocation time: %s", TIME_STR);
 	}
 	bgq_cnode_map_free(cnode_bitmap);
-	exit(0);
-
-
-	START_TIMER;
-	attempt_cnt += bgq_cnode_build_all(alloc_dims);
-	END_TIMER;
-	info("built %d maps in %s", attempt_cnt, TIME_STR);
 
 	exit(0);
 }
