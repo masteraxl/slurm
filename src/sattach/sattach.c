@@ -264,7 +264,12 @@ extern int bgq_cnode_build_all(int *alloc_dims)
 	return map_cnt;
 }
 
-/* increment a geometry array, return false after reaching */
+/*
+ * Increment a geometry array, return false after reaching the last entry
+ * NOTE: This is 1-origin and only generates unique number by insuring
+ * that each number in the array is no larger than the number in the
+ * prior dimension.
+ */
 static bool _incr_geo(int *geo)
 {
 	int dim, i;
@@ -288,39 +293,73 @@ static bool _incr_geo(int *geo)
 	return false;
 }
 
-static void _build_table(void)
+static void _swap_geo_table(int inx1, int inx2)
+{
+	int i, tmp;
+
+	tmp = geo_table[inx1].size;
+	geo_table[inx1].size = geo_table[inx2].size;
+	geo_table[inx2].size = tmp;
+	for (i = 0; i < BGQ_CNODE_DIM_CNT; i++) {
+		tmp = geo_table[inx1].geo[i];
+		geo_table[inx1].geo[i] = geo_table[inx2].geo[i];
+		geo_table[inx2].geo[i] = tmp;
+	}
+}
+
+/*
+ * Sort a geo_table in order of decreasing node counts
+ */
+static void _sort_geo_table(void)
+{
+	int i, j, high_inx;
+
+	for (i = 0; i < geo_table_cnt; i++) {
+		high_inx = i;
+		for (j = i + 1; j < geo_table_cnt; j++) {
+			if (geo_table[j].size > geo_table[high_inx].size)
+				high_inx = j;
+		}
+		if (high_inx != i)
+			_swap_geo_table(i, high_inx);
+	}
+}
+
+/*
+ * Print the contents of geo_table
+ */
+static void _print_geo_table(void)
+{
+	int i;
+
+	for (i = 0; i < geo_table_cnt; i++) {
+		info("%d %d %d %d %d : %d", geo_table[i].geo[0],
+		    geo_table[i].geo[1], geo_table[i].geo[2],
+		    geo_table[i].geo[3], geo_table[i].geo[4],
+		    geo_table[i].size);
+	}
+}
+
+/*
+ * Build a geo_table of possible unique geometries
+ */
+static void _build_geo_table(void)
 {
 	int dim, inx[BGQ_CNODE_DIM_CNT], product;
-#if _DEBUG
-	char dim_buf[16], out_buf[128];
-#endif
+
 	for (dim = 0; dim < BGQ_CNODE_DIM_CNT; dim++)
 		inx[dim] = 1;
 
 	do {
-#if _DEBUG
-		out_buf[0] = '\0';
-#endif
 		/* Store new value */
 		product = 1;
 		for (dim = 0; dim < BGQ_CNODE_DIM_CNT; dim++) {
 			geo_table[geo_table_cnt].geo[dim] = inx[dim];
 			product *= inx[dim];
-#if _DEBUG
-			snprintf(dim_buf, sizeof(dim_buf), "%d ",
-				 geo_table[geo_table_cnt].geo[dim]);
-			strcat(out_buf, dim_buf);
-#endif
 		}
 		geo_table[geo_table_cnt++].size = product;
 		if (geo_table_cnt >= BGQ_GEO_TABLE_LEN)
 			fatal("BGQ geometry table overflow");
-#if _DEBUG
-		snprintf(dim_buf, sizeof(dim_buf), ": %d", product);
-	//		 geo_table[geo_table_cnt].size);
-		strcat(out_buf, dim_buf);
-		info("%s", out_buf);
-#endif
 		/* Generate next geometry */
 	} while (_incr_geo(inx));
 }
@@ -371,7 +410,9 @@ int sattach(int argc, char *argv[])
 	int alloc_dims[BGQ_CNODE_DIM_CNT] = {1, 1, 1, 1, 1};
 
 	START_TIMER;
-	_build_table();
+	_build_geo_table();
+	_sort_geo_table();
+	_print_geo_table();
 	END_TIMER;
 	info("built table: %s", TIME_STR);
 
