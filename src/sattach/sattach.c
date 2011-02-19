@@ -65,8 +65,11 @@
 				 * this number of possible placements. */
 
 /* Number of elements in each dimension
+ *
  * NOTE: Current algorithms rely upon each number being equal to or smaller
- *       than its predecessor. See _incr_geo() and _perm_geo() */
+ *       than its predecessor. The effected functions are _incr_geo() and
+ *       _perm_geo(), both of which would be much more complex without this
+ *       restriction. */
 static int bgq_cnode_dim_size[BGQ_CNODE_DIM_CNT] = {4, 4, 4, 4, 2};
 
 typedef struct geo_table {
@@ -409,6 +412,7 @@ static void _build_geo_table(void)
 		inx[dim] = 1;
 
 	do {
+		info("add geo:%d:%d:%d:%d:%d", inx[0], inx[1], inx[2], inx[3], inx[4]);
 		/* Store new value */
 		product = 1;
 		for (dim = 0; dim < BGQ_CNODE_DIM_CNT; dim++) {
@@ -490,10 +494,10 @@ static List _find_dims(int node_cnt)
  * inx IN - variation number of the permuation
  * RET - true if valid rotation is possible, otherwise false
  *
- * NOTE: There are 120 valid permuations of a 5-D geometry
+ * NOTE: There are 120 valid permuations of a 5-D geometry.
  * This algorithm only performs a simple rotation algorithm
  * (e.g. ABCDE -> EABCD -> DEABC -> CDEAB -> BCDEA)
- * It does *not* currently re-order the numbers (no EDCBA).
+ * It does *not* currently invert the dimensions (no ABCDE -> BACDE).
  */
 static bool _perm_geo(geo_table_t *orig_geo, geo_table_t *perm_geo, int inx)
 {
@@ -532,7 +536,7 @@ int sattach(int argc, char *argv[])
 	_sort_geo_table();
 	_print_geo_table();
 	END_TIMER;
-	info("built table: %s", TIME_STR);
+	info("built table of size %d in time %s", geo_table_cnt, TIME_STR);
 
 	cnode_bitmap = bgq_cnode_map_alloc();
 	while (1) {
@@ -588,7 +592,7 @@ int sattach(int argc, char *argv[])
 		list_destroy(my_geo_list);
 		info("full system allocation:");
 		bgq_cnode_map_print(cnode_bitmap);
-		info("allocation time: %s", TIME_STR);
+		info("allocation time %s", TIME_STR);
 	}
 	bgq_cnode_map_free(cnode_bitmap);
 
