@@ -53,6 +53,7 @@
 #include "src/common/xstring.h"
 #include "src/common/xmalloc.h"
 
+#define _DEBUG            0	/* Print debugging information */
 #define DISPLAY_1D        1	/* Print allocation information using 1-D */
 #define DISPLAY_5D        0	/* Print allocation information using 5-D */
 #define BGQ_CNODE_DIM_CNT 5	/* Number of dimensions to manage */
@@ -64,30 +65,23 @@
 				 * too slow to attempt. Stop after reaching
 				 * this number of possible placements. */
 
-/* Number of elements in each dimension
- *
- * NOTE: Current algorithms rely upon each number being equal to or smaller
- *       than its predecessor. The effected functions are _incr_geo() and
- *       _perm_geo(), both of which would be much more complex without this
- *       restriction. */
+/* Number of elements in each dimension */
 static int bgq_cnode_dim_size[BGQ_CNODE_DIM_CNT] = {4, 4, 4, 4, 2};
+
 
 typedef struct geo_table {
 	int size;
 	int geo[BGQ_CNODE_DIM_CNT];
+	struct geo_table *next_ptr;
 } geo_table_t;
-geo_table_t geo_table[BGQ_GEO_TABLE_LEN];
-static int geo_table_cnt = 0;
+geo_table_t *geo_table_size_ptr[BGQ_CNODE_CNT+1];
+int geo_table_size = 0;
 
 /* Local functions */
 static void _build_geo_table(void);
-static List _find_dims(int node_cnt);
-static void _geo_list_destroy(void *x);
+static void _free_geo_table(void);
 static int  _geo_list_print(void *x, void *arg);
 static bool _incr_geo(int *geo);
-static void _print_geo_table(void);
-static void _sort_geo_table(void);
-static void _swap_geo_table(int inx1, int inx2);
 
 /* Translate a 5-D coordinate into a 1-D offset in the cnode bitmap */
 static void _bgl_cnode_xlate_5d_1d(int *offset_1d, int *offset_5d)
@@ -123,7 +117,7 @@ static void _bgl_cnode_xlate_1d_5d(int offset_1d, int *offset_5d)
 /* Allocate a bgq cnode map. Use bgq_cnode_map_free() to free */
 extern bitstr_t *bgq_cnode_map_alloc(void)
 {
-	bitstr_t *cnode_map = bit_alloc( BGQ_CNODE_CNT);
+	bitstr_t *cnode_map = bit_alloc(BGQ_CNODE_CNT);
 	if (cnode_map == NULL)
 		fatal("bit_alloc: malloc failure");
 	return cnode_map;
@@ -325,113 +319,92 @@ extern int  bgq_cnode_test_all(bitstr_t *cnode_bitmap,
 }
 
 /*
- * Increment a geometry array, return false after reaching the last entry
- * NOTE: This is 1-origin and only generates unique number by insuring
- * that each number in the array is no larger than the number in the
- * prior dimension.
+ * Increment a geometry index array, return false after reaching the last entry
  */
 static bool _incr_geo(int *geo)
 {
 	int dim, i;
-	for (dim = BGQ_CNODE_DIM_CNT - 1; dim >= 1; dim--) {
-		if ((geo[dim] < geo[dim-1]) &&
-		    (geo[dim] < bgq_cnode_dim_size[dim])) {
+
+	for (dim = BGQ_CNODE_DIM_CNT - 1; dim >= 0; dim--) {
+		if (geo[dim] < bgq_cnode_dim_size[dim]) {
 			geo[dim]++;
 			for (i = dim + 1; i < BGQ_CNODE_DIM_CNT; i++)
 				geo[i] = 1;
 			return true;
 		}
 	}
-
-	if (++geo[0] <= bgq_cnode_dim_size[0]) {
-		for (dim = 1; dim < BGQ_CNODE_DIM_CNT; dim++) {
-			geo[dim] = 1;
-		}
-		return true;
-	}
 	
 	return false;
 }
 
-/*
- * Swap two records in the geometry table
- */
-static void _swap_geo_table(int inx1, int inx2)
-{
-	int i, tmp;
-
-	tmp = geo_table[inx1].size;
-	geo_table[inx1].size = geo_table[inx2].size;
-	geo_table[inx2].size = tmp;
-	for (i = 0; i < BGQ_CNODE_DIM_CNT; i++) {
-		tmp = geo_table[inx1].geo[i];
-		geo_table[inx1].geo[i] = geo_table[inx2].geo[i];
-		geo_table[inx2].geo[i] = tmp;
-	}
-}
-
-/*
- * Sort a geo_table in order of increasing node counts
- * Do bubble sort to preserve order
- */
-static void _sort_geo_table(void)
-{
-	int i;
-	bool sorted = false;
-
-	do {
-		sorted = true;
-		for (i = 1; i < geo_table_cnt; i++) {
-			if (geo_table[i-1].size > geo_table[i].size) {
-				_swap_geo_table(i-1, i);
-				sorted = false;
-			}
-		}
-	} while (!sorted);
-}
-
+#if _DEBUG
 /*
  * Print the contents of geo_table
  */
 static void _print_geo_table(void)
 {
 	int i;
+	geo_table_t *geo_ptr;
 
-	for (i = 0; i < geo_table_cnt; i++)
-		_geo_list_print(geo_table+i, "");
+	for (i = 1; i < (BGQ_CNODE_CNT + 1); i++) {
+		geo_ptr = geo_table_size_ptr[i];
+		while (geo_ptr) {
+			_geo_list_print(geo_ptr, "");
+			geo_ptr = geo_ptr->next_ptr;
+		}
+	}
 }
+#endif
 
 /*
  * Build a geo_table of possible unique geometries
+ * Release memory using _free_geo_table()
  */
 static void _build_geo_table(void)
 {
+	geo_table_t *geo_ptr;
 	int dim, inx[BGQ_CNODE_DIM_CNT], product;
 
 	for (dim = 0; dim < BGQ_CNODE_DIM_CNT; dim++)
 		inx[dim] = 1;
 
 	do {
+#if _DEBUG
 		info("add geo:%d:%d:%d:%d:%d", inx[0], inx[1], inx[2], inx[3], inx[4]);
+#endif
 		/* Store new value */
+		geo_ptr = xmalloc(sizeof(geo_table_t));
 		product = 1;
 		for (dim = 0; dim < BGQ_CNODE_DIM_CNT; dim++) {
-			geo_table[geo_table_cnt].geo[dim] = inx[dim];
+			geo_ptr->geo[dim] = inx[dim];
 			product *= inx[dim];
 		}
-		geo_table[geo_table_cnt++].size = product;
-		if (geo_table_cnt >= BGQ_GEO_TABLE_LEN)
-			fatal("BGQ geometry table overflow");
+		geo_ptr->size = product;
+		xassert(product <= BGQ_CNODE_CNT);
+		geo_ptr->next_ptr = geo_table_size_ptr[product];
+		geo_table_size_ptr[product] = geo_ptr;
+		geo_table_size++;
 	} while (_incr_geo(inx));	/* Generate next geometry */
 }
 
 /*
- * Destroy a geo_table_t entry from a list.
+ * Free memory allocated by _build_geo_table()
  */
-static void _geo_list_destroy(void *x)
+static void _free_geo_table(void)
 {
-	geo_table_t *my_geo = (geo_table_t *) x;
-	xfree(my_geo);
+	geo_table_t *geo_ptr, *next_ptr;
+	int i;
+
+	for (i = 0; i <= BGQ_CNODE_CNT; i++) {
+		geo_ptr = geo_table_size_ptr[i];
+		geo_table_size_ptr[i] = NULL;
+		while (geo_ptr) {
+			next_ptr = geo_ptr->next_ptr;
+			xfree(geo_ptr);
+			geo_ptr = next_ptr;
+		}
+	}
+	geo_table_size = 0;
 }
 
 /*
@@ -455,88 +428,22 @@ static int _geo_list_print(void *x, void *arg)
 	return 0;
 }
 
-/*
- * Find the possible geometries of a given size.
- * Search from the bottom of the list to prefer geometries that more
- * fully use a dimension (e.g. prefer "4,1,1,1,1" over "2,2,1,1,1").
- * Return a List of geo_table_t entries that match, NULL if none are found.
- */
-static List _find_dims(int node_cnt)
-{
-	int dim, i;
-	geo_table_t *my_geo;
-	List my_list = NULL;
-
-	for (i = geo_table_cnt-1; i >= 0; i--) {
-		if (geo_table[i].size < node_cnt)
-			break;
-		if (geo_table[i].size > node_cnt)
-			continue;
-		if (my_list == NULL) {
-			my_list = list_create(_geo_list_destroy);
-			if (my_list == NULL)
-				fatal("list_create: malloc failure");
-		}
-		my_geo = xmalloc(sizeof(geo_table_t));
-		my_geo->size = geo_table[i].size;
-		for (dim = 0; dim < BGQ_CNODE_DIM_CNT; dim++) {
-			my_geo->geo[dim] = geo_table[i].geo[dim];
-		}
-		list_append(my_list, my_geo);
-	}
-	return my_list;
-}
-
-/*
- * Generate a valid permutation of a geometry table record
- * orig_geo IN - a valid initial geometry
- * perm_geo OUT - permuation of orig_geo
- * inx IN - variation number of the permuation
- * RET - true if valid rotation is possible, otherwise false
- *
- * NOTE: There are 120 valid permuations of a 5-D geometry.
- * This algorithm only performs a simple rotation algorithm
- * (e.g. ABCDE -> EABCD -> DEABC -> CDEAB -> BCDEA)
- * It does *not* currently invert the dimensions (no ABCDE -> BACDE).
- */
-static bool _perm_geo(geo_table_t *orig_geo, geo_table_t *perm_geo, int inx)
-{
-	int dim, new_offset;
-
-	if (inx >= BGQ_CNODE_DIM_CNT)
-		return false;
-
-	if ((inx != 0) &&
-	    (orig_geo->geo[0] == orig_geo->geo[BGQ_CNODE_DIM_CNT-1]))
-		return false;
-
-	for (dim = 0; dim < BGQ_CNODE_DIM_CNT; dim++) {
-		new_offset = (dim + inx) % BGQ_CNODE_DIM_CNT;
-		perm_geo->geo[new_offset] = orig_geo->geo[dim];
-		if (perm_geo->geo[new_offset] > bgq_cnode_dim_size[new_offset])
-			return false;
-	}
-
-	return true;
-}
-
 int sattach(int argc, char *argv[])
 {
 	DEF_TIMERS;
 	bitstr_t *cnode_bitmap, *alloc_cnode_bitmap = NULL;
 	char in_buf[32];
 	int attempt_cnt = 0, total_attempt_cnt;
-	int i, node_cnt, rc;
-	List my_geo_list;
-	ListIterator geo_iter;
-	geo_table_t *my_geo, perm_geo;
+	int free_node_cnt, node_cnt, rc;
+	geo_table_t *my_geo;
 
 	START_TIMER;
 	_build_geo_table();
-	_sort_geo_table();
+#if _DEBUG
 	_print_geo_table();
+#endif
 	END_TIMER;
-	info("built table of size %d in time %s", geo_table_cnt, TIME_STR);
+	info("built table of size %d in time %s", geo_table_size, TIME_STR);
 
 	cnode_bitmap = bgq_cnode_map_alloc();
 	while (1) {
@@ -547,54 +454,57 @@ int sattach(int argc, char *argv[])
 		if (node_cnt == 0)
 			break;
 
-		my_geo_list = _find_dims(node_cnt);
-		if (my_geo_list == NULL) {
-			error("no geometry of size %d", node_cnt);
+		START_TIMER;
+		if (node_cnt > BGQ_CNODE_CNT) {
+			info("more nodes requested than exist");
+			continue;
+		}
+		free_node_cnt = bit_clear_count(cnode_bitmap);
+		if (node_cnt > free_node_cnt) {
+			END_TIMER;
+			info("only %d free nodes remain, time %s",
+			     free_node_cnt, TIME_STR);
 			continue;
 		}
 
-		START_TIMER;
 		total_attempt_cnt = 0;
 		rc = SLURM_ERROR;
-		geo_iter = list_iterator_create(my_geo_list);
-		if (geo_iter == NULL)
-			fatal("list_iterator_create: malloc failure");
-		while ((my_geo = (geo_table_t *)list_next(geo_iter))) {
-			for (i = 0; _perm_geo(my_geo, &perm_geo, i); i++) {
-				_geo_list_print(&perm_geo,
-						"testing to allocate: ");
-				rc = bgq_cnode_test_all(cnode_bitmap,
-							&alloc_cnode_bitmap,
-							&perm_geo,
-							&attempt_cnt);
-				if (rc == SLURM_SUCCESS) {
-					END_TIMER;
-					info("allocation successful at:");
-					bgq_cnode_map_print(alloc_cnode_bitmap);
-					bgq_cnode_map_add(cnode_bitmap,
-							  alloc_cnode_bitmap);
-					bgq_cnode_map_free(alloc_cnode_bitmap);
-					break;
-				}
-				total_attempt_cnt += attempt_cnt;
-				if (total_attempt_cnt >= MAX_ATTEMPT_CNT)
-					break;	/* Abandon effort */
+		if ((node_cnt >= 1) && (node_cnt <= BGQ_CNODE_CNT))
+			my_geo = geo_table_size_ptr[node_cnt];
+		else
+			my_geo = NULL;
+		while (my_geo) {
+			_geo_list_print(my_geo, "testing to allocate: ");
+			rc = bgq_cnode_test_all(cnode_bitmap,
+						&alloc_cnode_bitmap,
+						my_geo, &attempt_cnt);
+			if (rc == SLURM_SUCCESS) {
+				END_TIMER;
+				info("allocation successful at:");
+				bgq_cnode_map_print(alloc_cnode_bitmap);
+				bgq_cnode_map_add(cnode_bitmap,
+						  alloc_cnode_bitmap);
+				bgq_cnode_map_free(alloc_cnode_bitmap);
+				break;
 			}
+			total_attempt_cnt += attempt_cnt;
+			if (total_attempt_cnt >= MAX_ATTEMPT_CNT)
+				break;	/* Abandon effort */
 			if (rc == SLURM_SUCCESS)
 				break;
+			my_geo = my_geo->next_ptr;
 		}
 		if (rc != SLURM_SUCCESS) {
 			END_TIMER;
 			info("allocation unsuccessful after %d attempts",
 			     total_attempt_cnt);
 		}
-		list_iterator_destroy(geo_iter);
-		list_destroy(my_geo_list);
 		info("full system allocation:");
 		bgq_cnode_map_print(cnode_bitmap);
 		info("allocation time %s", TIME_STR);
 	}
 	bgq_cnode_map_free(cnode_bitmap);
+	_free_geo_table();
 
 	exit(0);
 }
