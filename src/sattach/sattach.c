@@ -491,7 +491,6 @@ int sattach(int argc, char *argv[])
 	my_system_geo->dim_size[2] = 4;
 	my_system_geo->dim_size[3] = 4;
 	my_system_geo->dim_size[4] = 2;
-	my_system_geo->total_size = 4 * 4 * 4 * 4 * 2;
 #endif
 #if 0
 	/* BlueGene/Q - Midplanes
@@ -504,7 +503,6 @@ int sattach(int argc, char *argv[])
 	my_system_geo->dim_size[1] = 4;
 	my_system_geo->dim_size[2] = 3;
 	my_system_geo->dim_size[3] = 4;
-	my_system_geo->total_size = 4 * 4 * 3 * 4;
 #endif
 #if 0
 	/* BlueGene/L - Midplanes
@@ -516,7 +514,6 @@ int sattach(int argc, char *argv[])
 	my_system_geo->dim_size[0] = 12;
 	my_system_geo->dim_size[1] = 4;
 	my_system_geo->dim_size[2] = 4;
-	my_system_geo->total_size = 12 * 4 * 4;
 #endif
 
 	START_TIMER;

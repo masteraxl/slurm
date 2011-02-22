@@ -31,19 +31,19 @@
 
 
 typedef struct geo_table {
-	int size;			/* Total size */
-	int *geometry;			/* Size in each dimension */
+	uint16_t size;			/* Total object count */
+	uint16_t *geometry;		/* Size in each dimension */
 	struct geo_table *next_ptr;	/* Next geometry of this size */
 } geo_table_t;
 
 typedef struct system_geo {
-	int dim_count;			/* Number of system dimensions */
-	int *dim_size;			/* System size in each dimension */
-	int total_size;			/* Total number of nodes in system */
+	uint16_t dim_count;		/* Number of system dimensions */
+	uint16_t *dim_size;		/* System size in each dimension */
+	uint16_t total_size;		/* Total number of nodes in system */
 
 	geo_table_t **geo_table_ptr;	/* Pointers to possible geometries.
 					 * Index is request size */
-	int geo_table_size;		/* Number of geo_table_t records */
+	uint16_t geo_table_size;	/* Number of geo_table_t records */
 } system_geo_t;
 
 /*
