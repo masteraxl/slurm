@@ -397,7 +397,7 @@ extern int fini ( void )
 /*
  * Uses slurmd job-step manager's pid as the unique container id.
  */
-extern int slurm_container_create ( slurmd_job_t *job )
+extern int slurm_container_plugin_create ( slurmd_job_t *job )
 {
 	int fstatus;
 
@@ -428,12 +428,12 @@ extern int slurm_container_create ( slurmd_job_t *job )
 	return SLURM_SUCCESS;
 }
 
-extern int slurm_container_add ( slurmd_job_t *job, pid_t pid )
+extern int slurm_container_plugin_add ( slurmd_job_t *job, pid_t pid )
 {
 	return _slurm_cgroup_add_pids(job->cont_id,&pid,1);
 }
 
-extern int slurm_container_signal ( uint32_t id, int signal )
+extern int slurm_container_plugin_signal ( uint32_t id, int signal )
 {
 	pid_t* pids = NULL;
 	int npids;
@@ -488,25 +488,25 @@ extern int slurm_container_signal ( uint32_t id, int signal )
 	return SLURM_SUCCESS;
 }
 
-extern int slurm_container_destroy ( uint32_t id )
+extern int slurm_container_plugin_destroy ( uint32_t id )
 {
 	_slurm_cgroup_destroy();
 	return SLURM_SUCCESS;
 }
 
-extern uint32_t slurm_container_find(pid_t pid)
+extern uint32_t slurm_container_plugin_find(pid_t pid)
 {
 	uint32_t cont_id=-1;
 	/* not provided for now */
 	return cont_id;
 }
 
-extern bool slurm_container_has_pid(uint32_t cont_id, pid_t pid)
+extern bool slurm_container_plugin_has_pid(uint32_t cont_id, pid_t pid)
 {
 	return _slurm_cgroup_has_pid(pid);
 }
 
-extern int slurm_container_wait(uint32_t cont_id)
+extern int slurm_container_plugin_wait(uint32_t cont_id)
 {
 	int delay = 1;
 
@@ -516,8 +516,8 @@ extern int slurm_container_wait(uint32_t cont_id)
 	}
 
 	/* Spin until the container is successfully destroyed */
-	while (slurm_container_destroy(cont_id) != SLURM_SUCCESS) {
-		slurm_container_signal(cont_id, SIGKILL);
+	while (slurm_container_plugin_destroy(cont_id) != SLURM_SUCCESS) {
+		slurm_container_plugin_signal(cont_id, SIGKILL);
 		sleep(delay);
 		if (delay < 120) {
 			delay *= 2;
@@ -529,7 +529,8 @@ extern int slurm_container_wait(uint32_t cont_id)
 	return SLURM_SUCCESS;
 }
 
-extern int slurm_container_get_pids(uint32_t cont_id, pid_t **pids, int *npids)
+extern int slurm_container_plugin_get_pids(uint32_t cont_id,
+					   pid_t **pids, int *npids)
 {
 	return _slurm_cgroup_get_pids(cont_id,pids,npids);
 }

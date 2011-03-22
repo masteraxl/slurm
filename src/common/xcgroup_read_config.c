@@ -97,7 +97,7 @@ extern int read_slurm_cgroup_conf(slurm_cgroup_conf_t *slurm_cgroup_conf)
 	s_p_options_t options[] = {
 		{"CgroupAutomount", S_P_BOOLEAN},
 		{"CgroupSubsystems", S_P_STRING},
-		{"CgroupReleaseAgent", S_P_STRING},
+		{"CgroupReleaseAgentDir", S_P_STRING},
 		{"ConstrainCores", S_P_BOOLEAN},
 		{"TaskAffinity", S_P_BOOLEAN},
 		{"ConstrainRAMSpace", S_P_BOOLEAN},
@@ -140,7 +140,7 @@ extern int read_slurm_cgroup_conf(slurm_cgroup_conf_t *slurm_cgroup_conf)
 		s_p_get_string(&slurm_cgroup_conf->cgroup_subsystems,
 			       "CgroupSubsystems", tbl);
 		s_p_get_string(&slurm_cgroup_conf->cgroup_release_agent,
-			       "CgroupReleaseAgent", tbl);
+			       "CgroupReleaseAgentDir", tbl);
 		if ( ! slurm_cgroup_conf->cgroup_release_agent )
 			slurm_cgroup_conf->cgroup_release_agent =
 				xstrdup("/etc/slurm/cgroup");
