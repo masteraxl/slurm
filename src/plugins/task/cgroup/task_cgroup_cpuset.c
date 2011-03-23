@@ -337,6 +337,9 @@ extern int task_cgroup_cpuset_create(slurmd_job_t *job)
 		fstatus = SLURM_SUCCESS;
 
 error:
+	xcgroup_unlock(&cpuset_cg);
+	xcgroup_destroy(&cpuset_cg);
+
 	xfree(user_alloc_cores);
 	xfree(job_alloc_cores);
 	xfree(step_alloc_cores);
