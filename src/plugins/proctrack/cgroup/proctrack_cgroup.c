@@ -131,7 +131,7 @@ int _slurm_cgroup_init()
 	}
 
 	/* initialize freezer cgroup namespace */
-	if ( xcgroup_ns_create(&freezer_ns,CGROUP_SLURMDIR "/freezer","",
+	if ( xcgroup_ns_create(&freezer_ns,CGROUP_BASEDIR "/freezer","",
 			       "freezer",release_agent_path) 
 	     != XCGROUP_SUCCESS ) {
 		error("unable to create freezer cgroup namespace");
@@ -182,11 +182,23 @@ int _slurm_cgroup_create(slurmd_job_t *job,uint32_t id,uid_t uid,gid_t gid)
 
 	/* build job step cgroup relative path (should not be) */
 	if ( *jobstep_cgroup_path == '\0' ) {
-		if ( snprintf(jobstep_cgroup_path,PATH_MAX,"%s/step_%u",
-			      job_cgroup_path,job->stepid) >= PATH_MAX ) {
-			error("unable to build job step %u cgroup relative path"
-			      " : %m",job->stepid);
-			return SLURM_ERROR;
+		if (job->stepid == NO_VAL) {
+			if (snprintf(jobstep_cgroup_path, PATH_MAX,
+				     "%s/step_batch", job_cgroup_path)
+			    >= PATH_MAX ) {
+				error("proctrack/cgroup unable to build job step"
+				      " %u.batch freezer cg relative path: %m",
+				      job->jobid);
+				return SLURM_ERROR;
+			}
+		} else {
+			if (snprintf(jobstep_cgroup_path, PATH_MAX, "%s/step_%u",
+				     job_cgroup_path,job->stepid) >= PATH_MAX ) {
+				error("proctrack/cgroup unable to build job step"
+				      " %u.%u freezer cg relative path: %m",
+				      job->jobid, job->stepid);
+				return SLURM_ERROR;
+			}
 		}
 	}
 

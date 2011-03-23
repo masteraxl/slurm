@@ -188,11 +188,23 @@ extern int task_cgroup_cpuset_create(slurmd_job_t *job)
 
 	/* build job step cgroup relative path (should not be) */
 	if ( *jobstep_cgroup_path == '\0' ) {
-		if ( snprintf(jobstep_cgroup_path,PATH_MAX,"%s/step_%u",
-			      job_cgroup_path,stepid) >= PATH_MAX ) {
-			error("task/cgroup: unable to build job step %u cpuset "
-			      "cg relative path : %m",stepid);
-			return SLURM_ERROR;
+		if (stepid == NO_VAL) {
+			if (snprintf(jobstep_cgroup_path, PATH_MAX,
+				     "%s/step_batch", job_cgroup_path)
+			    >= PATH_MAX ) {
+				error("task/cgroup: unable to build job step"
+				      " %u.batch cpuset cg relative path: %m",
+				      jobid);
+				return SLURM_ERROR;
+			}
+		} else {
+			if (snprintf(jobstep_cgroup_path, PATH_MAX, "%s/step_%u",
+				     job_cgroup_path, stepid) >= PATH_MAX ) {
+				error("task/cgroup: unable to build job step"
+				      " %u.%u cpuset cg relative path: %m",
+				      jobid, stepid);
+				return SLURM_ERROR;
+			}
 		}
 	}
 
