@@ -1324,7 +1324,7 @@ static int _filter_job(job_info_t * job)
 	int filter;
 	ListIterator iterator;
 	uint32_t *job_id, *user;
-	enum job_states *state_id;
+	uint16_t *state_id;
 	char *account, *part, *qos;
 
 	if (params.job_list) {
@@ -1370,7 +1370,7 @@ static int _filter_job(job_info_t * job)
 		iterator = list_iterator_create(params.account_list);
 		while ((account = list_next(iterator))) {
 			 if ((job->account != NULL) &&
-			     (strcmp(account, job->account) == 0)) {
+			     (strcasecmp(account, job->account) == 0)) {
 				filter = 0;
 				break;
 			}
@@ -1385,7 +1385,7 @@ static int _filter_job(job_info_t * job)
 		iterator = list_iterator_create(params.qos_list);
 		while ((qos = list_next(iterator))) {
 			 if ((job->qos != NULL) &&
-			     (strcmp(qos, job->qos) == 0)) {
+			     (strcasecmp(qos, job->qos) == 0)) {
 				filter = 0;
 				break;
 			}

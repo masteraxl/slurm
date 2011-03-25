@@ -48,25 +48,27 @@ extern int block_exist_in_list(List my_list, bg_record_t *bg_record)
 	int rc = 0;
 
 	while ((found_record = list_next(itr))) {
+		if (found_record->magic != BLOCK_MAGIC)
+			continue;
 		/* check for full node bitmap compare */
 		if (bit_equal(bg_record->bitmap, found_record->bitmap)
 		    && bit_equal(bg_record->ionode_bitmap,
 				 found_record->ionode_bitmap)) {
 			/* now make sure the conn_type is the same for
 			   regular sized blocks */
-			if ((bg_record->node_cnt >= bg_conf->mp_node_cnt)
+			if ((bg_record->cnode_cnt >= bg_conf->mp_cnode_cnt)
 			    && bg_record->conn_type != found_record->conn_type)
 				continue;
-			if (bg_record->ionodes)
+			if (bg_record->ionode_str)
 				debug("This block %s[%s] "
 				      "is already in the list %s",
-				      bg_record->nodes,
-				      bg_record->ionodes,
+				      bg_record->mp_str,
+				      bg_record->ionode_str,
 				      found_record->bg_block_id);
 			else
 				debug("This block %s "
 				      "is already in the list %s",
-				      bg_record->nodes,
+				      bg_record->mp_str,
 				      found_record->bg_block_id);
 
 			rc = 1;
@@ -114,7 +116,7 @@ extern bg_record_t *find_bg_record_in_list(List my_list,
 
 	itr = list_iterator_create(my_list);
 	while ((bg_record = list_next(itr))) {
-		if (bg_record->bg_block_id)
+		if (bg_record->bg_block_id && (bg_record->magic == BLOCK_MAGIC))
 			if (!strcasecmp(bg_record->bg_block_id, bg_block_id))
 				break;
 	}
@@ -140,7 +142,7 @@ extern int remove_from_bg_list(List my_list, bg_record_t *bg_record)
 	//slurm_mutex_lock(&block_state_mutex);
 	itr = list_iterator_create(my_list);
 	while ((found_record = list_next(itr))) {
-		if (found_record)
+		if (found_record->magic == BLOCK_MAGIC)
 			if (bg_record == found_record) {
 				list_remove(itr);
 				rc = SLURM_SUCCESS;
@@ -162,7 +164,10 @@ extern bg_record_t *find_and_remove_org_from_bg_list(List my_list,
 	ListIterator itr = list_iterator_create(my_list);
 	bg_record_t *found_record = NULL;
 
-	while ((found_record = (bg_record_t *) list_next(itr)) != NULL) {
+	while ((found_record = list_next(itr))) {
+		if (found_record->magic != BLOCK_MAGIC)
+			continue;
+
 		/* check for full node bitmap compare */
 		if (bit_equal(bg_record->bitmap, found_record->bitmap)
 		    && bit_equal(bg_record->ionode_bitmap,
@@ -188,7 +193,9 @@ extern bg_record_t *find_org_in_bg_list(List my_list, bg_record_t *bg_record)
 	ListIterator itr = list_iterator_create(my_list);
 	bg_record_t *found_record = NULL;
 
-	while ((found_record = (bg_record_t *) list_next(itr)) != NULL) {
+	while ((found_record = list_next(itr))) {
+		if (found_record->magic != BLOCK_MAGIC)
+			continue;
 		/* check for full node bitmap compare */
 		if (bit_equal(bg_record->bitmap, found_record->bitmap)
 		    && bit_equal(bg_record->ionode_bitmap,

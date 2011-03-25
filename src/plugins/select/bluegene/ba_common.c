@@ -467,9 +467,9 @@ extern ba_mp_t *loc2ba_mp(const char* mp_id)
 				       mp_id[1], mp_id[2], mp_id[3]);
 	}
 
-	if ((check[1] < '0' || check[1] > '9')
-	    || (check[2] < '0' || check[2] > '9')
-	    || (check[5] < '0' || check[5] > '9')) {
+	if ((select_char2coord(check[1]) == -1)
+	    || (select_char2coord(check[2]) == -1)
+	    || (select_char2coord(check[5]) == -1)) {
 		error("%s is not a valid Rack-Midplane (i.e. R00-M0)", mp_id);
 		goto cleanup;
 	}
@@ -485,7 +485,7 @@ cleanup:
 #endif
 }
 
-extern void ba_setup_mp(ba_mp_t *ba_mp, bool track_down_mps)
+extern void ba_setup_mp(ba_mp_t *ba_mp, bool track_down_mps, bool wrap_it)
 {
 	int i;
 	uint16_t node_base_state = ba_mp->state & NODE_STATE_BASE;
@@ -497,7 +497,7 @@ extern void ba_setup_mp(ba_mp_t *ba_mp, bool track_down_mps)
 	for (i=0; i<cluster_dims; i++){
 #ifdef HAVE_BG_L_P
 		int j;
-		for(j=0;j<NUM_PORTS_PER_NODE;j++) {
+		for (j=0;j<NUM_PORTS_PER_NODE;j++) {
 			ba_mp->axis_switch[i].int_wire[j].used = 0;
 			if (i!=0) {
 				if (j==3 || j==4)
@@ -507,7 +507,10 @@ extern void ba_setup_mp(ba_mp_t *ba_mp, bool track_down_mps)
 			ba_mp->axis_switch[i].int_wire[j].port_tar = j;
 		}
 #endif
-		ba_mp->axis_switch[i].usage = BG_SWITCH_NONE;
+		if (wrap_it)
+			ba_mp->axis_switch[i].usage = BG_SWITCH_WRAPPED;
+		else
+			ba_mp->axis_switch[i].usage = BG_SWITCH_NONE;
 		ba_mp->alter_switch[i].usage = BG_SWITCH_NONE;
 	}
 }
@@ -525,6 +528,8 @@ extern ba_mp_t *ba_copy_mp(ba_mp_t *ba_mp)
 	memcpy(new_ba_mp, ba_mp, sizeof(ba_mp_t));
 	/* we have to set this or we would be pointing to the original */
 	memset(new_ba_mp->next_mp, 0, sizeof(new_ba_mp->next_mp));
+	/* we have to set this or we would be pointing to the original */
+	memset(new_ba_mp->prev_mp, 0, sizeof(new_ba_mp->prev_mp));
 	/* These are only used on the original as well. */
 	new_ba_mp->nodecard_loc = NULL;
 	new_ba_mp->loc = NULL;
@@ -964,7 +969,7 @@ extern char *find_mp_rack_mid(char* coords)
 }
 
 /* */
-extern int validate_coord(uint16_t *coord)
+extern int validate_coord(int *coord)
 {
 	int dim, i;
 	char coord_str[cluster_dims+1];

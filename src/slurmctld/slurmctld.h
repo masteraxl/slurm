@@ -363,6 +363,7 @@ struct job_details {
 					 * as set by Moab */
 	bitstr_t *exc_node_bitmap;	/* bitmap of excluded nodes */
 	char *exc_nodes;		/* excluded nodes */
+	uint32_t expanding_jobid;	/* ID of job to be expanded */
 	List feature_list;		/* required features with
 					 * node counts */
 	char *features;			/* required features */
@@ -559,6 +560,7 @@ struct job_record {
 						 * successfully */
 #define SLURM_DEPEND_SINGLETON		5	/* Only one job for this
 						 * user/name at a time */
+#define SLURM_DEPEND_EXPAND		6	/* Expand running job */
 struct	depend_spec {
 	uint16_t	depend_type;	/* SLURM_DEPEND_* type */
 	uint32_t	job_id;		/* SLURM job_id */
@@ -1581,7 +1583,7 @@ extern slurm_step_layout_t *step_layout_create(struct step_record *step_ptr,
 					       uint32_t num_tasks,
 					       uint16_t cpus_per_task,
 					       uint16_t task_dist,
-					       uint32_t plane_size);
+					       uint16_t plane_size);
 
 /* start_power_mgr - Start power management thread as needed. The thread
  *	terminates automatically at slurmctld shutdown time.

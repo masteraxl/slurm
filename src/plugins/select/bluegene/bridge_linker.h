@@ -83,13 +83,6 @@ extern int num_unused_cpus;
 extern int bridge_init(char *properties_file);
 extern int bridge_fini();
 
-/*
- * Convert a BG API error code to a string
- * IN inx - error code from any of the BG Bridge APIs
- * RET - string describing the error condition
- */
-extern const char *bridge_err_str(int inx);
-
 extern int bridge_get_size(int *size);
 extern int bridge_setup_system();
 
@@ -115,13 +108,13 @@ extern int bridge_blocks_load_curr(List curr_block_list);
 
 extern void bridge_reset_block_list(List block_list);
 extern void bridge_block_post_job(char *bg_block_id);
+extern int bridge_set_log_params(char *api_file_name, unsigned int level);
 
 #if defined HAVE_BG_FILES && defined HAVE_BG_L_P
 extern bool have_db2;
 
 extern status_t bridge_get_bg(my_bluegene_t **bg);
 extern status_t bridge_free_bg(my_bluegene_t *bg);
-extern int bridge_set_log_params(char *api_file_name, unsigned int level);
 extern status_t bridge_get_data(rm_element_t* element,
 				enum rm_specification field, void *data);
 extern status_t bridge_set_data(rm_element_t* element,

@@ -1,4 +1,4 @@
-.TH "srun" "1" "SLURM 2.2" "November 2010" "SLURM Commands"
+.TH "srun" "1" "SLURM 2.3" "March 2011" "SLURM Commands"
 
 .SH "NAME"
 srun \- Run parallel jobs
@@ -300,13 +300,17 @@ unable to execute more than a total of 4 tasks.
 This option may also be useful to spawn tasks without allocating
 resources to the job step from the job's allocation when running
 multiple job steps with the \fB\-\-exclusive\fR option.
+
 \fBWARNING\fR: There are configurations and options interpreted differently by
-job and job step requests which can result in inconsistent for this option.
+job and job step requests which can result in inconsistencies for this option.
 For example \fIsrun \-c2 \-\-threads\-per\-core=1 prog\fR may allocate two
 cores for the job, but if each of those cores contains two threads, the job
 allocation will include four CPUs. The job step allocation will then launch two
 threads per CPU for a total of two tasks.
 
+\fBWARNING\fR: When srun is executed from within salloc or sbatch,
+there are configurations and options which can result in inconsistent 
+allocations when \-c has a value greater than \-c on salloc or sbatch.
 .TP
 \fB\-d\fR, \fB\-\-dependency\fR=<\fIdependency_list\fR>
 Defer the start of this job until the specified dependencies have been
@@ -333,6 +337,11 @@ in some failed state (non-zero exit code, node failure, timed out, etc).
 \fBafterok:job_id[:jobid...]\fR
 This job can begin execution after the specified jobs have successfully
 executed (ran to completion with non-zero exit code).
+.TP
+\fBexpand:job_id\fR
+Resources allocated to this job should be used to expand the specified job.
+The job to expand must share the same QOS (Quality of Service) and partition.
+Gang scheduling of resources in the partition is also not supported.
 .TP
 \fBsingleton\fR
 This job can begin execution after any previously launched jobs

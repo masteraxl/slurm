@@ -45,12 +45,16 @@ block_allocator_lib  = ba/libblock_allocator.la
 endif
 
 if BGQ_LOADED
-SUBDIRS += bl_bgq ba_bgq
+  SUBDIRS += bl_bgq ba_bgq
 
-block_allocator_lib  = ba_bgq/libblock_allocator.la
+  block_allocator_lib = ba_bgq/libblock_allocator.la
 
-# force link with g++
-nodist_EXTRA_select_bluegene_la_SOURCES = dummy.cxx
+  # force link with g++
+  nodist_EXTRA_select_bluegene_la_SOURCES = dummy.cxx
+
+  pkglib_LTLIBRARIES += runjob_plugin.la
+  runjob_plugin_la_SOURCES = runjob_plugin.cc
+  runjob_plugin_la_LDFLAGS = $(SO_LDFLAGS) $(PLUGIN_FLAGS)
 
 endif
 

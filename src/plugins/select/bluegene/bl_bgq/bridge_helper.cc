@@ -218,7 +218,7 @@ extern int bridge_handle_runtime_errors(const char *function,
 		break;
 	case bgsched::RuntimeErrors::BlockFreeError:
 		/* not a real error */
-		rc = SLURM_SUCCESS;
+		rc = BG_ERROR_PENDING_ACTION;
 		debug2("%s: Error freeing block %s.", function,
 		       bg_record->bg_block_id);
 		break;
@@ -232,9 +232,9 @@ extern int bridge_handle_runtime_errors(const char *function,
 		break;
 	case bgsched::RuntimeErrors::InvalidBlockState:
 		/* not a real error */
-		rc = SLURM_SUCCESS;
-		error("%s: Error can't perform task with block %s in state %s"
-		      "incorrect %s.", function, bg_record->bg_block_id,
+		rc = BG_ERROR_INVALID_STATE;
+		error("%s: Error can't perform task with block %s in state %s",
+		      function, bg_record->bg_block_id,
 		      bg_block_state_string(bg_record->state));
 		break;
 	case bgsched::RuntimeErrors::DimensionOutOfRange:
@@ -250,8 +250,7 @@ extern int bridge_handle_runtime_errors(const char *function,
 	return rc;
 }
 
-extern bg_block_status_t bridge_translate_status(
-	bgsched::Block::Status state_in)
+extern uint16_t bridge_translate_status(bgsched::Block::Status state_in)
 {
 	switch (state_in) {
 	case Block::Allocated:
@@ -270,7 +269,7 @@ extern bg_block_status_t bridge_translate_status(
 		return BG_BLOCK_TERM;
 		break;
 	default:
-		return BG_BLOCK_ERROR;
+		return BG_BLOCK_ERROR_FLAG;
 		break;
 	}
 	error("unknown block state %d", state_in);

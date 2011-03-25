@@ -1560,7 +1560,7 @@ static void _slurm_rpc_complete_batch_script(slurm_msg_t * msg)
 #ifdef HAVE_BG
 	if (block_desc.bg_block_id) {
 		block_desc.reason = slurm_strerror(comp_msg->slurm_rc);
-		block_desc.state = BG_BLOCK_ERROR;
+		block_desc.state = BG_BLOCK_ERROR_FLAG;
 		i = select_g_update_block(&block_desc);
 		error_code = MAX(error_code, i);
 		xfree(block_desc.bg_block_id);
@@ -2640,8 +2640,8 @@ static void _slurm_rpc_update_job(slurm_msg_t * msg)
 
 	/* return result */
 	if (error_code) {
-		error("_slurm_rpc_update_job JobId=%u uid=%d: %s",
-		      job_desc_msg->job_id, uid, slurm_strerror(error_code));
+		info("_slurm_rpc_update_job JobId=%u uid=%d: %s",
+		     job_desc_msg->job_id, uid, slurm_strerror(error_code));
 		slurm_send_rc_msg(msg, error_code);
 	} else {
 		info("_slurm_rpc_update_job complete JobId=%u uid=%d %s",
@@ -3115,8 +3115,8 @@ static void _slurm_rpc_update_block(slurm_msg_t * msg)
 		error("Security violation, UPDATE_BLOCK RPC from uid=%d", uid);
 		if (block_desc_ptr->bg_block_id) {
 			name = block_desc_ptr->bg_block_id;
-		} else if (block_desc_ptr->nodes) {
-			name = block_desc_ptr->nodes;
+		} else if (block_desc_ptr->mp_str) {
+			name = block_desc_ptr->mp_str;
 		}
 	}
 
@@ -3126,10 +3126,10 @@ static void _slurm_rpc_update_block(slurm_msg_t * msg)
 			error_code = select_g_update_block(block_desc_ptr);
 			END_TIMER2("_slurm_rpc_update_block");
 			name = block_desc_ptr->bg_block_id;
-		} else if (block_desc_ptr->nodes) {
+		} else if (block_desc_ptr->mp_str) {
 			error_code = select_g_update_sub_node(block_desc_ptr);
 			END_TIMER2("_slurm_rpc_update_subbp");
-			name = block_desc_ptr->nodes;
+			name = block_desc_ptr->mp_str;
 		} else {
 			error("Unknown update for blocks");
 			error_code = SLURM_ERROR;
