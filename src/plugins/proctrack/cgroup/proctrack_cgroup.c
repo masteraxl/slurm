@@ -3,32 +3,32 @@
  *****************************************************************************
  *  Copyright (C) 2009 CEA/DAM/DIF
  *  Written by Matthieu Hautreux <matthieu.hautreux@cea.fr>
- *  
+ *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <https://computing.llnl.gov/linux/slurm/>.
  *  Please also read the included file: DISCLAIMER.
- *  
+ *
  *  SLURM is free software; you can redistribute it and/or modify it under
  *  the terms of the GNU General Public License as published by the Free
  *  Software Foundation; either version 2 of the License, or (at your option)
  *  any later version.
  *
- *  In addition, as a special exception, the copyright holders give permission 
- *  to link the code of portions of this program with the OpenSSL library under 
- *  certain conditions as described in each individual source file, and 
- *  distribute linked combinations including the two. You must obey the GNU 
- *  General Public License in all respects for all of the code used other than 
- *  OpenSSL. If you modify file(s) with this exception, you may extend this 
- *  exception to your version of the file(s), but you are not obligated to do 
+ *  In addition, as a special exception, the copyright holders give permission
+ *  to link the code of portions of this program with the OpenSSL library under
+ *  certain conditions as described in each individual source file, and
+ *  distribute linked combinations including the two. You must obey the GNU
+ *  General Public License in all respects for all of the code used other than
+ *  OpenSSL. If you modify file(s) with this exception, you may extend this
+ *  exception to your version of the file(s), but you are not obligated to do
  *  so. If you do not wish to do so, delete this exception statement from your
- *  version.  If you delete this exception statement from all source files in 
+ *  version.  If you delete this exception statement from all source files in
  *  the program, then also delete it here.
- *  
+ *
  *  SLURM is distributed in the hope that it will be useful, but WITHOUT ANY
  *  WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  *  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
  *  details.
- *  
+ *
  *  You should have received a copy of the GNU General Public License along
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
@@ -80,7 +80,7 @@
  * where <application> is a description of the intended application of
  * the plugin (e.g., "jobcomp" for SLURM job completion logging) and <method>
  * is a description of how this plugin satisfies that application.  SLURM will
- * only load job completion logging plugins if the plugin_type string has a 
+ * only load job completion logging plugins if the plugin_type string has a
  * prefix of "jobcomp/".
  *
  * plugin_version - an unsigned 32-bit integer giving the version number
@@ -98,8 +98,6 @@ const uint32_t plugin_version = 10;
 #ifndef PATH_MAX
 #define PATH_MAX 256
 #endif
-
-#define CGROUP_SLURMDIR CGROUP_BASEDIR "/slurm"
 
 static slurm_cgroup_conf_t slurm_cgroup_conf;
 
@@ -132,7 +130,7 @@ int _slurm_cgroup_init()
 
 	/* initialize freezer cgroup namespace */
 	if ( xcgroup_ns_create(&freezer_ns,CGROUP_BASEDIR "/freezer","",
-			       "freezer",release_agent_path) 
+			       "freezer",release_agent_path)
 	     != XCGROUP_SUCCESS ) {
 		error("unable to create freezer cgroup namespace");
 		return SLURM_ERROR;
@@ -359,7 +357,7 @@ _slurm_cgroup_is_pid_a_slurm_task(uint32_t id, pid_t pid)
 		return fstatus;
 	}
 
-	/* 
+	/*
 	 * assume that any child of slurmstepd is a slurm task
 	 * they will get all signals, inherited processes will
 	 * only get SIGKILL
@@ -413,7 +411,7 @@ extern int slurm_container_plugin_create ( slurmd_job_t *job )
 {
 	int fstatus;
 
-	/* create a new cgroup for that container */ 
+	/* create a new cgroup for that container */
 	fstatus = _slurm_cgroup_create(job,(uint32_t)job->jmgr_pid,
 				       job->uid,job->gid);
 	if ( fstatus )
