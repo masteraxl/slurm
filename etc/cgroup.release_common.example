@@ -74,6 +74,15 @@ then
     # remove this cgroup
     if [[ -d ${rmcg} ]]
     then
+        case ${subsystem} in
+            memory)
+		# help to correctly remove lazy cleaning memcg
+		# but still not perfect
+                sleep 1
+                ;;
+            *)
+		;;
+        esac
 	rmdir ${rmcg}
     fi
     if [[ ${uidcg} == ${rmcg} ]]
