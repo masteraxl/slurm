@@ -98,7 +98,6 @@ typedef enum {
 	BG_BLOCK_INITED,    // Block is initialized
 	BG_BLOCK_REBOOTING, // Block is rebooting
 	BG_BLOCK_TERM,      // Block is terminating
-	BG_BLOCK_ERROR,     // Block is in error
 	BG_BLOCK_NAV,       // Block state is undefined
 } bg_block_status_t;
 
@@ -111,6 +110,9 @@ typedef enum {
         BG_JOB_TERMINATED,  //!< Job is terminated.
         BG_JOB_ERROR        //!< Job is in error status.
 } bg_job_status_t;
+
+#define BG_BLOCK_ERROR_FLAG    0x1000  // Block is in error
+
 
 #define BG_SWITCH_NONE         0x0000
 #define BG_SWITCH_OUT          0x0001
@@ -150,6 +152,22 @@ typedef enum {
 #define REMOVE_USER_ERR  -1
 #define REMOVE_USER_NONE  0
 #define REMOVE_USER_FOUND 2
+
+typedef enum {
+	BG_ERROR_PENDING_ACTION = 100,
+	BG_ERROR_INVALID_STATE,
+	BG_ERROR_BLOCK_NOT_FOUND,
+	BG_ERROR_BOOT_ERROR,
+	BG_ERROR_JOB_NOT_FOUND,
+	BG_ERROR_MP_NOT_FOUND,
+	BG_ERROR_SWITCH_NOT_FOUND,
+	BG_ERROR_BLOCK_ALREADY_DEFINED,
+	BG_ERROR_JOB_ALREADY_DEFINED,
+	BG_ERROR_CONNECTION_ERROR,
+	BG_ERROR_INTERNAL_ERROR,
+	BG_ERROR_INVALID_INPUT,
+	BG_ERROR_INCONSISTENT_DATA,
+} bg_errno_t;
 
 #endif	/* #ifndef ATTACH_BG_H */
 #endif	/* #ifndef ATTACH_BGL_H */

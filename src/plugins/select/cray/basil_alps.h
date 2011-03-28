@@ -12,6 +12,8 @@
 #endif
 
 #include "src/common/log.h"
+#include "src/common/fd.h"
+#include "cray_config.h"
 
 #include <stdio.h>
 #include <unistd.h>
@@ -68,6 +70,7 @@ enum basil_version {
 	BV_1_1,		/* Basil 1.1 CLE variant (XT/SeaStar)       */
 	BV_1_2,		/* Basil 1.1 CLE 2.x variant (XT/SeaStar)   */
 	BV_3_1,		/* Basil 1.1 CLE 3.x (XE/Gemini support)    */
+	BV_4_0,		/* Basil 1.2 CLE 4.x unconfirmed simulator version  */
 	BV_MAX
 };
 
@@ -126,7 +129,8 @@ enum basil_element {
 	BT_RESVDNODEARRAY,	/* Basil 3.1 RESERVE Response */
 	BT_RESVDNODE,		/* Basil 3.1 RESERVE Response */
 #define BT_3_1_MAX		(BT_RESVDNODE + 1)	/* End of Basil 3.1 */
-
+	/* FIXME: the Basil 4.0 interface is not yet fully released */
+#define BT_4_0_MAX              BT_3_1_MAX              /* End of Basil 4.0 */
 	BT_MAX			/* End of Basil tags */
 };
 
@@ -360,17 +364,19 @@ struct basil_full_inventory {
 
 /**
  * struct basil_inventory - basic inventory information
- * @mpp_host:    Basil 3.1 only
- * @timestamp:   Basil 3.1 only
- * @is_gemini:   true if XE/Gemini system, false if XT/SeaStar system
- * @batch_avail: number of compute nodes available for scheduling
- * @batch_total: total number of usable/used compute nodes
- * @nodes_total: total number of all compute nodes
+ * @mpp_host:     Basil 3.1 and above
+ * @timestamp:    Basil 3.1 and above
+ * @is_gemini:    true if XE/Gemini system, false if XT/SeaStar system
+ * @change_count: number of changes since start
+ * @batch_avail:  number of compute nodes available for scheduling
+ * @batch_total:  total number of usable/used compute nodes
+ * @nodes_total:  total number of all compute nodes
  */
 struct basil_inventory {
 	char		mpp_host[BASIL_STRING_SHORT];
 	time_t		timestamp;
 	bool		is_gemini;
+	uint64_t        change_count;
 	uint32_t	batch_avail,
 			batch_total,
 			nodes_total;
@@ -408,6 +414,7 @@ struct basil_rsvn_param {
  * struct basil_reservation  -  reservation parameters and data
  * @rsvn_id:      assigned by RESERVE method
  * @pagg_id:      used by CONFIRM method (session ID or CSA PAGG ID)
+ * @claims:	  number of claims outstanding against @rsvn_id (Basil 4.0)
  * @rsvd_nodes:   assigned by Basil 3.1 RESERVE method
  * @user_name:    required by RESERVE method
  * @account_name: optional Basil 1.0 RESERVE parameter
@@ -420,6 +427,7 @@ struct basil_reservation {
 	 */
 	uint32_t	rsvn_id;
 	uint64_t	pagg_id;
+	uint32_t        claims;
 	struct nodespec *rsvd_nodes;
 	/*
 	 * Static (IN) parameters
@@ -546,6 +554,8 @@ extern const struct basil_rsvn *basil_rsvn_by_id(const struct basil_inventory *i
 extern uint64_t *basil_get_rsvn_aprun_apids(const struct basil_inventory *inv,
 					    uint32_t rsvn_id);
 extern int basil_release(uint32_t rsvn_id);
+extern int basil_signal_apids(int32_t rsvn_id, int signal,
+			      struct basil_inventory *inv);
 extern int basil_safe_release(int32_t rsvn_id, struct basil_inventory *inv);
 
 #endif /* __BASIL_ALPS_H__ */

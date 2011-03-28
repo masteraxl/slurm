@@ -246,7 +246,7 @@ scontrol_hold(char *op, char *job_id_str)
 		job_msg.priority = 0;
 		job_msg.alloc_sid = 0;
 	} else
-		job_msg.priority = 1;
+		job_msg.priority = INFINITE;
 
 	if (slurm_update_job(&job_msg))
 		return slurm_get_errno();
@@ -336,6 +336,9 @@ scontrol_update_job (int argc, char *argv[])
 	job_desc_msg_t job_msg;
 
 	slurm_init_job_desc_msg (&job_msg);
+
+	/* set current user, needed e.g., for AllowGroups checks */
+	job_msg.user_id = getuid();
 
 	for (i=0; i<argc; i++) {
 		tag = argv[i];
@@ -633,8 +636,8 @@ scontrol_update_job (int argc, char *argv[])
 		}
 		else if (!strncasecmp(tag, "EligibleTime", MAX(taglen, 2)) ||
 			 !strncasecmp(tag, "StartTime",    MAX(taglen, 2))) {
-			if((job_msg.begin_time = parse_time(val, 0))) {
-				if(job_msg.begin_time < time(NULL))
+			if ((job_msg.begin_time = parse_time(val, 0))) {
+				if (job_msg.begin_time < time(NULL))
 					job_msg.begin_time = time(NULL);
 				update_cnt++;
 			}

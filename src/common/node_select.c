@@ -90,6 +90,7 @@ static int _select_get_ops(char *select_type,
 		"select_p_job_expand_allow",
 		"select_p_job_expand",
 		"select_p_job_resized",
+		"select_p_job_signal",
 		"select_p_job_fini",
 		"select_p_job_suspend",
 		"select_p_job_resume",
@@ -258,6 +259,14 @@ extern void print_select_ba_request(select_ba_request_t* ba_request)
 	debug("    elongate:\t%d", ba_request->elongate);
 }
 
+extern int select_char2coord(char coord)
+{
+	if ((coord >= '0') && (coord <= '9'))
+		return (coord - '0');
+	if ((coord >= 'A') && (coord <= 'Z'))
+		return ((coord - 'A') + 10);
+	return -1;
+}
 
 /*
  * Initialize context for node selection plugin
@@ -676,6 +685,21 @@ extern int select_g_job_resized(struct job_record *job_ptr,
 
 	return (*(select_context[select_context_default].ops.job_resized))
 		(job_ptr, node_ptr);
+}
+
+/*
+ * Pass job-step signal to plugin before signalling any job steps, so that
+ * any signal-dependent actions can be taken.
+ * IN job_ptr - job to be signalled
+ * IN signal  - signal(7) number
+ */
+extern int select_g_job_signal(struct job_record *job_ptr, int signal)
+{
+	if (slurm_select_init(0) < 0)
+		return SLURM_ERROR;
+
+	return (*(select_context[select_context_default].ops.job_signal))
+		(job_ptr, signal);
 }
 
 /*

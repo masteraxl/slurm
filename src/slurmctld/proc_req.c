@@ -769,6 +769,18 @@ static void _slurm_rpc_allocate_resources(slurm_msg_t * msg)
 		error("REQUEST_RESOURCE_ALLOCATE lacks alloc_node from uid=%d",
 		      uid);
 	}
+#if HAVE_CRAY
+	/*
+	 * We are using the alloc_sid as unique identifier to confirm the ALPS
+	 * reservation. ALPS will refuse any attempt to create a second session
+	 * with the same identifier, hence sessions may not be nested.
+	 */
+	if (allocated_session_in_use(job_desc_msg)) {
+		error_code = ESLURM_RESERVATION_BUSY;
+		error("attempt to nest ALPS allocation on %s:%d by uid=%d",
+			job_desc_msg->alloc_node, job_desc_msg->alloc_sid, uid);
+	}
+#endif
 	slurm_get_peer_addr(msg->conn_fd, &resp_addr);
 	job_desc_msg->resp_host = xmalloc(16);
 	slurm_get_ip_str(&resp_addr, &port, job_desc_msg->resp_host, 16);
@@ -1560,7 +1572,7 @@ static void _slurm_rpc_complete_batch_script(slurm_msg_t * msg)
 #ifdef HAVE_BG
 	if (block_desc.bg_block_id) {
 		block_desc.reason = slurm_strerror(comp_msg->slurm_rc);
-		block_desc.state = BG_BLOCK_ERROR;
+		block_desc.state = BG_BLOCK_ERROR_FLAG;
 		i = select_g_update_block(&block_desc);
 		error_code = MAX(error_code, i);
 		xfree(block_desc.bg_block_id);
@@ -3115,8 +3127,8 @@ static void _slurm_rpc_update_block(slurm_msg_t * msg)
 		error("Security violation, UPDATE_BLOCK RPC from uid=%d", uid);
 		if (block_desc_ptr->bg_block_id) {
 			name = block_desc_ptr->bg_block_id;
-		} else if (block_desc_ptr->nodes) {
-			name = block_desc_ptr->nodes;
+		} else if (block_desc_ptr->mp_str) {
+			name = block_desc_ptr->mp_str;
 		}
 	}
 
@@ -3126,10 +3138,10 @@ static void _slurm_rpc_update_block(slurm_msg_t * msg)
 			error_code = select_g_update_block(block_desc_ptr);
 			END_TIMER2("_slurm_rpc_update_block");
 			name = block_desc_ptr->bg_block_id;
-		} else if (block_desc_ptr->nodes) {
+		} else if (block_desc_ptr->mp_str) {
 			error_code = select_g_update_sub_node(block_desc_ptr);
 			END_TIMER2("_slurm_rpc_update_subbp");
-			name = block_desc_ptr->nodes;
+			name = block_desc_ptr->mp_str;
 		} else {
 			error("Unknown update for blocks");
 			error_code = SLURM_ERROR;

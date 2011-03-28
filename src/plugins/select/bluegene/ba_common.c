@@ -52,15 +52,6 @@ bool ba_initialized = false;
 uint32_t ba_debug_flags = 0;
 int DIM_SIZE[HIGHEST_DIMENSIONS];
 
-static int _coord(char coord)
-{
-	if ((coord >= '0') && (coord <= '9'))
-		return (coord - '0');
-	if ((coord >= 'A') && (coord <= 'Z'))
-		return (coord - 'A') + 10;
-	return -1;
-}
-
 /*
  * Increment a geometry index array, return false after reaching the last entry
  */
@@ -295,7 +286,8 @@ node_info_error:
 
 				for (k = 0; k < cluster_dims; k++, j++)
 					DIM_SIZE[k] = MAX(DIM_SIZE[k],
-							  _coord(nodes[j]));
+							  select_char2coord(
+								  nodes[j]));
 				if (nodes[j] != ',')
 					break;
 			}
@@ -392,6 +384,12 @@ extern void destroy_ba_mp(void *ptr)
 	ba_mp_t *ba_mp = (ba_mp_t *)ptr;
 	if (ba_mp) {
 		xfree(ba_mp->loc);
+		if (ba_mp->nodecard_loc) {
+			int i;
+			for (i=0; i<bg_conf->mp_nodecard_cnt; i++)
+				xfree(ba_mp->nodecard_loc[i]);
+			xfree(ba_mp->nodecard_loc);
+		}
 		xfree(ba_mp);
 	}
 }
@@ -412,7 +410,7 @@ extern ba_mp_t *str2ba_mp(const char *coords)
 		return NULL;
 
 	for (dim = 0; dim < cluster_dims; dim++, len++) {
-		coord[dim] = _coord(coords[len]);
+		coord[dim] = select_char2coord(coords[len]);
 		if (coord[dim] > dims[dim])
 			break;
 	}
@@ -469,9 +467,9 @@ extern ba_mp_t *loc2ba_mp(const char* mp_id)
 				       mp_id[1], mp_id[2], mp_id[3]);
 	}
 
-	if ((check[1] < '0' || check[1] > '9')
-	    || (check[2] < '0' || check[2] > '9')
-	    || (check[5] < '0' || check[5] > '9')) {
+	if ((select_char2coord(check[1]) == -1)
+	    || (select_char2coord(check[2]) == -1)
+	    || (select_char2coord(check[5]) == -1)) {
 		error("%s is not a valid Rack-Midplane (i.e. R00-M0)", mp_id);
 		goto cleanup;
 	}
@@ -487,7 +485,7 @@ cleanup:
 #endif
 }
 
-extern void ba_setup_mp(ba_mp_t *ba_mp, bool track_down_mps)
+extern void ba_setup_mp(ba_mp_t *ba_mp, bool track_down_mps, bool wrap_it)
 {
 	int i;
 	uint16_t node_base_state = ba_mp->state & NODE_STATE_BASE;
@@ -499,7 +497,7 @@ extern void ba_setup_mp(ba_mp_t *ba_mp, bool track_down_mps)
 	for (i=0; i<cluster_dims; i++){
 #ifdef HAVE_BG_L_P
 		int j;
-		for(j=0;j<NUM_PORTS_PER_NODE;j++) {
+		for (j=0;j<NUM_PORTS_PER_NODE;j++) {
 			ba_mp->axis_switch[i].int_wire[j].used = 0;
 			if (i!=0) {
 				if (j==3 || j==4)
@@ -509,7 +507,10 @@ extern void ba_setup_mp(ba_mp_t *ba_mp, bool track_down_mps)
 			ba_mp->axis_switch[i].int_wire[j].port_tar = j;
 		}
 #endif
-		ba_mp->axis_switch[i].usage = BG_SWITCH_NONE;
+		if (wrap_it)
+			ba_mp->axis_switch[i].usage = BG_SWITCH_WRAPPED;
+		else
+			ba_mp->axis_switch[i].usage = BG_SWITCH_NONE;
 		ba_mp->alter_switch[i].usage = BG_SWITCH_NONE;
 	}
 }
@@ -525,9 +526,13 @@ extern ba_mp_t *ba_copy_mp(ba_mp_t *ba_mp)
 	ba_mp_t *new_ba_mp = (ba_mp_t *)xmalloc(sizeof(ba_mp_t));
 
 	memcpy(new_ba_mp, ba_mp, sizeof(ba_mp_t));
-	new_ba_mp->loc = xstrdup(ba_mp->loc);
 	/* we have to set this or we would be pointing to the original */
 	memset(new_ba_mp->next_mp, 0, sizeof(new_ba_mp->next_mp));
+	/* we have to set this or we would be pointing to the original */
+	memset(new_ba_mp->prev_mp, 0, sizeof(new_ba_mp->prev_mp));
+	/* These are only used on the original as well. */
+	new_ba_mp->nodecard_loc = NULL;
+	new_ba_mp->loc = NULL;
 
 	return new_ba_mp;
 }
@@ -550,8 +555,9 @@ extern int ba_geo_list_print(ba_geo_table_t *geo_ptr, char *header,
 			 geo_ptr->geometry[i]);
 		strcat(full_buf, dim_buf);
 	}
-	snprintf(dim_buf, sizeof(dim_buf), ": size:%u : full_dim_cnt:%u",
-		 geo_ptr->size, geo_ptr->full_dim_cnt);
+	snprintf(dim_buf, sizeof(dim_buf),
+		 ": size:%u : full_dim_cnt:%u passthru_cnt:%u",
+		 geo_ptr->size, geo_ptr->full_dim_cnt, geo_ptr->passthru_cnt);
 	strcat(full_buf, dim_buf);
 	info("%s%s", header, full_buf);
 
@@ -579,7 +585,7 @@ extern void ba_print_geo_table(ba_geo_system_t *my_geo_system)
 extern void ba_create_geo_table(ba_geo_system_t *my_geo_system)
 {
 	ba_geo_table_t *geo_ptr;
-	int dim, inx[my_geo_system->dim_count], product;
+	int dim, inx[my_geo_system->dim_count], passthru, product;
 	struct ba_geo_table **last_pptr;
 
 	if (my_geo_system->geo_table_ptr)
@@ -607,8 +613,11 @@ extern void ba_create_geo_table(ba_geo_system_t *my_geo_system)
 		for (dim = 0; dim < my_geo_system->dim_count; dim++) {
 			geo_ptr->geometry[dim] = inx[dim];
 			product *= inx[dim];
-			if (inx[dim] == my_geo_system->dim_size[dim])
+			passthru = inx[dim] - my_geo_system->dim_size[dim];
+			if (passthru == 0)
 				geo_ptr->full_dim_cnt++;
+			else if (passthru > 1)
+				geo_ptr->passthru_cnt += passthru;
 		}
 		geo_ptr->size = product;
 		xassert(product <= my_geo_system->total_size);
@@ -616,8 +625,14 @@ extern void ba_create_geo_table(ba_geo_system_t *my_geo_system)
 		/* Insert record into linked list so that geometries
 		 * with full dimensions appear first */
 		last_pptr = &my_geo_system->geo_table_ptr[product];
-		while ((*last_pptr) &&
-		       ((*last_pptr)->full_dim_cnt > geo_ptr->full_dim_cnt)) {
+		while (*last_pptr) {
+			if (geo_ptr->full_dim_cnt > (*last_pptr)->full_dim_cnt)
+				break;
+			if ((geo_ptr->full_dim_cnt ==
+			     (*last_pptr)->full_dim_cnt) &&
+			    (geo_ptr->passthru_cnt <
+			     (*last_pptr)->passthru_cnt))
+				break;
 			last_pptr = &((*last_pptr)->next_ptr);
 		}
 		geo_ptr->next_ptr = *last_pptr;
@@ -941,9 +956,9 @@ extern void ba_update_mp_state(ba_mp_t *ba_mp, uint16_t state)
 	/* basically set the mp as used */
 	if ((mp_base_state == NODE_STATE_DOWN)
 	    || (mp_flags & (NODE_STATE_DRAIN | NODE_STATE_FAIL)))
-		ba_mp->used = BA_MP_USED_TRUE;
+		ba_mp->used |= BA_MP_USED_TRUE;
 	else
-		ba_mp->used = BA_MP_USED_FALSE;
+		ba_mp->used &= (~BA_MP_USED_TRUE);
 
 	ba_mp->state = state;
 }
@@ -964,7 +979,7 @@ extern char *find_mp_rack_mid(char* coords)
 }
 
 /* */
-extern int validate_coord(uint16_t *coord)
+extern int validate_coord(int *coord)
 {
 	int dim, i;
 	char coord_str[cluster_dims+1];

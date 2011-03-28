@@ -71,6 +71,7 @@ typedef struct ba_geo_table {
 	uint16_t size;			/* Total object count */
 	uint16_t *geometry;		/* Size in each dimension */
 	uint16_t full_dim_cnt;		/* Fully occupied dimension count */
+	uint16_t passthru_cnt;		/* Count of nodes lost for passthru */
 	struct ba_geo_table *next_ptr;	/* Next geometry of this size */
 } ba_geo_table_t;
 
@@ -98,7 +99,7 @@ typedef struct {
  */
 typedef struct {
 	/* target label */
-	uint16_t mp_tar[HIGHEST_DIMENSIONS];
+	int mp_tar[HIGHEST_DIMENSIONS];
 	/* target port */
 	int port_tar;
 	bool used;
@@ -129,15 +130,17 @@ typedef struct block_allocator_mp {
 	ba_switch_t alter_switch[HIGHEST_DIMENSIONS];
 	/* a switch for each dimensions */
 	ba_switch_t axis_switch[HIGHEST_DIMENSIONS];
-	struct block_allocator_mp *next_mp[HIGHEST_DIMENSIONS];
 	/* coordinates of midplane */
-	uint16_t coord[HIGHEST_DIMENSIONS];
+	int coord[HIGHEST_DIMENSIONS];
 	/* coordinates of midplane in str format */
 	char coord_str[HIGHEST_DIMENSIONS+1];
 	/* midplane index used for easy look up of the miplane */
 	int index;
 	/* rack-midplane location. */
 	char *loc;
+	struct block_allocator_mp *next_mp[HIGHEST_DIMENSIONS];
+	char **nodecard_loc;
+	struct block_allocator_mp *prev_mp[HIGHEST_DIMENSIONS];
 //	int phys_x;	// no longer needed
 	int state;
 	/* set if using this midplane in a block */
@@ -224,7 +227,7 @@ extern void ba_update_mp_state(ba_mp_t *ba_mp, uint16_t state);
 /*
  * setup the ports and what not for a midplane.
  */
-extern void ba_setup_mp(ba_mp_t *ba_mp, bool track_down_mps);
+extern void ba_setup_mp(ba_mp_t *ba_mp, bool track_down_mps, bool wrap_it);
 
 /*
  * copy info from a ba_mp, a direct memcpy of the ba_mp_t
@@ -355,7 +358,7 @@ extern char *find_mp_rack_mid(char* coords);
 extern int load_block_wiring(char *bg_block_id);
 
 /* make sure a node is in the system return 1 if it is 0 if not */
-extern int validate_coord(uint16_t *coord);
+extern int validate_coord(int *coord);
 
 extern char *ba_switch_usage_str(uint16_t usage);
 

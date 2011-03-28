@@ -234,7 +234,6 @@ struct job_record *create_job_record(int *error_code)
 	detail_ptr->submit_time = time(NULL);
 	job_ptr->requid = -1; /* force to -1 for sacct to know this
 			       * hasn't been set yet  */
-
 	if (list_append(job_list, job_ptr) == 0)
 		fatal("list_append memory allocation failure");
 
@@ -256,7 +255,8 @@ void delete_job_details(struct job_record *job_entry)
 		return;
 
 	xassert (job_entry->details->magic == DETAILS_MAGIC);
-	_delete_job_desc_files(job_entry->job_id);
+	if (IS_JOB_FINISHED(job_entry))
+		_delete_job_desc_files(job_entry->job_id);
 
 	for (i=0; i<job_entry->details->argc; i++)
 		xfree(job_entry->details->argv[i]);
@@ -2167,6 +2167,42 @@ extern bool partition_in_use(char *part_name)
 }
 
 /*
+ * allocated_session_in_use - check if an interactive session is already running
+ * IN new_alloc - allocation (alloc_node:alloc_sid) to test for
+ * Returns true if an interactive session of the same node:sid already is in use
+ * by a RUNNING, PENDING, or SUSPENDED job. Provides its own locking.
+ */
+extern bool allocated_session_in_use(job_desc_msg_t *new_alloc)
+{
+	ListIterator job_iter;
+	struct job_record *job_ptr;
+	/* Locks: Read job */
+	slurmctld_lock_t job_read_lock = {
+		NO_LOCK, READ_LOCK, NO_LOCK, NO_LOCK };
+
+	if ((new_alloc->script != NULL) || (new_alloc->alloc_node == NULL))
+		return false;
+
+	lock_slurmctld(job_read_lock);
+	job_iter = list_iterator_create(job_list);
+	if (job_iter == NULL)
+		fatal("list_iterator_create: malloc failure");
+
+	while ((job_ptr = (struct job_record *)list_next(job_iter))) {
+		if (job_ptr->batch_flag || IS_JOB_FINISHED(job_ptr))
+			continue;
+		if (job_ptr->alloc_node &&
+		    (strcmp(job_ptr->alloc_node, new_alloc->alloc_node) == 0) &&
+		    (job_ptr->alloc_sid == new_alloc->alloc_sid))
+			break;
+	}
+	list_iterator_destroy(job_iter);
+	unlock_slurmctld(job_read_lock);
+
+	return job_ptr != NULL;
+}
+
+/*
  * kill_running_job_by_node_name - Given a node name, deallocate RUNNING
  *	or COMPLETING jobs from the node or kill them
  * IN node_name - name of a node
@@ -2895,6 +2931,9 @@ extern int job_signal(uint32_t job_id, uint16_t signal, uint16_t batch_flag,
 	if (IS_JOB_FINISHED(job_ptr))
 		return ESLURM_ALREADY_DONE;
 
+	/* let node select plugin do any state-dependent signalling actions */
+	select_g_job_signal(job_ptr, signal);
+
 	/* save user ID of the one who requested the job be cancelled */
 	if (signal == SIGKILL)
 		job_ptr->requid = uid;
@@ -3470,6 +3509,16 @@ static int _job_create(job_desc_msg_t * job_desc, int allocate, int will_run,
 
 	/* insure that selected nodes are in this partition */
 	if (job_desc->req_nodes) {
+		static uint32_t node_scaling = 1;
+		static uint32_t cpus_per_mp = 1;
+#ifdef HAVE_BG
+		if (node_scaling == 1) {
+			select_g_alter_node_cnt(SELECT_GET_NODE_SCALING,
+						&node_scaling);
+			select_g_alter_node_cnt(SELECT_GET_MP_CPU_CNT,
+						&cpus_per_mp);
+		}
+#endif
 		error_code = node_name2bitmap(job_desc->req_nodes, false,
 					      &req_bitmap);
 		if (error_code) {
@@ -3481,9 +3530,9 @@ static int _job_create(job_desc_msg_t * job_desc, int allocate, int will_run,
 
 		i = bit_set_count(req_bitmap);
 		if (i > job_desc->min_nodes)
-			job_desc->min_nodes = i;
+			job_desc->min_nodes = i * node_scaling;
 		if (i > job_desc->min_cpus)
-			job_desc->min_cpus = i;
+			job_desc->min_cpus = i * cpus_per_mp;
 		if (job_desc->max_nodes &&
 		    (job_desc->min_nodes > job_desc->max_nodes))
 			job_desc->max_nodes = job_desc->min_nodes;
@@ -3558,7 +3607,7 @@ static int _job_create(job_desc_msg_t * job_desc, int allocate, int will_run,
 				   assoc_ptr, qos_ptr,
 				   &limit_set_max_cpus,
 				   &limit_set_max_nodes,
-				   &limit_set_time))) {
+				   &limit_set_time, 0))) {
 		info("_job_create: exceeded association's node or time limit "
 		     "for user %u", job_desc->user_id);
 		error_code = ESLURM_ACCOUNTING_POLICY;
@@ -5012,8 +5061,7 @@ static void _list_delete_job(void *job_entry)
 		fatal("job hash error");
 	*job_pptr = job_ptr->job_next;
 
-	if (IS_JOB_FINISHED(job_ptr))
-		delete_job_details(job_ptr);
+	delete_job_details(job_ptr);
 	xfree(job_ptr->account);
 	xfree(job_ptr->alloc_node);
 	xfree(job_ptr->batch_host);
@@ -6311,6 +6359,109 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 	if (error_code != SLURM_SUCCESS)
 		goto fini;
 
+	if (job_specs->exc_nodes) {
+		if ((!IS_JOB_PENDING(job_ptr)) || (detail_ptr == NULL))
+			error_code = ESLURM_DISABLED;
+		else if (job_specs->exc_nodes[0] == '\0') {
+			xfree(detail_ptr->exc_nodes);
+			FREE_NULL_BITMAP(detail_ptr->exc_node_bitmap);
+		} else {
+			if (node_name2bitmap(job_specs->exc_nodes, false,
+					     &exc_bitmap)) {
+				error("sched: Invalid node list for "
+				      "job_update: %s",job_specs->exc_nodes);
+				FREE_NULL_BITMAP(exc_bitmap);
+				error_code = ESLURM_INVALID_NODE_NAME;
+			}
+			if (exc_bitmap) {
+				xfree(detail_ptr->exc_nodes);
+				detail_ptr->exc_nodes =
+					job_specs->exc_nodes;
+				FREE_NULL_BITMAP(detail_ptr->exc_node_bitmap);
+				detail_ptr->exc_node_bitmap = exc_bitmap;
+				info("sched: update_job: setting exc_nodes to "
+				     "%s for job_id %u", job_specs->exc_nodes,
+				     job_specs->job_id);
+				job_specs->exc_nodes = NULL;
+			}
+		}
+	}
+	if (error_code != SLURM_SUCCESS)
+		goto fini;
+
+#ifndef HAVE_BG
+	if (job_specs->req_nodes &&
+	    (IS_JOB_RUNNING(job_ptr) || IS_JOB_SUSPENDED(job_ptr))) {
+		/* Use req_nodes to change the nodes associated with a running
+		 * for lack of other field in the job request to use */
+		if ((job_specs->req_nodes[0] == '\0') ||
+		    node_name2bitmap(job_specs->req_nodes,false, &req_bitmap) ||
+		    !bit_super_set(req_bitmap, job_ptr->node_bitmap)) {
+			info("sched: Invalid node list (%s) for job %u update",
+			     job_specs->req_nodes, job_specs->job_id);
+			error_code = ESLURM_INVALID_NODE_NAME;
+			goto fini;
+		} else if (req_bitmap) {
+			int i, i_first, i_last;
+			struct node_record *node_ptr;
+			info("sched: update_job: setting nodes to %s for "
+			     "job_id %u",
+			     job_specs->req_nodes, job_specs->job_id);
+			job_pre_resize_acctg(job_ptr);
+			i_first = bit_ffs(job_ptr->node_bitmap);
+			i_last  = bit_fls(job_ptr->node_bitmap);
+			for (i=i_first; i<=i_last; i++) {
+				if (bit_test(req_bitmap, i) ||
+				    !bit_test(job_ptr->node_bitmap, i))
+					continue;
+				node_ptr = node_record_table_ptr + i;
+				kill_step_on_node(job_ptr, node_ptr, false);
+				excise_node_from_job(job_ptr, node_ptr);
+			}
+			job_post_resize_acctg(job_ptr);
+			/* Since job_post_resize_acctg will restart
+			 * things, don't do it again. */
+			update_accounting = false;
+		} else {
+			update_accounting = true;
+		}
+		FREE_NULL_BITMAP(req_bitmap);
+		xfree(job_specs->req_nodes);
+	}
+#endif
+
+	if (job_specs->req_nodes) {
+		if ((!IS_JOB_PENDING(job_ptr)) || (detail_ptr == NULL))
+			error_code = ESLURM_DISABLED;
+		else if (job_specs->req_nodes[0] == '\0') {
+			xfree(detail_ptr->req_nodes);
+			FREE_NULL_BITMAP(detail_ptr->req_node_bitmap);
+			xfree(detail_ptr->req_node_layout);
+		} else {
+			if (node_name2bitmap(job_specs->req_nodes, false,
+					     &req_bitmap)) {
+				info("sched: Invalid node list for "
+				     "job_update: %s", job_specs->req_nodes);
+				FREE_NULL_BITMAP(req_bitmap);
+				error_code = ESLURM_INVALID_NODE_NAME;
+			}
+			if (req_bitmap) {
+				xfree(detail_ptr->req_nodes);
+				detail_ptr->req_nodes =
+					job_specs->req_nodes;
+				FREE_NULL_BITMAP(detail_ptr->req_node_bitmap);
+				xfree(detail_ptr->req_node_layout);
+				detail_ptr->req_node_bitmap = req_bitmap;
+				info("sched: update_job: setting req_nodes to "
+				     "%s for job_id %u", job_specs->req_nodes,
+				     job_specs->job_id);
+				job_specs->req_nodes = NULL;
+			}
+		}
+	}
+	if (error_code != SLURM_SUCCESS)
+		goto fini;
+
 	if (job_specs->partition) {
 		List part_ptr_list = NULL;
 
@@ -6374,7 +6525,7 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 			goto fini;
 	}
 
-	/* Always do this last just incase the assoc_ptr changed */
+	/* Always do this last just in case the assoc_ptr changed */
 	if (job_specs->comment && wiki_sched && !validate_slurm_user(uid)) {
 		/* User must use Moab command to change job comment */
 		error("Attempt to change comment for job %u",
@@ -6409,7 +6560,11 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 				}
 			}
 		}
-	} else if (job_specs->qos) {
+	}
+	if (error_code != SLURM_SUCCESS)
+		goto fini;
+
+	if (job_specs->qos) {
 		slurmdb_qos_rec_t qos_rec;
 		if (!IS_JOB_PENDING(job_ptr))
 			error_code = ESLURM_DISABLED;
@@ -6437,7 +6592,7 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 					  job_ptr->assoc_ptr, job_ptr->qos_ptr,
 					  &limit_set_max_cpus,
 					  &limit_set_max_nodes,
-					  &limit_set_time)) {
+					  &limit_set_time, 1)) {
 			info("update_job: exceeded association's cpu, node or "
 			     "time limit for user %u", job_specs->user_id);
 			error_code = ESLURM_ACCOUNTING_POLICY;
@@ -7099,109 +7254,6 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 	if (error_code != SLURM_SUCCESS)
 		goto fini;
 
-	if (job_specs->exc_nodes) {
-		if ((!IS_JOB_PENDING(job_ptr)) || (detail_ptr == NULL))
-			error_code = ESLURM_DISABLED;
-		else if (job_specs->exc_nodes[0] == '\0') {
-			xfree(detail_ptr->exc_nodes);
-			FREE_NULL_BITMAP(detail_ptr->exc_node_bitmap);
-		} else {
-			if (node_name2bitmap(job_specs->exc_nodes, false,
-					     &exc_bitmap)) {
-				error("sched: Invalid node list for "
-				      "job_update: %s",job_specs->exc_nodes);
-				FREE_NULL_BITMAP(exc_bitmap);
-				error_code = ESLURM_INVALID_NODE_NAME;
-			}
-			if (exc_bitmap) {
-				xfree(detail_ptr->exc_nodes);
-				detail_ptr->exc_nodes =
-					job_specs->exc_nodes;
-				FREE_NULL_BITMAP(detail_ptr->exc_node_bitmap);
-				detail_ptr->exc_node_bitmap = exc_bitmap;
-				info("sched: update_job: setting exc_nodes to "
-				     "%s for job_id %u", job_specs->exc_nodes,
-				     job_specs->job_id);
-				job_specs->exc_nodes = NULL;
-			}
-		}
-	}
-	if (error_code != SLURM_SUCCESS)
-		goto fini;
-
-#ifndef HAVE_BG
-	if (job_specs->req_nodes &&
-	    (IS_JOB_RUNNING(job_ptr) || IS_JOB_SUSPENDED(job_ptr))) {
-		/* Use req_nodes to change the nodes associated with a running
-		 * for lack of other field in the job request to use */
-		if ((job_specs->req_nodes[0] == '\0') ||
-		    node_name2bitmap(job_specs->req_nodes,false, &req_bitmap) ||
-		    !bit_super_set(req_bitmap, job_ptr->node_bitmap)) {
-			info("sched: Invalid node list (%s) for job %u update",
-			     job_specs->req_nodes, job_specs->job_id);
-			error_code = ESLURM_INVALID_NODE_NAME;
-			goto fini;
-		} else if (req_bitmap) {
-			int i, i_first, i_last;
-			struct node_record *node_ptr;
-			info("sched: update_job: setting nodes to %s for "
-			     "job_id %u",
-			     job_specs->req_nodes, job_specs->job_id);
-			job_pre_resize_acctg(job_ptr);
-			i_first = bit_ffs(job_ptr->node_bitmap);
-			i_last  = bit_fls(job_ptr->node_bitmap);
-			for (i=i_first; i<=i_last; i++) {
-				if (bit_test(req_bitmap, i) ||
-				    !bit_test(job_ptr->node_bitmap, i))
-					continue;
-				node_ptr = node_record_table_ptr + i;
-				kill_step_on_node(job_ptr, node_ptr, false);
-				excise_node_from_job(job_ptr, node_ptr);
-			}
-			job_post_resize_acctg(job_ptr);
-			/* Since job_post_resize_acctg will restart
-			   things don't do it again. */
-			update_accounting = false;
-		} else {
-			update_accounting = true;
-		}
-		FREE_NULL_BITMAP(req_bitmap);
-		xfree(job_specs->req_nodes);
-	}
-#endif
-
-	if (job_specs->req_nodes) {
-		if ((!IS_JOB_PENDING(job_ptr)) || (detail_ptr == NULL))
-			error_code = ESLURM_DISABLED;
-		else if (job_specs->req_nodes[0] == '\0') {
-			xfree(detail_ptr->req_nodes);
-			FREE_NULL_BITMAP(detail_ptr->req_node_bitmap);
-			xfree(detail_ptr->req_node_layout);
-		} else {
-			if (node_name2bitmap(job_specs->req_nodes, false,
-					     &req_bitmap)) {
-				info("sched: Invalid node list for "
-				     "job_update: %s", job_specs->req_nodes);
-				FREE_NULL_BITMAP(req_bitmap);
-				error_code = ESLURM_INVALID_NODE_NAME;
-			}
-			if (req_bitmap) {
-				xfree(detail_ptr->req_nodes);
-				detail_ptr->req_nodes =
-					job_specs->req_nodes;
-				FREE_NULL_BITMAP(detail_ptr->req_node_bitmap);
-				xfree(detail_ptr->req_node_layout);
-				detail_ptr->req_node_bitmap = req_bitmap;
-				info("sched: update_job: setting req_nodes to "
-				     "%s for job_id %u", job_specs->req_nodes,
-				     job_specs->job_id);
-				job_specs->req_nodes = NULL;
-			}
-		}
-	}
-	if (error_code != SLURM_SUCCESS)
-		goto fini;
-
 	if ((job_specs->min_nodes != NO_VAL) && !select_g_job_expand_allow()) {
 		info("Change of size for job %u not supported",
 		     job_specs->job_id);
@@ -7342,12 +7394,11 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 
 	if (job_specs->begin_time) {
 		if (IS_JOB_PENDING(job_ptr) && detail_ptr) {
-			/* Make sure this time is current, it does no
-			   good for accounting to say this job could had
-			   started in the past since the job isn't
-			   going to start until now as the earliest.
-			*/
-			if(job_specs->begin_time < now)
+			char time_str[32];
+			/* Make sure this time is current, it does no good for
+			 * accounting to say this job could have started before
+			 * now */
+			if (job_specs->begin_time < now)
 				job_specs->begin_time = now;
 
 			detail_ptr->begin_time = job_specs->begin_time;
@@ -7355,6 +7406,11 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 			if ((job_ptr->priority == 1) &&
 			    (detail_ptr->begin_time <= now))
 				_set_job_prio(job_ptr);
+			slurm_make_time_str(&detail_ptr->begin_time, time_str,
+					    sizeof(time_str));
+			info("sched: update_job: setting begin to %s for "
+			     "job_id %u",
+			     time_str, job_ptr->job_id);
 		} else {
 			error_code = ESLURM_DISABLED;
 			goto fini;
@@ -8464,6 +8520,7 @@ extern bool job_independent(struct job_record *job_ptr, int will_run)
 		xfree(job_ptr->state_desc);
 		job_ptr->start_time	= now;
 		job_ptr->end_time	= now;
+		srun_allocate_abort(job_ptr);
 		job_completion_logger(job_ptr, false);
 		srun_allocate_abort(job_ptr);
 		return false;

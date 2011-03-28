@@ -1,10 +1,10 @@
 /*****************************************************************************\
- *  bg_status.h
+ *  cray_config.h
  *
  *****************************************************************************
- *  Copyright (C) 2011 Lawrence Livermore National Security.
+ *  Copyright (C) 2011 SchedMD LLC.
  *  Produced at Lawrence Livermore National Laboratory (cf, DISCLAIMER).
- *  Written by Danny Auble <da@llnl.gov>
+ *  Written by Danny Auble <da@schedmd.com>
  *
  *  This file is part of SLURM, a resource management program.
  *  For details, see <https://computing.llnl.gov/linux/slurm/>.
@@ -35,19 +35,48 @@
  *  with SLURM; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
-#ifndef _BG_STATUS_H_
-#define _BG_STATUS_H_
 
-#include "bg_core.h"
+#ifndef _CRAY_CONFIG_H_
+#define _CRAY_CONFIG_H_
 
-extern int bg_status_update_block_state(bg_record_t *bg_record,
-					uint16_t state,
-					List kill_job_list);
-extern List bg_status_create_kill_job_list(void);
-extern void bg_status_process_kill_job_list(List kill_job_list);
+#if HAVE_CONFIG_H
+#  include "config.h"
+#endif
 
-/* defined in the various bridge_status' */
-extern int bridge_block_check_mp_states(char *bg_block_id,
-					bool slurmctld_locked);
+#include <slurm/slurm.h>
+
+typedef struct {
+	char *alps_dir;
+	char *apbasil;
+	char *apkill;
+	char *sdb_db;
+	char *sdb_host;
+	char *sdb_pass;
+	uint32_t sdb_port;
+	char *sdb_user;
+	uint32_t slurm_debug_flags;
+} cray_config_t;
+
+/* Location of Alps install dir */
+#define DEFAULT_ALPS_DIR          "/usr"
+/* Location of Alps apbasil executable (supported on XT/XE CNL) */
+#define DEFAULT_APBASIL           DEFAULT_ALPS_DIR "/bin/apbasil"
+/* Location of Alps apkill executable (supported on XT/XE CNL) */
+#define DEFAULT_APKILL            DEFAULT_ALPS_DIR "/bin/apkill"
+/* database name to use  */
+#define DEFAULT_CRAY_SDB_DB       "XTAdmin"
+/* DNS name of SDB host */
+#define DEFAULT_CRAY_SDB_HOST "sdb"
+/* If NULL, use value from my.cnf */
+#define DEFAULT_CRAY_SDB_PASS     NULL
+/* If NULL, use value from my.cnf */
+#define DEFAULT_CRAY_SDB_PORT     0
+/* If NULL, use value from my.cnf */
+#define DEFAULT_CRAY_SDB_USER     NULL
+
+extern cray_config_t *cray_conf;
+
+extern int create_config(void);
+extern int destroy_config(void);
 
 #endif

@@ -307,10 +307,10 @@ static bg_record_t *_find_matching_block(List block_list,
 		if (bg_record->job_ptr)
 			bg_record->job_running = bg_record->job_ptr->job_id;
 
-		/*block is messed up some how (BLOCK_ERROR_STATE)
+		/*block is messed up some how (BLOCK_ERROR_STATE_FLAG)
 		 * ignore it or if state == BG_BLOCK_ERROR */
 		if ((bg_record->job_running == BLOCK_ERROR_STATE)
-		    || (bg_record->state == BG_BLOCK_ERROR)) {
+		    || (bg_record->state & BG_BLOCK_ERROR_FLAG)) {
 			if (bg_conf->slurm_debug_flags & DEBUG_FLAG_BG_PICK)
 				info("block %s is in an error "
 				     "state (can't use)",
@@ -597,10 +597,12 @@ static int _check_for_booted_overlapping_blocks(
 				  || SELECT_IS_MODE_RUN_NOW(query_mode))
 				 && (bg_conf->layout_mode != LAYOUT_DYNAMIC)))
 			    && ((found_record->job_running != NO_JOB_RUNNING)
-				|| (found_record->state == BG_BLOCK_ERROR))) {
+				|| (found_record->state
+				    & BG_BLOCK_ERROR_FLAG))) {
 				if ((found_record->job_running
 				     == BLOCK_ERROR_STATE)
-				    || (found_record->state == BG_BLOCK_ERROR))
+				    || (found_record->state
+					& BG_BLOCK_ERROR_FLAG))
 					error("can't use %s, "
 					      "overlapping block %s "
 					      "is in an error state.",
@@ -740,9 +742,6 @@ static int _dynamically_request(List block_list, int *blocks_added,
 	ListIterator itr = NULL;
 	int rc = SLURM_ERROR;
 	int create_try = 0;
-	uint16_t start_geo[SYSTEM_DIMENSIONS];
-
-	memcpy(start_geo, request->geometry, sizeof(start_geo));
 
 	if (bg_conf->slurm_debug_flags & DEBUG_FLAG_BG_PICK)
 		info("going to create %d", request->size);
@@ -789,14 +788,8 @@ static int _dynamically_request(List block_list, int *blocks_added,
 		*/
 		if (bg_conf->slurm_debug_flags & DEBUG_FLAG_BG_PICK)
 			info("trying with %d", create_try);
-		new_blocks = create_dynamic_block(block_list,
-						  request, temp_list,
-						  true);
-		/* This could get changed in create_dynamic_block
-		   so reset it here.
-		*/
-		memcpy(request->geometry, start_geo, sizeof(start_geo));
-		if (new_blocks) {
+		if ((new_blocks = create_dynamic_block(
+			     block_list, request, temp_list, true))) {
 			bg_record_t *bg_record = NULL;
 			while ((bg_record = list_pop(new_blocks))) {
 				if (block_exist_in_list(block_list, bg_record))
@@ -932,20 +925,20 @@ static int _find_best_block_match(List block_list,
 		goto end_it;
 
 	if (req_geometry[0] != 0 && req_geometry[0] != (uint16_t)NO_VAL) {
-		char tmp_char[SYSTEM_DIMENSIONS+1];
+		char tmp_geo[SYSTEM_DIMENSIONS+1];
 
 		target_size = 1;
 		for (i=0; i<SYSTEM_DIMENSIONS; i++) {
 			target_size *= req_geometry[i];
-			tmp_char[i] = alpha_num[req_geometry[i]];
+			tmp_geo[i] = alpha_num[req_geometry[i]];
 		}
-		tmp_char[i] = '\0';
+		tmp_geo[i] = '\0';
 
 		if (target_size != min_nodes) {
 			debug2("min_nodes not set correctly %u "
 			       "should be %u from %s",
 			       min_nodes, target_size,
-			       tmp_char);
+			       tmp_geo);
 			min_nodes = target_size;
 		}
 		if (!req_nodes)
@@ -1035,7 +1028,7 @@ static int _find_best_block_match(List block_list,
 					*/
 					bg_record->job_running =
 						BLOCK_ERROR_STATE;
-					bg_record->state = BG_BLOCK_ERROR;
+					bg_record->state |= BG_BLOCK_ERROR_FLAG;
 					error("_find_best_block_match: Picked "
 					      "block (%s) had some issues with "
 					      "hardware, trying a different "
@@ -1176,15 +1169,9 @@ static int _find_best_block_match(List block_list,
 					*/
 					track_down_nodes = false;
 
-				new_blocks = create_dynamic_block(
-					block_list, &request, job_list,
-					track_down_nodes);
-				/* this could get altered in
-				 * create_dynamic_block so we reset it */
-				memcpy(request.geometry, req_geometry,
-				       sizeof(req_geometry));
-
-				if (!new_blocks) {
+				if (!(new_blocks = create_dynamic_block(
+					      block_list, &request, job_list,
+					      track_down_nodes))) {
 					if (errno == ESLURM_INTERCONNECT_FAILURE
 					    || !list_count(job_list)) {
 						char *nodes;
@@ -1299,8 +1286,8 @@ static int _sync_block_lists(List full_list, List incomp_list)
 					 new_record->ionode_bitmap)) {
 				/* now make sure the conn_type is the same for
 				   regular sized blocks */
-				if (bg_record->node_cnt
-				    >= bg_conf->mp_node_cnt) {
+				if (bg_record->cnode_cnt
+				    >= bg_conf->mp_cnode_cnt) {
 					int i;
 					for (i=0; i<SYSTEM_DIMENSIONS; i++)
 						if (bg_record->conn_type[i]
@@ -1544,7 +1531,7 @@ extern int submit_job(struct job_record *job_ptr, bitstr_t *slurm_block_bitmap,
 	get_select_jobinfo(job_ptr->select_jobinfo->data,
 			   SELECT_JOBDATA_CONN_TYPE, &conn_type);
 	if (conn_type[0] == SELECT_NAV) {
-		if (bg_conf->mp_node_cnt == bg_conf->nodecard_node_cnt)
+		if (bg_conf->mp_cnode_cnt == bg_conf->nodecard_cnode_cnt)
 			conn_type[0] = SELECT_SMALL;
 		else if (min_nodes > 1) {
 			for (dim=0; dim<SYSTEM_DIMENSIONS; dim++)
@@ -1692,15 +1679,15 @@ extern int submit_job(struct job_record *job_ptr, bitstr_t *slurm_block_bitmap,
 
 			set_select_jobinfo(job_ptr->select_jobinfo->data,
 					   SELECT_JOBDATA_NODES,
-					   bg_record->nodes);
+					   bg_record->mp_str);
 			set_select_jobinfo(job_ptr->select_jobinfo->data,
 					   SELECT_JOBDATA_IONODES,
-					   bg_record->ionodes);
+					   bg_record->ionode_str);
 			if (!bg_record->bg_block_id) {
 				debug("%d can start unassigned job %u "
 				      "at %ld on %s",
 				      local_mode, job_ptr->job_id,
-				      starttime, bg_record->nodes);
+				      starttime, bg_record->mp_str);
 
 				set_select_jobinfo(
 					job_ptr->select_jobinfo->data,
@@ -1709,9 +1696,9 @@ extern int submit_job(struct job_record *job_ptr, bitstr_t *slurm_block_bitmap,
 				set_select_jobinfo(
 					job_ptr->select_jobinfo->data,
 					SELECT_JOBDATA_NODE_CNT,
-					&bg_record->node_cnt);
+					&bg_record->cnode_cnt);
 			} else {
-				if ((bg_record->ionodes)
+				if ((bg_record->ionode_str)
 				    && (job_ptr->part_ptr->max_share <= 1))
 					error("Small block used in "
 					      "non-shared partition");
@@ -1720,7 +1707,7 @@ extern int submit_job(struct job_record *job_ptr, bitstr_t *slurm_block_bitmap,
 				      "at %ld on %s(%s) %d",
 				      local_mode, mode, job_ptr->job_id,
 				      starttime, bg_record->bg_block_id,
-				      bg_record->nodes,
+				      bg_record->mp_str,
 				      SELECT_IS_MODE_RUN_NOW(local_mode));
 
 				if (SELECT_IS_MODE_RUN_NOW(local_mode)) {
@@ -1755,12 +1742,12 @@ extern int submit_job(struct job_record *job_ptr, bitstr_t *slurm_block_bitmap,
 				set_select_jobinfo(
 					job_ptr->select_jobinfo->data,
 					SELECT_JOBDATA_NODE_CNT,
-					&bg_record->node_cnt);
+					&bg_record->cnode_cnt);
 			}
 			if (SELECT_IS_MODE_RUN_NOW(local_mode))
 				_build_select_struct(job_ptr,
 						     slurm_block_bitmap,
-						     bg_record->node_cnt);
+						     bg_record->cnode_cnt);
 			/* set up the preempted job list */
 			if (SELECT_IS_PREEMPT_SET(local_mode)) {
 				if (*preemptee_job_list)

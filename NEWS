@@ -24,9 +24,23 @@ documents those changes that are of interest to users and admins.
     reservation.
  -- Change slurm.conf node configuration parameter from "Procs" to "CPUs".
     Both parameters will be supported for now.
+ -- BLUEGENE - fix for when user requests only midplane names with no count at
+    job submission time to process the node count correctly.
+ -- Fix job step resource allocation problem when both node and tasks counts
+    are specified. New logic selects nodes with larger CPU counts as needed.
+ -- BGQ - make it so srun wraps runjob (still under construction, but works
+    for most cases)
+ -- Permit a job's QOS and Comment field to both change in a single RPC. This
+    was previously disabled since Moab stored the QOS within the Comment field.
  -- Add support for jobs to expand in size. Submit additional batch job with
     the option "--dependency=expand:<jobid>". See web page "faq.html#job_size"
     for details. Restrictions to be removed in the future.
+ -- Added --with-alps-emulation to configure, and also an optional cray.conf
+    to setup alps location and database information.
+ -- Modify PMI data types from 16-bits to 32-bits in order to support MPICH2
+    jobs with more than 65,536 tasks. Patch from Hongjia Cao, NUDT.
+ -- Set slurmd's soft process CPU limit equal to it's hard limit and notify the
+    user if the limit is not infinite.
 
 * Changes in SLURM 2.3.0.pre3
 =============================
@@ -112,10 +126,23 @@ documents those changes that are of interest to users and admins.
     a full midplane on BlueGene computers. Treat cnodes as liceses which can
     be reserved and are consumed by jobs. This reservation mechanism for less
     than an entire midplane is still under development.
- -- Clear a job's "reason" field when a hold job is released.
+ -- Clear a job's "reason" field when a held job is released.
+ -- When releasing a held job, calculate a new priority for it rather than
+    just setting the priority to 1.
  -- Fix for sview started on a non-bluegene system to pick colors correctly
     when talking to a real bluegene system.
  -- Improve sched/backfill's expected start time calculation.
+ -- Prevent abort of sacctmgr for dump command with invalid (or no) filename.
+ -- Improve handling of job updates when using limits in accounting, and
+    updating jobs as a non-admin user.
+ -- Fix for "squeue --states=all" option. Bug would show no jobs.
+ -- Schedule jobs with reservations before those without reservations.
+ -- Fix squeue/scancel to query correctly against accounts of different case.
+ -- Abort an srun command when it's associated job gets aborted due to a
+    dependency that can not be satisfied.
+ -- In jobcomp plugins, report start time of zeroif pending job is cancelled.
+    Previously may report expected start time.
+ -- Fixed sacctmgr man to state correct variables.
 
 * Changes in SLURM 2.2.3
 ========================

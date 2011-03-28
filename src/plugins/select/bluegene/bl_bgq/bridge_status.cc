@@ -200,7 +200,8 @@ void event_handler::handleBlockStateChangedRealtimeEvent(
 	bg_record = find_bg_record_in_list(bg_lists->main, bg_block_id);
 	if (!bg_record) {
 		slurm_mutex_unlock(&block_state_mutex);
-		info("bg_record %s isn't in the main list", bg_block_id);
+		info("bridge_status: bg_record %s isn't in the main list",
+		     bg_block_id);
 		return;
 	}
 
@@ -225,8 +226,6 @@ void event_handler::handleMidplaneStateChangedRealtimeEvent(
 void event_handler::handleSwitchStateChangedRealtimeEvent(
 	const SwitchStateChangedEventInfo& event)
 {
-	char bg_down_node[128];
-
 	const char *midplane = event.getMidplaneId().c_str();
 	ba_mp_t *ba_mp = loc2ba_mp(midplane);
 
@@ -257,12 +256,9 @@ void event_handler::handleSwitchStateChangedRealtimeEvent(
 void event_handler::handleNodeBoardStateChangedRealtimeEvent(
 	const NodeBoardStateChangedEventInfo& event)
 {
-	int rc = SLURM_ERROR;
-
 	const char *mp_name = event.getMidplaneId().c_str();
 	const char *nb_name = event.getNodeBoardId().c_str();
 	ba_mp_t *ba_mp = loc2ba_mp(mp_name);
-	int io_start = 0;
 
 	if (!ba_mp) {
 		error("Nodeboard '%s' on Midplane %s, state went from %d to %d,"
@@ -442,9 +438,6 @@ static void _handle_midplane_update(ComputeHardware::ConstPtr bgq,
 static void _do_hardware_poll(void)
 {
 #if defined HAVE_BG_FILES
-	ListIterator itr;
-	int updated = 0;
-
 	if (!ba_main_grid)
 		return;
 

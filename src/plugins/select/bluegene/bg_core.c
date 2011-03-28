@@ -95,8 +95,8 @@ static int _post_block_free(bg_record_t *bg_record, bool restore)
 		return SLURM_SUCCESS;
 	}
 
-	if ((bg_record->state != BG_BLOCK_FREE)
-	    && (bg_record->state != BG_BLOCK_ERROR)) {
+	if (!(bg_record->state & BG_BLOCK_ERROR_FLAG)
+	    && (bg_record->state != BG_BLOCK_FREE)) {
 		/* Something isn't right, go mark this one in an error
 		   state. */
 		update_block_msg_t block_msg;
@@ -107,7 +107,7 @@ static int _post_block_free(bg_record_t *bg_record, bool restore)
 			     bg_block_state_string(bg_record->state));
 		slurm_init_update_block_msg(&block_msg);
 		block_msg.bg_block_id = bg_record->bg_block_id;
-		block_msg.state = BG_BLOCK_ERROR;
+		block_msg.state |= BG_BLOCK_ERROR_FLAG;
 		block_msg.reason = "Block would not deallocate";
 		slurm_mutex_unlock(&block_state_mutex);
 		select_g_update_block(&block_msg);
@@ -118,19 +118,15 @@ static int _post_block_free(bg_record_t *bg_record, bool restore)
 	/* A bit of a sanity check to make sure blocks are being
 	   removed out of all the lists.
 	*/
-	if (blocks_are_created) {
-		remove_from_bg_list(bg_lists->booted, bg_record);
-		if (remove_from_bg_list(bg_lists->job_running, bg_record)
-		    == SLURM_SUCCESS)
-			num_unused_cpus += bg_record->cpu_cnt;
-	}
+	remove_from_bg_list(bg_lists->booted, bg_record);
+	if (remove_from_bg_list(bg_lists->job_running, bg_record)
+	    == SLURM_SUCCESS)
+		num_unused_cpus += bg_record->cpu_cnt;
 
 	if (restore)
 		return SLURM_SUCCESS;
 
-	if (blocks_are_created
-	    && remove_from_bg_list(bg_lists->main, bg_record)
-	    != SLURM_SUCCESS) {
+	if (remove_from_bg_list(bg_lists->main, bg_record) != SLURM_SUCCESS) {
 		/* This should only happen if called from
 		 * bg_job_place.c where the block was never added to
 		 * the list. */
@@ -152,7 +148,7 @@ static int _post_block_free(bg_record_t *bg_record, bool restore)
 			error("_post_block_free: "
 			      "bridge_block_remove(%s): %s",
 			      bg_record->bg_block_id,
-			      bridge_err_str(rc));
+			      bg_err_str(rc));
 		/* } */
 	} else
 		if (bg_conf->slurm_debug_flags & DEBUG_FLAG_SELECT_TYPE)
@@ -206,12 +202,12 @@ static void *_track_freeing_blocks(void *args)
 			/* Fake a free since we are n deallocating
 			   state before this.
 			*/
-			if ((bg_record->state != BG_BLOCK_ERROR)
+			if (!(bg_record->state & BG_BLOCK_ERROR_FLAG)
 			    && (retry_cnt >= 3))
 				bg_record->state = BG_BLOCK_FREE;
 #endif
 			if ((bg_record->state == BG_BLOCK_FREE)
-			    || (bg_record->state == BG_BLOCK_ERROR))
+			    || (bg_record->state & BG_BLOCK_ERROR_FLAG))
 				free_cnt++;
 			else if (bg_record->state != BG_BLOCK_TERM)
 				bg_free_block(bg_record, 0, 1);
@@ -272,8 +268,8 @@ extern bool blocks_overlap(bg_record_t *rec_a, bg_record_t *rec_b)
 	    && !bit_overlap(rec_a->bitmap, rec_b->bitmap))
 		return false;
 
-	if ((rec_a->node_cnt >= bg_conf->mp_node_cnt)
-	    || (rec_b->node_cnt >= bg_conf->mp_node_cnt))
+	if ((rec_a->cnode_cnt >= bg_conf->mp_cnode_cnt)
+	    || (rec_b->cnode_cnt >= bg_conf->mp_cnode_cnt))
 		return true;
 
 	if (rec_a->ionode_bitmap && rec_b->ionode_bitmap
@@ -359,43 +355,49 @@ extern int bg_free_block(bg_record_t *bg_record, bool wait, bool locked)
 				     bg_record->bg_block_id);
 			rc = bridge_block_free(bg_record);
 			if (rc != SLURM_SUCCESS) {
-/* 				if (rc == PARTITION_NOT_FOUND) { */
-/* 					debug("block %s is not found", */
-/* 					      bg_record->bg_block_id); */
-/* 					break; */
-/* 				} else if (rc == INCOMPATIBLE_STATE) { */
-/* #ifndef HAVE_BGL */
-/* 					/\* If the state is error and */
-/* 					   we get an incompatible */
-/* 					   state back here, it means */
-/* 					   we set it ourselves so */
-/* 					   break out. */
-/* 					*\/ */
-/* 					if (bg_record->state */
-/* 					    == BG_BLOCK_ERROR) */
-/* 						break; */
-/* #endif */
-/* 					if (bg_conf->slurm_debug_flags */
-/* 					    & DEBUG_FLAG_SELECT_TYPE) */
-/* 						info("bridge_block_remove" */
-/* 						     "(%s): %s State = %d", */
-/* 						     bg_record->bg_block_id, */
-/* 						     bridge_err_str(rc), */
-/* 						     bg_record->state); */
-/* 				} else { */
+				if (rc == BG_ERROR_BLOCK_NOT_FOUND) {
+					debug("block %s is not found",
+					      bg_record->bg_block_id);
+					break;
+				} else if (rc == BG_ERROR_PENDING_ACTION) {
+#ifndef HAVE_BGL
+					/* If the state is error and
+					   we get an incompatible
+					   state back here, it means
+					   we set it ourselves so
+					   break out.
+					*/
+					if (bg_record->state
+					    & BG_BLOCK_ERROR_FLAG)
+						break;
+#endif
+					if (bg_conf->slurm_debug_flags
+					    & DEBUG_FLAG_SELECT_TYPE)
+						info("bridge_block_free"
+						     "(%s): %s State = %d",
+						     bg_record->bg_block_id,
+						     bg_err_str(rc),
+						     bg_record->state);
+#ifdef HAVE_BGQ
+					if (bg_record->state != BG_BLOCK_FREE
+					    && bg_record->state
+					    != BG_BLOCK_TERM)
+					bg_record->state = BG_BLOCK_TERM;
+#endif
+				} else {
 					error("bridge_block_remove"
 					      "(%s): %s State = %d",
 					      bg_record->bg_block_id,
-					      bridge_err_str(rc),
+					      bg_err_str(rc),
 					      bg_record->state);
-				/* } */
+				}
 			}
 		}
 #else
 		/* Fake a free since we are n deallocating
 		   state before this.
 		*/
-		if (bg_record->state == BG_BLOCK_ERROR)
+		if (bg_record->state & BG_BLOCK_ERROR_FLAG)
 			break;
 		else if (count >= 3)
 			bg_record->state = BG_BLOCK_FREE;
@@ -405,7 +407,7 @@ extern int bg_free_block(bg_record_t *bg_record, bool wait, bool locked)
 
 		if (!wait || (bg_record->state == BG_BLOCK_FREE)
 #ifdef HAVE_BGL
-		    ||  (bg_record->state == BG_BLOCK_ERROR)
+		    ||  (bg_record->state & BG_BLOCK_ERROR_FLAG)
 #endif
 			) {
 			break;
@@ -422,7 +424,7 @@ extern int bg_free_block(bg_record_t *bg_record, bool wait, bool locked)
 
 	rc = SLURM_SUCCESS;
 	if ((bg_record->state == BG_BLOCK_FREE)
-	    || (bg_record->state == BG_BLOCK_ERROR))
+	    || (bg_record->state & BG_BLOCK_ERROR_FLAG))
 		remove_from_bg_list(bg_lists->booted, bg_record);
 	else if (count >= MAX_FREE_RETRIES) {
 		/* Something isn't right, go mark this one in an error
@@ -435,7 +437,7 @@ extern int bg_free_block(bg_record_t *bg_record, bool wait, bool locked)
 			     bg_block_state_string(bg_record->state));
 		slurm_init_update_block_msg(&block_msg);
 		block_msg.bg_block_id = bg_record->bg_block_id;
-		block_msg.state = BG_BLOCK_ERROR;
+		block_msg.state |= BG_BLOCK_ERROR_FLAG;
 		block_msg.reason = "Block would not deallocate";
 		slurm_mutex_unlock(&block_state_mutex);
 		select_g_update_block(&block_msg);
@@ -640,7 +642,7 @@ extern int load_state_file(List curr_block_list, char *dir_name)
 
 		/* we only care about the states we need here
 		 * everthing else should have been set up already */
-		if (block_info->state == BG_BLOCK_ERROR) {
+		if (block_info->state & BG_BLOCK_ERROR_FLAG) {
 			slurm_mutex_lock(&block_state_mutex);
 			if ((bg_record = find_bg_record_in_list(
 				     curr_block_list,
@@ -694,8 +696,7 @@ extern int load_state_file(List curr_block_list, char *dir_name)
 
 		j = 0;
 		while (block_info->mp_inx[j] >= 0) {
-			if (block_info->mp_inx[j+1]
-			    >= node_record_count) {
+			if (block_info->mp_inx[j+1] >= node_record_count) {
 				fatal("Job state recovered incompatible with "
 				      "bluegene.conf. mp=%u state=%d",
 				      node_record_count,
@@ -725,8 +726,8 @@ extern int load_state_file(List curr_block_list, char *dir_name)
 		bg_record = xmalloc(sizeof(bg_record_t));
 		bg_record->magic = BLOCK_MAGIC;
 		bg_record->bg_block_id = xstrdup(block_info->bg_block_id);
-		bg_record->nodes = xstrdup(block_info->nodes);
-		bg_record->ionodes = xstrdup(block_info->ionodes);
+		bg_record->mp_str = xstrdup(block_info->mp_str);
+		bg_record->ionode_str = xstrdup(block_info->ionode_str);
 		bg_record->ionode_bitmap = bit_copy(ionode_bitmap);
 		/* put_block_in_error_state should be
 		   called after the bg_lists->main has been
@@ -738,10 +739,10 @@ extern int load_state_file(List curr_block_list, char *dir_name)
 		bg_record->job_running = NO_JOB_RUNNING;
 
 		bg_record->mp_count = bit_set_count(node_bitmap);
-		bg_record->node_cnt = block_info->node_cnt;
-		if (bg_conf->mp_node_cnt > bg_record->node_cnt) {
-			ionodes = bg_conf->mp_node_cnt
-				/ bg_record->node_cnt;
+		bg_record->cnode_cnt = block_info->cnode_cnt;
+		if (bg_conf->mp_cnode_cnt > bg_record->cnode_cnt) {
+			ionodes = bg_conf->mp_cnode_cnt
+				/ bg_record->cnode_cnt;
 			bg_record->cpu_cnt = bg_conf->cpus_per_mp / ionodes;
 		} else {
 			bg_record->cpu_cnt = bg_conf->cpus_per_mp
@@ -790,6 +791,8 @@ extern int load_state_file(List curr_block_list, char *dir_name)
 #else
 		results = list_create(NULL);
 #endif
+		/* info("adding back %s %s", bg_record->bg_block_id, */
+		/*      bg_record->mp_str); */
 		name = set_bg_block(results,
 				    bg_record->start,
 				    geo,
@@ -811,11 +814,11 @@ extern int load_state_file(List curr_block_list, char *dir_name)
 			 name);
 
 		xfree(name);
-		if (strcmp(temp, bg_record->nodes)) {
+		if (strcmp(temp, bg_record->mp_str)) {
 			fatal("bad wiring in preserved state "
 			      "(found %s, but allocated %s) "
 			      "YOU MUST COLDSTART",
-			      bg_record->nodes, temp);
+			      bg_record->mp_str, temp);
 		}
 		if (bg_record->ba_mp_list)
 			list_destroy(bg_record->ba_mp_list);
@@ -856,3 +859,43 @@ unpack_error:
 	free_buf(buffer);
 	return SLURM_FAILURE;
 }
+
+/*
+ * Convert a BG API error code to a string
+ * IN inx - error code from any of the BG Bridge APIs
+ * RET - string describing the error condition
+ */
+extern const char *bg_err_str(int inx)
+{
+	switch (inx) {
+	case SLURM_SUCCESS:
+		return "Status OK";
+	case BG_ERROR_PENDING_ACTION:
+		return "Action already pending";
+	case BG_ERROR_BLOCK_NOT_FOUND:
+		return "Block not found";
+	case BG_ERROR_BOOT_ERROR:
+		return "Block boot error";
+	case BG_ERROR_JOB_NOT_FOUND:
+		return "Job not found";
+	case BG_ERROR_MP_NOT_FOUND:
+		return "Midplane not found";
+	case BG_ERROR_SWITCH_NOT_FOUND:
+		return "Switch not found";
+	case BG_ERROR_BLOCK_ALREADY_DEFINED:
+		return "Block already defined";
+	case BG_ERROR_JOB_ALREADY_DEFINED:
+		return "Job already defined";
+	case BG_ERROR_CONNECTION_ERROR:
+		return "Connection error";
+	case BG_ERROR_INTERNAL_ERROR:
+		return "Internal error";
+	case BG_ERROR_INVALID_INPUT:
+		return "Invalid input";
+	case BG_ERROR_INCONSISTENT_DATA:
+		return "Inconsistent data";
+	}
+
+	return "?";
+}
+

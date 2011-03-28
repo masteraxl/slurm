@@ -219,6 +219,8 @@ static int _delete_old_blocks(List curr_block_list, List found_block_list)
 		itr_curr = list_iterator_create(curr_block_list);
 		while ((init_record = list_next(itr_curr))) {
 			list_remove(itr_curr);
+			/* make sure we query the state here. */
+			list_push(bg_lists->main, init_record);
 			list_push(destroy_list, init_record);
 		}
 		list_iterator_destroy(itr_curr);
@@ -237,6 +239,8 @@ static int _delete_old_blocks(List curr_block_list, List found_block_list)
 
 			if (found_record == NULL) {
 				list_remove(itr_curr);
+				/* make sure we query the state here. */
+				list_push(bg_lists->main, init_record);
 				list_push(destroy_list, init_record);
 			}
 		}
@@ -328,8 +332,8 @@ static int _validate_config_nodes(List curr_block_list,
 	while ((bg_record = list_next(itr_conf))) {
 		list_iterator_reset(itr_curr);
 		while ((init_bg_record = list_next(itr_curr))) {
-			if (strcasecmp(bg_record->nodes,
-				       init_bg_record->nodes))
+			if (strcasecmp(bg_record->mp_str,
+				       init_bg_record->mp_str))
 				continue; /* wrong nodes */
 			if (!bit_equal(bg_record->ionode_bitmap,
 				       init_bg_record->ionode_bitmap))
@@ -436,7 +440,7 @@ static void _pack_block(bg_record_t *bg_record, Buf buffer,
 		pack32(1, buffer); /* for dimensions of conn_type */
 		pack16(bg_record->conn_type[0], buffer);
 #endif
-		packstr(bg_record->ionodes, buffer);
+		packstr(bg_record->ionode_str, buffer);
 		pack_bit_fmt(bg_record->ionode_bitmap, buffer);
 
 		if (bg_record->job_list)
@@ -455,8 +459,8 @@ static void _pack_block(bg_record_t *bg_record, Buf buffer,
 		pack32((uint32_t)bg_record->job_running, buffer);
 		packstr(bg_record->linuximage, buffer);
 		packstr(bg_record->mloaderimage, buffer);
-		packstr(bg_record->nodes, buffer);
-		pack32((uint32_t)bg_record->node_cnt, buffer);
+		packstr(bg_record->mp_str, buffer);
+		pack32((uint32_t)bg_record->cnode_cnt, buffer);
 		pack16((uint16_t)bg_record->node_use, buffer);
 		packstr(bg_record->user_name, buffer);
 		packstr(bg_record->ramdiskimage, buffer);
@@ -469,13 +473,13 @@ static void _pack_block(bg_record_t *bg_record, Buf buffer,
 #endif
 		pack_bit_fmt(bg_record->bitmap, buffer);
 		pack16((uint16_t)bg_record->conn_type[0], buffer);
-		packstr(bg_record->ionodes, buffer);
+		packstr(bg_record->ionode_str, buffer);
 		pack_bit_fmt(bg_record->ionode_bitmap, buffer);
 		pack32((uint32_t)bg_record->job_running, buffer);
 		packstr(bg_record->linuximage, buffer);
 		packstr(bg_record->mloaderimage, buffer);
-		packstr(bg_record->nodes, buffer);
-		pack32((uint32_t)bg_record->node_cnt, buffer);
+		packstr(bg_record->mp_str, buffer);
+		pack32((uint32_t)bg_record->cnode_cnt, buffer);
 #ifdef HAVE_BGL
 		pack16((uint16_t)bg_record->node_use, buffer);
 #endif
@@ -490,13 +494,13 @@ static void _pack_block(bg_record_t *bg_record, Buf buffer,
 #endif
 		pack_bit_fmt(bg_record->bitmap, buffer);
 		pack16((uint16_t)bg_record->conn_type[0], buffer);
-		packstr(bg_record->ionodes, buffer);
+		packstr(bg_record->ionode_str, buffer);
 		pack_bit_fmt(bg_record->ionode_bitmap, buffer);
 		pack32((uint32_t)bg_record->job_running, buffer);
 		packstr(bg_record->linuximage, buffer);
 		packstr(bg_record->mloaderimage, buffer);
-		packstr(bg_record->nodes, buffer);
-		pack32((uint32_t)bg_record->node_cnt, buffer);
+		packstr(bg_record->mp_str, buffer);
+		pack32((uint32_t)bg_record->cnode_cnt, buffer);
 #ifdef HAVE_BGL
 		pack16((uint16_t)bg_record->node_use, buffer);
 #endif
@@ -516,7 +520,7 @@ static List _get_config(void)
 
 	key_pair = xmalloc(sizeof(config_key_pair_t));
 	key_pair->name = xstrdup("MidPlaneNodeCnt");
-	key_pair->value = xstrdup_printf("%u", bg_conf->mp_node_cnt);
+	key_pair->value = xstrdup_printf("%u", bg_conf->mp_cnode_cnt);
 	list_append(my_list, key_pair);
 
 	key_pair = xmalloc(sizeof(config_key_pair_t));
@@ -603,7 +607,7 @@ static List _get_config(void)
 
 	key_pair = xmalloc(sizeof(config_key_pair_t));
 	key_pair->name = xstrdup("NodeCardNodeCnt");
-	key_pair->value = xstrdup_printf("%u", bg_conf->nodecard_node_cnt);
+	key_pair->value = xstrdup_printf("%u", bg_conf->nodecard_cnode_cnt);
 	list_append(my_list, key_pair);
 
 	key_pair = xmalloc(sizeof(config_key_pair_t));
@@ -625,6 +629,18 @@ extern int init(void)
 {
 
 #ifdef HAVE_BG
+	if (!bg_conf) {
+		/* This is needed on all systems where srun wraps the
+		   bluegene calling program (i.e. runjob).
+		*/
+		bg_conf = xmalloc(sizeof(bg_config_t));
+		/* set some defaults for most systems */
+		bg_conf->mp_cnode_cnt = 512;
+		bg_conf->quarter_cnode_cnt = 128;
+		bg_conf->nodecard_cnode_cnt = 32;
+		bg_conf->mp_nodecard_cnt = bg_conf->mp_cnode_cnt
+			/ bg_conf->nodecard_cnode_cnt;
+	}
 	if (bg_recover != NOT_FROM_CONTROLLER) {
 #if defined HAVE_BG_L_P && (SYSTEM_DIMENSIONS != 3)
 		fatal("SYSTEM_DIMENSIONS value (%d) invalid for BlueGene",
@@ -657,9 +673,6 @@ extern int init(void)
 		   we don't want to read the config or anything like that. */
 		_set_bg_lists();
 
-		if (!bg_conf)
-			bg_conf = xmalloc(sizeof(bg_config_t));
-
 		xfree(bg_conf->slurm_user_name);
 		xfree(bg_conf->slurm_node_prefix);
 		slurm_conf_lock();
@@ -670,6 +683,7 @@ extern int init(void)
 		bg_conf->slurm_node_prefix =
 			xstrdup(slurmctld_conf.node_prefix);
 		bg_conf->slurm_debug_flags = slurmctld_conf.debug_flags;
+		bg_conf->slurm_debug_level = slurmctld_conf.slurmctld_debug;
 		slurm_conf_unlock();
 
 		if (bg_conf->blrts_list)
@@ -745,7 +759,7 @@ extern int select_p_state_save(char *dir_name)
 		 * the blocks in an error state
 		 */
 #if defined HAVE_BG_FILES
-		if (bg_record->state != BG_BLOCK_ERROR)
+		if (!(bg_record->state & BG_BLOCK_ERROR_FLAG))
 			continue;
 #endif
 		xassert(bg_record->bg_block_id != NULL);
@@ -867,7 +881,7 @@ extern int select_p_state_restore(char *dir_name)
 	   no threads are started before this function. */
 	itr = list_iterator_create(bg_lists->main);
 	while ((bg_record = list_next(itr))) {
-		if (bg_record->state == BG_BLOCK_ERROR)
+		if (bg_record->state & BG_BLOCK_ERROR_FLAG)
 			put_block_in_error_state(bg_record,
 						 BLOCK_ERROR_STATE, NULL);
 	}
@@ -915,7 +929,7 @@ extern int select_p_node_init(struct node_record *node_ptr, int node_cnt)
 {
 #ifdef HAVE_BG
 	if (node_cnt>0 && bg_conf)
-		if (node_ptr->cpus >= bg_conf->mp_node_cnt)
+		if (node_ptr->cpus >= bg_conf->mp_cnode_cnt)
 			bg_conf->cpus_per_mp = node_ptr->cpus;
 
 	return SLURM_SUCCESS;
@@ -1100,6 +1114,11 @@ extern int select_p_job_expand(struct job_record *from_job_ptr,
 			       struct job_record *to_job_ptr)
 {
 	return ESLURM_NOT_SUPPORTED;
+}
+
+extern int select_p_job_signal(struct job_record *job_ptr, int signal)
+{
+	return SLURM_SUCCESS;
 }
 
 extern int select_p_job_fini(struct job_record *job_ptr)
@@ -1310,7 +1329,7 @@ extern int select_p_update_block(update_block_msg_t *block_desc_ptr)
 			snprintf(reason, sizeof(reason),
 				 "update_block: "
 				 "Removed all blocks on midplane %s",
-				 bg_record->nodes);
+				 bg_record->mp_str);
 
 	} else
 		snprintf(reason, sizeof(reason),
@@ -1338,7 +1357,7 @@ extern int select_p_update_block(update_block_msg_t *block_desc_ptr)
 		bg_record->job_ptr = NULL;
 	}
 
-	if (block_desc_ptr->state == BG_BLOCK_ERROR) {
+	if (block_desc_ptr->state == BG_BLOCK_ERROR_FLAG) {
 		bg_record_t *found_record = NULL;
 		ListIterator itr;
 		List delete_list = list_create(NULL);
@@ -1471,7 +1490,7 @@ extern int select_p_update_block(update_block_msg_t *block_desc_ptr)
 		   to a normal state in accounting first */
 		itr = list_iterator_create(delete_list);
 		while ((found_record = list_next(itr))) {
-			if (found_record->state == BG_BLOCK_ERROR)
+			if (found_record->state & BG_BLOCK_ERROR_FLAG)
 				resume_block(found_record);
 		}
 		list_iterator_destroy(itr);
@@ -1486,7 +1505,7 @@ extern int select_p_update_block(update_block_msg_t *block_desc_ptr)
 
 		/* make sure if we are removing a block to put it back
 		   to a normal state in accounting first */
-		if (bg_record->state == BG_BLOCK_ERROR)
+		if (bg_record->state & BG_BLOCK_ERROR_FLAG)
 			resume_block(bg_record);
 
 		term_jobs_on_block(bg_record->bg_block_id);
@@ -1519,7 +1538,7 @@ extern int select_p_update_block(update_block_msg_t *block_desc_ptr)
 				error("select_p_update_block: "
 				      "rm_remove_partition(%s): %s",
 				      bg_record->bg_block_id,
-				      bridge_err_str(rc));
+				      bg_err_str(rc));
 			/* } */
 		} else
 			if (bg_conf->slurm_debug_flags & DEBUG_FLAG_SELECT_TYPE)
@@ -1575,12 +1594,12 @@ extern int select_p_update_sub_node (update_block_msg_t *block_desc_ptr)
 
 	memset(coord, 0, sizeof(coord));
 	memset(ionodes, 0, 128);
-	if (!block_desc_ptr->nodes) {
+	if (!block_desc_ptr->mp_str) {
 		error("update_sub_node: No name specified");
 		rc = ESLURM_INVALID_BLOCK_NAME;
 		goto end_it;
 	}
-	name = block_desc_ptr->nodes;
+	name = block_desc_ptr->mp_str;
 
 	while (name[j] != '\0') {
 		if (name[j] == '[') {
@@ -1659,7 +1678,7 @@ extern int select_p_update_sub_node (update_block_msg_t *block_desc_ptr)
 	}
 	node_name = xstrdup_printf("%s%s", bg_conf->slurm_node_prefix, coord);
 	/* find out how many nodecards to get for each ionode */
-	if (block_desc_ptr->state == BG_BLOCK_ERROR) {
+	if (block_desc_ptr->state == BG_BLOCK_ERROR_FLAG) {
 		info("Admin setting %s[%s] in an error state",
 		     node_name, ionodes);
 		for(i = 0; i<bg_conf->ionodes_per_mp; i++) {
@@ -1767,7 +1786,7 @@ extern int select_p_alter_node_cnt(enum select_node_cnt type, void *data)
 	int i;
 	uint16_t req_geometry[SYSTEM_DIMENSIONS];
 
-	if (!bg_conf->mp_node_cnt) {
+	if (!bg_conf->mp_cnode_cnt) {
 		fatal("select_p_alter_node_cnt: This can't be called "
 		      "before init");
 	}
@@ -1775,7 +1794,7 @@ extern int select_p_alter_node_cnt(enum select_node_cnt type, void *data)
 	switch (type) {
 	case SELECT_GET_NODE_SCALING:
 		if ((*nodes) != INFINITE)
-			(*nodes) = bg_conf->mp_node_cnt;
+			(*nodes) = bg_conf->mp_cnode_cnt;
 		break;
 	case SELECT_GET_NODE_CPU_CNT:
 		if ((*cpus) != (uint16_t)INFINITE)
@@ -1788,9 +1807,9 @@ extern int select_p_alter_node_cnt(enum select_node_cnt type, void *data)
 	case SELECT_SET_MP_CNT:
 		if (((*nodes) == INFINITE) || ((*nodes) == NO_VAL))
 			tmp = (*nodes);
-		else if ((*nodes) > bg_conf->mp_node_cnt) {
+		else if ((*nodes) > bg_conf->mp_cnode_cnt) {
 			tmp = (*nodes);
-			tmp /= bg_conf->mp_node_cnt;
+			tmp /= bg_conf->mp_cnode_cnt;
 			if (tmp < 1)
 				tmp = 1;
 		} else
@@ -1804,11 +1823,11 @@ extern int select_p_alter_node_cnt(enum select_node_cnt type, void *data)
 			 * don't scale up this value. */
 			break;
 		}
-		(*nodes) *= bg_conf->mp_node_cnt;
+		(*nodes) *= bg_conf->mp_cnode_cnt;
 		break;
 	case SELECT_APPLY_NODE_MAX_OFFSET:
 		if ((*nodes) != INFINITE)
-			(*nodes) *= bg_conf->mp_node_cnt;
+			(*nodes) *= bg_conf->mp_cnode_cnt;
 		break;
 	case SELECT_SET_NODE_CNT:
 		get_select_jobinfo(job_desc->select_jobinfo->data,
@@ -1832,7 +1851,7 @@ extern int select_p_alter_node_cnt(enum select_node_cnt type, void *data)
 			for (i=0; i<SYSTEM_DIMENSIONS; i++)
 				job_desc->min_nodes *=
 					(uint16_t)req_geometry[i];
-			job_desc->min_nodes *= bg_conf->mp_node_cnt;
+			job_desc->min_nodes *= bg_conf->mp_cnode_cnt;
 			job_desc->max_nodes = job_desc->min_nodes;
 		}
 
@@ -1852,18 +1871,18 @@ extern int select_p_alter_node_cnt(enum select_node_cnt type, void *data)
 			job_desc->max_nodes = job_desc->min_nodes;
 
 		/* See if min_nodes is greater than one base partition */
-		if (job_desc->min_nodes > bg_conf->mp_node_cnt) {
+		if (job_desc->min_nodes > bg_conf->mp_cnode_cnt) {
 			/*
 			 * if it is make sure it is a factor of
-			 * bg_conf->mp_node_cnt, if it isn't make it
+			 * bg_conf->mp_cnode_cnt, if it isn't make it
 			 * that way
 			 */
-			tmp = job_desc->min_nodes % bg_conf->mp_node_cnt;
+			tmp = job_desc->min_nodes % bg_conf->mp_cnode_cnt;
 			if (tmp > 0)
 				job_desc->min_nodes +=
-					(bg_conf->mp_node_cnt-tmp);
+					(bg_conf->mp_cnode_cnt-tmp);
 		}
-		tmp = job_desc->min_nodes / bg_conf->mp_node_cnt;
+		tmp = job_desc->min_nodes / bg_conf->mp_cnode_cnt;
 
 		/* this means it is greater or equal to one mp */
 		if (tmp > 0) {
@@ -1874,29 +1893,29 @@ extern int select_p_alter_node_cnt(enum select_node_cnt type, void *data)
 			job_desc->min_cpus = bg_conf->cpus_per_mp * tmp;
 		} else {
 #ifdef HAVE_BGL
-			if (job_desc->min_nodes <= bg_conf->nodecard_node_cnt
+			if (job_desc->min_nodes <= bg_conf->nodecard_cnode_cnt
 			    && bg_conf->nodecard_ionode_cnt)
 				job_desc->min_nodes =
-					bg_conf->nodecard_node_cnt;
+					bg_conf->nodecard_cnode_cnt;
 			else if (job_desc->min_nodes
-				 <= bg_conf->quarter_node_cnt)
+				 <= bg_conf->quarter_cnode_cnt)
 				job_desc->min_nodes =
-					bg_conf->quarter_node_cnt;
+					bg_conf->quarter_cnode_cnt;
 			else
 				job_desc->min_nodes =
-					bg_conf->mp_node_cnt;
+					bg_conf->mp_cnode_cnt;
 
 			set_select_jobinfo(job_desc->select_jobinfo->data,
 					   SELECT_JOBDATA_NODE_CNT,
 					   &job_desc->min_nodes);
 
-			tmp = bg_conf->mp_node_cnt/job_desc->min_nodes;
+			tmp = bg_conf->mp_cnode_cnt/job_desc->min_nodes;
 
 			job_desc->min_cpus = bg_conf->cpus_per_mp/tmp;
 			job_desc->min_nodes = 1;
 #else
 			i = bg_conf->smallest_block;
-			while (i <= bg_conf->mp_node_cnt) {
+			while (i <= bg_conf->mp_cnode_cnt) {
 				if (job_desc->min_nodes <= i) {
 					job_desc->min_nodes = i;
 					break;
@@ -1914,13 +1933,13 @@ extern int select_p_alter_node_cnt(enum select_node_cnt type, void *data)
 #endif
 		}
 
-		if (job_desc->max_nodes > bg_conf->mp_node_cnt) {
-			tmp = job_desc->max_nodes % bg_conf->mp_node_cnt;
+		if (job_desc->max_nodes > bg_conf->mp_cnode_cnt) {
+			tmp = job_desc->max_nodes % bg_conf->mp_cnode_cnt;
 			if (tmp > 0)
 				job_desc->max_nodes +=
-					(bg_conf->mp_node_cnt-tmp);
+					(bg_conf->mp_cnode_cnt-tmp);
 		}
-		tmp = job_desc->max_nodes / bg_conf->mp_node_cnt;
+		tmp = job_desc->max_nodes / bg_conf->mp_cnode_cnt;
 
 		if (tmp > 0) {
 			job_desc->max_nodes = tmp;
@@ -1929,24 +1948,24 @@ extern int select_p_alter_node_cnt(enum select_node_cnt type, void *data)
 			tmp = NO_VAL;
 		} else {
 #ifdef HAVE_BGL
-			if (job_desc->max_nodes <= bg_conf->nodecard_node_cnt
+			if (job_desc->max_nodes <= bg_conf->nodecard_cnode_cnt
 			    && bg_conf->nodecard_ionode_cnt)
 				job_desc->max_nodes =
-					bg_conf->nodecard_node_cnt;
+					bg_conf->nodecard_cnode_cnt;
 			else if (job_desc->max_nodes
-				 <= bg_conf->quarter_node_cnt)
+				 <= bg_conf->quarter_cnode_cnt)
 				job_desc->max_nodes =
-					bg_conf->quarter_node_cnt;
+					bg_conf->quarter_cnode_cnt;
 			else
 				job_desc->max_nodes =
-					bg_conf->mp_node_cnt;
+					bg_conf->mp_cnode_cnt;
 
-			tmp = bg_conf->mp_node_cnt/job_desc->max_nodes;
+			tmp = bg_conf->mp_cnode_cnt/job_desc->max_nodes;
 			job_desc->max_cpus = bg_conf->cpus_per_mp/tmp;
 			job_desc->max_nodes = 1;
 #else
 			i = bg_conf->smallest_block;
-			while (i <= bg_conf->mp_node_cnt) {
+			while (i <= bg_conf->mp_cnode_cnt) {
 				if (job_desc->max_nodes <= i) {
 					job_desc->max_nodes = i;
 					break;
@@ -1991,6 +2010,7 @@ extern int select_p_reconfigure(void)
 		      "change to be enforced in the bluegene plugin.",
 		      bg_conf->slurm_node_prefix, slurmctld_conf.node_prefix);
 	bg_conf->slurm_debug_flags = slurmctld_conf.debug_flags;
+	bg_conf->slurm_debug_level = slurmctld_conf.slurmctld_debug;
 	set_ba_debug_flags(bg_conf->slurm_debug_flags);
 	slurm_conf_unlock();
 

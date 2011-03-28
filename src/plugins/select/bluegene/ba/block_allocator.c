@@ -62,7 +62,7 @@
  */
 typedef struct {
 	int dim;
-	uint16_t geometry[HIGHEST_DIMENSIONS];
+	int geometry[HIGHEST_DIMENSIONS];
 	int in;
 	int out;
 } ba_path_switch_t;
@@ -112,7 +112,7 @@ static int _copy_the_path(List nodes, ba_switch_t *curr_switch,
 			  int source, int dim);
 
 /* */
-static int _find_yz_path(ba_mp_t *ba_node, uint16_t *first,
+static int _find_yz_path(ba_mp_t *ba_node, int *first,
 			 uint16_t *geometry, int conn_type);
 
 #ifndef HAVE_BG_FILES
@@ -144,12 +144,12 @@ static int _set_external_wires(int dim, int count, ba_mp_t* source,
 static char *_set_internal_wires(List nodes, int size, int conn_type);
 
 /* */
-static int _find_x_path(List results, ba_mp_t *ba_node, uint16_t *start,
+static int _find_x_path(List results, ba_mp_t *ba_node, int *start,
 			int x_size, int found, int conn_type,
 			block_algo_t algo);
 
 /* */
-static int _remove_node(List results, uint16_t *mp_tar);
+static int _remove_node(List results, int *mp_tar);
 
 /* */
 static int _find_next_free_using_port_2(ba_switch_t *curr_switch,
@@ -163,17 +163,15 @@ static int _find_next_free_using_port_2(ba_switch_t *curr_switch,
 /* */
 static int _finish_torus(List results,
 			 ba_switch_t *curr_switch, int source_port,
-			 int dim, int count, uint16_t *start);
+			 int dim, int count, int *start);
 /* */
-static uint16_t *_set_best_path();
+static int *_set_best_path();
 
 /* */
-static int _set_one_dim(uint16_t *start, uint16_t *end, uint16_t *coord);
+static int _set_one_dim(int *start, int *end, int *coord);
 
 /* */
 static void _destroy_geo(void *object);
-
-static int _coord(char coord);
 
 extern void destroy_ba_node(void *ptr)
 {
@@ -658,7 +656,7 @@ extern int copy_node_path(List nodes, List *dest_nodes)
 				     alpha_num[ba_node->coord[Y]],
 				     alpha_num[ba_node->coord[Z]]);
 			new_ba_node = ba_copy_mp(ba_node);
-			ba_setup_mp(new_ba_node, false);
+			ba_setup_mp(new_ba_node, false, false);
 			list_push(*dest_nodes, new_ba_node);
 
 		}
@@ -1017,7 +1015,7 @@ extern void reset_ba_system(bool track_down_nodes)
 		for (y = 0; y < DIM_SIZE[Y]; y++)
 			for (z = 0; z < DIM_SIZE[Z]; z++) {
 				ba_mp_t *ba_mp = &ba_main_grid[x][y][z];
-				ba_setup_mp(ba_mp, track_down_nodes);
+				ba_setup_mp(ba_mp, track_down_nodes, false);
 			}
 	}
 }
@@ -1056,9 +1054,9 @@ extern void init_grid(node_info_msg_t * node_info_ptr)
 		} else {
 			if ((i = strlen(host)) < 3)
 				continue;
-			x = _coord(host[i-3]);
-			y = _coord(host[i-2]);
-			z = _coord(host[i-1]);
+			x = select_char2coord(host[i-3]);
+			y = select_char2coord(host[i-2]);
+			z = select_char2coord(host[i-1]);
 		}
 
 		if ((x < 0) || (y < 0) || (z < 0))
@@ -1073,231 +1071,6 @@ extern void init_grid(node_info_msg_t * node_info_ptr)
 		}
 		ba_node->state = node_ptr->node_state;
 	}
-}
-
-#if defined HAVE_BG_FILES
-/*
- * Convert a BG API error code to a string
- * IN inx - error code from any of the BG Bridge APIs
- * RET - string describing the error condition
- */
-extern char *bg_err_str(status_t inx)
-{
-	switch (inx) {
-	case STATUS_OK:
-		return "Status OK";
-	case PARTITION_NOT_FOUND:
-		return "Partition not found";
-	case JOB_NOT_FOUND:
-		return "Job not found";
-	case BP_NOT_FOUND:
-		return "Base partition not found";
-	case SWITCH_NOT_FOUND:
-		return "Switch not found";
-#ifndef HAVE_BGL
-	case PARTITION_ALREADY_DEFINED:
-		return "Partition already defined";
-#endif
-	case JOB_ALREADY_DEFINED:
-		return "Job already defined";
-	case CONNECTION_ERROR:
-		return "Connection error";
-	case INTERNAL_ERROR:
-		return "Internal error";
-	case INVALID_INPUT:
-		return "Invalid input";
-	case INCOMPATIBLE_STATE:
-		return "Incompatible state";
-	case INCONSISTENT_DATA:
-		return "Inconsistent data";
-	}
-
-	return "?";
-}
-#endif
-
-/*
- * set the used wires in the virtual system for a block from the real system
- */
-extern int load_block_wiring(char *bg_block_id)
-{
-#if defined HAVE_BG_FILES
-	int rc, i, j;
-	rm_partition_t *block_ptr = NULL;
-	int cnt = 0;
-	int switch_cnt = 0;
-	rm_switch_t *curr_switch = NULL;
-	rm_BP_t *curr_mp = NULL;
-	char *switchid = NULL;
-	rm_connection_t curr_conn;
-	int dim;
-	ba_switch_t *ba_switch = NULL;
-	ba_mp_t *ba_mp = NULL;
-
-	if (ba_debug_flags & DEBUG_FLAG_BG_ALGO)
-		info("getting info for block %s", bg_block_id);
-
-	if ((rc = bridge_get_block(bg_block_id,  &block_ptr)) != STATUS_OK) {
-		error("bridge_get_block(%s): %s",
-		      bg_block_id,
-		      bg_err_str(rc));
-		return SLURM_ERROR;
-	}
-
-	if ((rc = bridge_get_data(block_ptr, RM_PartitionSwitchNum,
-				  &switch_cnt)) != STATUS_OK) {
-		error("bridge_get_data(RM_PartitionSwitchNum): %s",
-		      bg_err_str(rc));
-		return SLURM_ERROR;
-	}
-	if (!switch_cnt) {
-		if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP)
-			info("no switch_cnt");
-		if ((rc = bridge_get_data(block_ptr,
-					  RM_PartitionFirstBP,
-					  &curr_mp))
-		    != STATUS_OK) {
-			error("bridge_get_data: "
-			      "RM_PartitionFirstBP: %s",
-			      bg_err_str(rc));
-			return SLURM_ERROR;
-		}
-		if ((rc = bridge_get_data(curr_mp, RM_BPID, &switchid))
-		    != STATUS_OK) {
-			error("bridge_get_data: RM_SwitchBPID: %s",
-			      bg_err_str(rc));
-			return SLURM_ERROR;
-		}
-
-		ba_mp = loc2ba_mp(switchid);
-		if (!ba_mp) {
-			error("loc2ba_mp: mpid %s not known", switchid);
-			return SLURM_ERROR;
-		}
-		ba_mp->used |= BA_MP_USED_TRUE;
-		return SLURM_SUCCESS;
-	}
-	for (i=0; i<switch_cnt; i++) {
-		if (i) {
-			if ((rc = bridge_get_data(block_ptr,
-						  RM_PartitionNextSwitch,
-						  &curr_switch))
-			    != STATUS_OK) {
-				error("bridge_get_data: "
-				      "RM_PartitionNextSwitch: %s",
-				      bg_err_str(rc));
-				return SLURM_ERROR;
-			}
-		} else {
-			if ((rc = bridge_get_data(block_ptr,
-						  RM_PartitionFirstSwitch,
-						  &curr_switch))
-			    != STATUS_OK) {
-				error("bridge_get_data: "
-				      "RM_PartitionFirstSwitch: %s",
-				      bg_err_str(rc));
-				return SLURM_ERROR;
-			}
-		}
-		if ((rc = bridge_get_data(curr_switch, RM_SwitchDim, &dim))
-		    != STATUS_OK) {
-			error("bridge_get_data: RM_SwitchDim: %s",
-			      bg_err_str(rc));
-			return SLURM_ERROR;
-		}
-		if ((rc = bridge_get_data(curr_switch, RM_SwitchBPID,
-					  &switchid))
-		    != STATUS_OK) {
-			error("bridge_get_data: RM_SwitchBPID: %s",
-			      bg_err_str(rc));
-			return SLURM_ERROR;
-		}
-
-		ba_mp = loc2ba_mp(switchid);
-		if (!ba_mp) {
-			error("loc2ba_mp: mpid %s not known", switchid);
-			return SLURM_ERROR;
-		}
-
-		if ((rc = bridge_get_data(curr_switch, RM_SwitchConnNum, &cnt))
-		    != STATUS_OK) {
-			error("bridge_get_data: RM_SwitchBPID: %s",
-			      bg_err_str(rc));
-			return SLURM_ERROR;
-		}
-		if (ba_debug_flags & DEBUG_FLAG_BG_ALGO)
-			info("switch id = %s dim %d conns = %d",
-			     switchid, dim, cnt);
-		ba_switch = &ba_mp->axis_switch[dim];
-		for (j=0; j<cnt; j++) {
-			if (j) {
-				if ((rc = bridge_get_data(
-					     curr_switch,
-					     RM_SwitchNextConnection,
-					     &curr_conn))
-				    != STATUS_OK) {
-					error("bridge_get_data: "
-					      "RM_SwitchNextConnection: %s",
-					      bg_err_str(rc));
-					return SLURM_ERROR;
-				}
-			} else {
-				if ((rc = bridge_get_data(
-					     curr_switch,
-					     RM_SwitchFirstConnection,
-					     &curr_conn))
-				    != STATUS_OK) {
-					error("bridge_get_data: "
-					      "RM_SwitchFirstConnection: %s",
-					      bg_err_str(rc));
-					return SLURM_ERROR;
-				}
-			}
-
-			if (curr_conn.p1 == 1 && dim == X) {
-				if (ba_mp->used) {
-					debug("I have already been to "
-					      "this node %s",
-					      ba_mp->coord_str);
-					return SLURM_ERROR;
-				}
-				ba_mp->used |= BA_MP_USED_TEMP;
-			}
-			if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP)
-				info("connection going from %d -> %d",
-				     curr_conn.p1, curr_conn.p2);
-
-			if (ba_switch->int_wire[curr_conn.p1].used) {
-				debug("%s dim %d port %d "
-				      "is already in use",
-				      ba_mp->coord_str,
-				      dim,
-				      curr_conn.p1);
-				return SLURM_ERROR;
-			}
-			ba_switch->int_wire[curr_conn.p1].used = 1;
-			ba_switch->int_wire[curr_conn.p1].port_tar
-				= curr_conn.p2;
-
-			if (ba_switch->int_wire[curr_conn.p2].used) {
-				debug("%s dim %d port %d "
-				      "is already in use",
-				      ba_mp->coord_str,
-				      dim,
-				      curr_conn.p2);
-				return SLURM_ERROR;
-			}
-			ba_switch->int_wire[curr_conn.p2].used = 1;
-			ba_switch->int_wire[curr_conn.p2].port_tar
-				= curr_conn.p1;
-		}
-	}
-	return SLURM_SUCCESS;
-
-#else
-	return SLURM_ERROR;
-#endif
-
 }
 
 /* Rotate a 3-D geometry array through its six permutations */
@@ -1579,9 +1352,9 @@ static int _copy_the_path(List nodes, ba_switch_t *curr_switch,
 			  ba_switch_t *mark_switch,
 			  int source, int dim)
 {
-	uint16_t *mp_tar;
-	uint16_t *mark_mp_tar;
-	uint16_t *node_curr;
+	int *mp_tar;
+	int *mark_mp_tar;
+	int *node_curr;
 	int port_tar, port_tar1;
 	ba_switch_t *next_switch = NULL;
 	ba_switch_t *next_mark_switch = NULL;
@@ -1670,7 +1443,7 @@ static int _copy_the_path(List nodes, ba_switch_t *curr_switch,
 			ba_node = ba_copy_mp(&ba_main_grid[mark_mp_tar[X]]
 					     [mark_mp_tar[Y]]
 					     [mark_mp_tar[Z]]);
-			ba_setup_mp(ba_node, false);
+			ba_setup_mp(ba_node, false, false);
 			list_push(nodes, ba_node);
 			if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP)
 				info("haven't seen %c%c%c adding it",
@@ -1687,11 +1460,11 @@ static int _copy_the_path(List nodes, ba_switch_t *curr_switch,
 			      port_tar, dim);
 }
 
-static int _find_yz_path(ba_mp_t *ba_node, uint16_t *first,
+static int _find_yz_path(ba_mp_t *ba_node, int *first,
 			 uint16_t *geometry, int conn_type)
 {
 	ba_mp_t *next_node = NULL;
-	uint16_t *mp_tar = NULL;
+	int *mp_tar = NULL;
 	ba_switch_t *dim_curr_switch = NULL;
 	ba_switch_t *dim_next_switch = NULL;
 	int i2;
@@ -1955,8 +1728,8 @@ static int _emulate_ext_wiring(ba_mp_t ***grid)
 static int _reset_the_path(ba_switch_t *curr_switch, int source,
 			   int target, int dim)
 {
-	uint16_t *mp_tar;
-	uint16_t *node_curr;
+	int *mp_tar;
+	int *node_curr;
 	int port_tar, port_tar1;
 	ba_switch_t *next_switch = NULL;
 
@@ -2062,7 +1835,7 @@ extern void ba_create_system(int num_cpus, int *real_dims)
 					 alpha_num[ba_mp->coord[X]],
 					 alpha_num[ba_mp->coord[Y]],
 					 alpha_num[ba_mp->coord[Z]]);
-				ba_setup_mp(ba_mp, true);
+				ba_setup_mp(ba_mp, true, false);
 			}
 		}
 	}
@@ -2328,7 +2101,7 @@ static int _set_external_wires(int dim, int count, ba_mp_t* source,
 			       ba_mp_t* target)
 {
 
-#if defined HAVE_BG_FILES
+#ifdef HAVE_BG_FILES
 #ifdef HAVE_BGL
 
 #define UNDER_POS  7
@@ -2362,7 +2135,7 @@ static int _set_external_wires(int dim, int count, ba_mp_t* source,
 	}
 
 	if (!bg) {
-		if ((rc = bridge_get_bg(&bg)) != STATUS_OK) {
+		if ((rc = bridge_get_bg(&bg)) != SLURM_SUCCESS) {
 			error("bridge_get_BG(): %d", rc);
 			return -1;
 		}
@@ -2371,7 +2144,8 @@ static int _set_external_wires(int dim, int count, ba_mp_t* source,
 	if (bg == NULL)
 		return -1;
 
-	if ((rc = bridge_get_data(bg, RM_WireNum, &wire_num)) != STATUS_OK) {
+	if ((rc = bridge_get_data(bg, RM_WireNum, &wire_num))
+	    != SLURM_SUCCESS) {
 		error("bridge_get_data(RM_BPNum): %d", rc);
 		wire_num = 0;
 	}
@@ -2381,19 +2155,19 @@ static int _set_external_wires(int dim, int count, ba_mp_t* source,
 
 		if (i) {
 			if ((rc = bridge_get_data(bg, RM_NextWire, &my_wire))
-			    != STATUS_OK) {
+			    != SLURM_SUCCESS) {
 				error("bridge_get_data(RM_NextWire): %d", rc);
 				break;
 			}
 		} else {
 			if ((rc = bridge_get_data(bg, RM_FirstWire, &my_wire))
-			    != STATUS_OK) {
+			    != SLURM_SUCCESS) {
 				error("bridge_get_data(RM_FirstWire): %d", rc);
 				break;
 			}
 		}
 		if ((rc = bridge_get_data(my_wire, RM_WireID, &wire_id))
-		    != STATUS_OK) {
+		    != SLURM_SUCCESS) {
 			error("bridge_get_data(RM_FirstWire): %d", rc);
 			break;
 		}
@@ -2428,22 +2202,22 @@ static int _set_external_wires(int dim, int count, ba_mp_t* source,
 		free(wire_id);
 
 		if ((rc = bridge_get_data(my_wire, RM_WireFromPort, &my_port))
-		    != STATUS_OK) {
+		    != SLURM_SUCCESS) {
 			error("bridge_get_data(RM_FirstWire): %d", rc);
 			break;
 		}
 		if ((rc = bridge_get_data(my_port, RM_PortID, &from_port))
-		    != STATUS_OK) {
+		    != SLURM_SUCCESS) {
 			error("bridge_get_data(RM_PortID): %d", rc);
 			break;
 		}
 		if ((rc = bridge_get_data(my_wire, RM_WireToPort, &my_port))
-		    != STATUS_OK) {
+		    != SLURM_SUCCESS) {
 			error("bridge_get_data(RM_WireToPort): %d", rc);
 			break;
 		}
 		if ((rc = bridge_get_data(my_port, RM_PortID, &to_port))
-		    != STATUS_OK) {
+		    != SLURM_SUCCESS) {
 			error("bridge_get_data(RM_PortID): %d", rc);
 			break;
 		}
@@ -2740,12 +2514,11 @@ static char *_set_internal_wires(List nodes, int size, int conn_type)
 {
 	ba_mp_t* ba_node[size+1];
 	int count=0, i;
-	uint16_t *start = NULL;
-	uint16_t *end = NULL;
+	int *start = NULL;
+	int *end = NULL;
 	char *name = NULL;
 	ListIterator itr;
 	hostlist_t hostlist;
-	char temp_name[4];
 
 	if (!nodes)
 		return NULL;
@@ -2753,14 +2526,10 @@ static char *_set_internal_wires(List nodes, int size, int conn_type)
 	hostlist = hostlist_create(NULL);
 	itr = list_iterator_create(nodes);
 	while ((ba_node[count] = list_next(itr))) {
-		snprintf(temp_name, sizeof(temp_name), "%c%c%c",
-			 alpha_num[ba_node[count]->coord[X]],
-			 alpha_num[ba_node[count]->coord[Y]],
-			 alpha_num[ba_node[count]->coord[Z]]);
 		if (ba_debug_flags & DEBUG_FLAG_BG_ALGO_DEEP)
-			info("name = %s", temp_name);
+			info("name = %s", ba_node[count]->coord_str);
+		hostlist_push(hostlist, ba_node[count]->coord_str);
 		count++;
-		hostlist_push(hostlist, temp_name);
 	}
 	list_iterator_destroy(itr);
 
@@ -2808,7 +2577,7 @@ static char *_set_internal_wires(List nodes, int size, int conn_type)
  * RET: 0 on failure, 1 on success
  */
 static int _find_x_path(List results, ba_mp_t *ba_node,
-			uint16_t *start, int x_size,
+			int *start, int x_size,
 			int found, int conn_type, block_algo_t algo)
 {
 	ba_switch_t *curr_switch = NULL;
@@ -2819,7 +2588,7 @@ static int _find_x_path(List results, ba_mp_t *ba_node,
 	int target_port=1;
 	int broke = 0, not_first = 0;
 	int ports_to_try[2] = {4, 2};
-	uint16_t *mp_tar = NULL;
+	int *mp_tar = NULL;
 	int i = 0;
 	ba_mp_t *next_node = NULL;
 	ba_mp_t *check_node = NULL;
@@ -3170,7 +2939,7 @@ static int _find_x_path(List results, ba_mp_t *ba_node,
 	return 0;
 }
 
-static int _remove_node(List results, uint16_t *mp_tar)
+static int _remove_node(List results, int *mp_tar)
 {
 	ListIterator itr;
 	ba_mp_t *ba_node = NULL;
@@ -3218,8 +2987,8 @@ static int _find_next_free_using_port_2(ba_switch_t *curr_switch,
 	int port_tar;
 	int target_port = 0;
 	int port_to_try = 2;
-	uint16_t *mp_tar= curr_switch->ext_wire[0].mp_tar;
-	uint16_t *node_src = curr_switch->ext_wire[0].mp_tar;
+	int *mp_tar= curr_switch->ext_wire[0].mp_tar;
+	int *node_src = curr_switch->ext_wire[0].mp_tar;
 	int used = 0;
 	int broke = 0;
 	ba_mp_t *ba_node = NULL;
@@ -3362,7 +3131,7 @@ return_0:
 
 static int _finish_torus(List results,
 			 ba_switch_t *curr_switch, int source_port,
-			 int dim, int count, uint16_t *start)
+			 int dim, int count, int *start)
 {
 	ba_switch_t *next_switch = NULL;
 	ba_path_switch_t *path_add = xmalloc(sizeof(ba_path_switch_t));
@@ -3371,8 +3140,8 @@ static int _finish_torus(List results,
 	int port_tar;
 	int target_port=0;
 	int ports_to_try[2] = {3,5};
-	uint16_t *mp_tar= curr_switch->ext_wire[0].mp_tar;
-	uint16_t *node_src = curr_switch->ext_wire[0].mp_tar;
+	int *mp_tar= curr_switch->ext_wire[0].mp_tar;
+	int *node_src = curr_switch->ext_wire[0].mp_tar;
 	int i;
 	int used=0;
 	ListIterator itr;
@@ -3547,12 +3316,12 @@ static int _finish_torus(List results,
  * into the main virtual system.  With will also set the passthrough
  * flag if there was a passthrough used.
  */
-static uint16_t *_set_best_path()
+static int *_set_best_path()
 {
 	ListIterator itr;
 	ba_path_switch_t *path_switch = NULL;
 	ba_switch_t *curr_switch = NULL;
-	uint16_t *geo = NULL;
+	int *geo = NULL;
 
 	if (!best_path)
 		return NULL;
@@ -3590,7 +3359,7 @@ static uint16_t *_set_best_path()
 	return geo;
 }
 
-static int _set_one_dim(uint16_t *start, uint16_t *end, uint16_t *coord)
+static int _set_one_dim(int *start, int *end, int *coord)
 {
 	int dim;
 	ba_switch_t *curr_switch = NULL;
@@ -3616,14 +3385,5 @@ static void _destroy_geo(void *object)
 {
 	uint16_t *geo_ptr = (uint16_t *)object;
 	xfree(geo_ptr);
-}
-
-static int _coord(char coord)
-{
-	if ((coord >= '0') && (coord <= '9'))
-		return (coord - '0');
-	if ((coord >= 'A') && (coord <= 'Z'))
-		return (coord - 'A');
-	return -1;
 }
 

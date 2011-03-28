@@ -7586,7 +7586,7 @@ static int _unpack_block_info_members(block_info_t *block_info, Buf buffer,
 		for (i=0; i<count; i++)
 			safe_unpack16(&block_info->conn_type[i], buffer);
 
-		safe_unpackstr_xmalloc(&(block_info->ionodes),
+		safe_unpackstr_xmalloc(&(block_info->ionode_str),
 				       &uint32_tmp, buffer);
 		safe_unpackstr_xmalloc(&mp_inx_str, &uint32_tmp, buffer);
 		if (mp_inx_str == NULL) {
@@ -7611,9 +7611,9 @@ static int _unpack_block_info_members(block_info_t *block_info, Buf buffer,
 				       &uint32_tmp, buffer);
 		safe_unpackstr_xmalloc(&block_info->mloaderimage,
 				       &uint32_tmp, buffer);
-		safe_unpackstr_xmalloc(&(block_info->nodes), &uint32_tmp,
+		safe_unpackstr_xmalloc(&(block_info->mp_str), &uint32_tmp,
 				       buffer);
-		safe_unpack32(&block_info->node_cnt, buffer);
+		safe_unpack32(&block_info->cnode_cnt, buffer);
 		safe_unpack16(&block_info->node_use, buffer);
 		safe_unpackstr_xmalloc(&block_info->owner_name,
 				       &uint32_tmp, buffer);
@@ -7636,7 +7636,7 @@ static int _unpack_block_info_members(block_info_t *block_info, Buf buffer,
 			xfree(mp_inx_str);
 		}
 		safe_unpack16(&block_info->conn_type[0], buffer);
-		safe_unpackstr_xmalloc(&(block_info->ionodes),
+		safe_unpackstr_xmalloc(&(block_info->ionode_str),
 				       &uint32_tmp, buffer);
 		safe_unpackstr_xmalloc(&mp_inx_str, &uint32_tmp, buffer);
 		if (mp_inx_str == NULL) {
@@ -7650,9 +7650,9 @@ static int _unpack_block_info_members(block_info_t *block_info, Buf buffer,
 				       &uint32_tmp, buffer);
 		safe_unpackstr_xmalloc(&block_info->mloaderimage,
 				       &uint32_tmp, buffer);
-		safe_unpackstr_xmalloc(&(block_info->nodes), &uint32_tmp,
+		safe_unpackstr_xmalloc(&(block_info->mp_str), &uint32_tmp,
 				       buffer);
-		safe_unpack32(&block_info->node_cnt, buffer);
+		safe_unpack32(&block_info->cnode_cnt, buffer);
 		if (cluster_flags & CLUSTER_FLAG_BGL)
 			safe_unpack16(&block_info->node_use, buffer);
 		safe_unpackstr_xmalloc(&block_info->owner_name,
@@ -7676,7 +7676,7 @@ static int _unpack_block_info_members(block_info_t *block_info, Buf buffer,
 			xfree(mp_inx_str);
 		}
 		safe_unpack16(&block_info->conn_type[0], buffer);
-		safe_unpackstr_xmalloc(&(block_info->ionodes),
+		safe_unpackstr_xmalloc(&(block_info->ionode_str),
 				       &uint32_tmp, buffer);
 		safe_unpackstr_xmalloc(&mp_inx_str, &uint32_tmp, buffer);
 		if (mp_inx_str == NULL) {
@@ -7690,9 +7690,9 @@ static int _unpack_block_info_members(block_info_t *block_info, Buf buffer,
 				       &uint32_tmp, buffer);
 		safe_unpackstr_xmalloc(&block_info->mloaderimage,
 				       &uint32_tmp, buffer);
-		safe_unpackstr_xmalloc(&(block_info->nodes), &uint32_tmp,
+		safe_unpackstr_xmalloc(&(block_info->mp_str), &uint32_tmp,
 				       buffer);
-		safe_unpack32(&block_info->node_cnt, buffer);
+		safe_unpack32(&block_info->cnode_cnt, buffer);
 		if(cluster_flags & CLUSTER_FLAG_BGL)
 			safe_unpack16(&block_info->node_use, buffer);
 		safe_unpackstr_xmalloc(&block_info->owner_name,
@@ -7759,7 +7759,7 @@ static void _pack_block_info_msg(block_info_t *block_info, Buf buffer,
 		for (dim = 0; dim < cluster_dims; dim++)
 			pack16(block_info->conn_type[dim], buffer);
 
-		packstr(block_info->ionodes, buffer);
+		packstr(block_info->ionode_str, buffer);
 
 		if (block_info->ionode_inx) {
 			char *bitfmt =
@@ -7787,8 +7787,8 @@ static void _pack_block_info_msg(block_info_t *block_info, Buf buffer,
 
 		packstr(block_info->linuximage, buffer);
 		packstr(block_info->mloaderimage, buffer);
-		packstr(block_info->nodes, buffer);
-		pack32(block_info->node_cnt, buffer);
+		packstr(block_info->mp_str, buffer);
+		pack32(block_info->cnode_cnt, buffer);
 		pack16(block_info->node_use, buffer);
 		packstr(block_info->owner_name, buffer);
 		packstr(block_info->ramdiskimage, buffer);
@@ -7834,7 +7834,7 @@ static void _pack_block_info_msg(block_info_t *block_info, Buf buffer,
 
 		pack16(block_info->conn_type[0], buffer);
 
-		packstr(block_info->ionodes, buffer);
+		packstr(block_info->ionode_str, buffer);
 
 		if(block_info->ionode_inx) {
 			char *bitfmt =
@@ -7848,8 +7848,8 @@ static void _pack_block_info_msg(block_info_t *block_info, Buf buffer,
 
 		packstr(block_info->linuximage, buffer);
 		packstr(block_info->mloaderimage, buffer);
-		packstr(block_info->nodes, buffer);
-		pack32(block_info->node_cnt, buffer);
+		packstr(block_info->mp_str, buffer);
+		pack32(block_info->cnode_cnt, buffer);
 		if(cluster_flags & CLUSTER_FLAG_BGL)
 			pack16(block_info->node_use, buffer);
 		packstr(block_info->owner_name, buffer);
@@ -7894,7 +7894,7 @@ static void _pack_block_info_msg(block_info_t *block_info, Buf buffer,
 
 		pack16(block_info->conn_type[0], buffer);
 
-		packstr(block_info->ionodes, buffer);
+		packstr(block_info->ionode_str, buffer);
 
 		if(block_info->ionode_inx) {
 			char *bitfmt =
@@ -7908,8 +7908,8 @@ static void _pack_block_info_msg(block_info_t *block_info, Buf buffer,
 
 		packstr(block_info->linuximage, buffer);
 		packstr(block_info->mloaderimage, buffer);
-		packstr(block_info->nodes, buffer);
-		pack32(block_info->node_cnt, buffer);
+		packstr(block_info->mp_str, buffer);
+		pack32(block_info->cnode_cnt, buffer);
 		if(cluster_flags & CLUSTER_FLAG_BGL)
 			pack16(block_info->node_use, buffer);
 		packstr(block_info->owner_name, buffer);
@@ -8999,7 +8999,7 @@ unpack_error:
 static void _pack_kvs_host_rec(struct kvs_hosts *msg_ptr, Buf buffer,
 			       uint16_t protocol_version)
 {
-	pack16(msg_ptr->task_id, buffer);
+	pack32(msg_ptr->task_id, buffer);
 	pack16(msg_ptr->port, buffer);
 	packstr(msg_ptr->hostname, buffer);
 }
@@ -9009,7 +9009,7 @@ static int _unpack_kvs_host_rec(struct kvs_hosts *msg_ptr, Buf buffer,
 {
 	uint32_t uint32_tmp;
 
-	safe_unpack16(&msg_ptr->task_id, buffer);
+	safe_unpack32(&msg_ptr->task_id, buffer);
 	safe_unpack16(&msg_ptr->port, buffer);
 	safe_unpackstr_xmalloc(&msg_ptr->hostname, &uint32_tmp, buffer);
 	return SLURM_SUCCESS;
@@ -9146,8 +9146,8 @@ unpack_error:
 static void _pack_kvs_get(kvs_get_msg_t *msg_ptr, Buf buffer,
 			  uint16_t protocol_version)
 {
-	pack16((uint16_t)msg_ptr->task_id, buffer);
-	pack16((uint16_t)msg_ptr->size, buffer);
+	pack32((uint32_t)msg_ptr->task_id, buffer);
+	pack32((uint32_t)msg_ptr->size, buffer);
 	pack16((uint16_t)msg_ptr->port, buffer);
 	packstr(msg_ptr->hostname, buffer);
 }
@@ -9160,8 +9160,8 @@ static int  _unpack_kvs_get(kvs_get_msg_t **msg_ptr, Buf buffer,
 
 	msg = xmalloc(sizeof(struct kvs_get_msg));
 	*msg_ptr = msg;
-	safe_unpack16(&msg->task_id, buffer);
-	safe_unpack16(&msg->size, buffer);
+	safe_unpack32(&msg->task_id, buffer);
+	safe_unpack32(&msg->size, buffer);
 	safe_unpack16(&msg->port, buffer);
 	safe_unpackstr_xmalloc(&msg->hostname, &uint32_tmp, buffer);
 	return SLURM_SUCCESS;

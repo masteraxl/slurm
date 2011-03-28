@@ -54,6 +54,7 @@
 
 #include "other_select.h"
 #include "basil_interface.h"
+#include "cray_config.h"
 
 /* These are defined here so when we link with something other than
  * the slurmctld we will have these symbols defined.  They will get
@@ -134,7 +135,13 @@ extern int init ( void )
 	 * if (slurmctld_conf.select_type_param & CR_CONS_RES)
 	 *	plugin_id = 105;
 	 */
-#ifndef HAVE_CRAY
+#ifdef HAVE_CRAY
+	if (bg_recover != NOT_FROM_CONTROLLER) {
+		verbose("%s loading...", plugin_name);
+		create_config();
+		verbose("Cray plugin loaded successfully");
+	}
+#else
 	if (bg_recover != NOT_FROM_CONTROLLER)
 		fatal("select/cray is incompatible with a non Cray system");
 #endif
@@ -143,6 +150,7 @@ extern int init ( void )
 
 extern int fini ( void )
 {
+	destroy_config();
 	return SLURM_SUCCESS;
 }
 
@@ -277,6 +285,13 @@ extern int select_p_job_expand(struct job_record *from_job_ptr,
 			       struct job_record *to_job_ptr)
 {
 	return ESLURM_NOT_SUPPORTED;
+}
+
+extern int select_p_job_signal(struct job_record *job_ptr, int signal)
+{
+	if (do_basil_signal(job_ptr, signal) != SLURM_SUCCESS)
+		return SLURM_ERROR;
+	return other_job_signal(job_ptr, signal);
 }
 
 extern int select_p_job_fini(struct job_record *job_ptr)
@@ -699,15 +714,6 @@ extern bitstr_t * select_p_resv_test(bitstr_t *avail_bitmap, uint32_t node_cnt)
 	return other_resv_test(avail_bitmap, node_cnt);
 }
 
-static int _coord(char coord)
-{
-	if ((coord >= '0') && (coord <= '9'))
-		return (coord - '0');
-	if ((coord >= 'A') && (coord <= 'Z'))
-		return (coord - 'A') + 10;
-	return -1;
-}
-
 extern void select_p_ba_init(node_info_msg_t *node_info_ptr, bool sanity_check)
 {
 	if (select_cray_dim_size[0] == -1) {
@@ -720,7 +726,8 @@ extern void select_p_ba_init(node_info_msg_t *node_info_ptr, bool sanity_check)
 			    (strlen(node_ptr->node_addr) != 3))
 				continue;
 			for (j = 0; j < 3; j++) {
-				offset = _coord(node_ptr->node_addr[j]);
+				offset = select_char2coord(
+					node_ptr->node_addr[j]);
 				select_cray_dim_size[j] = MAX((offset+1),
 						select_cray_dim_size[j]);
 			}

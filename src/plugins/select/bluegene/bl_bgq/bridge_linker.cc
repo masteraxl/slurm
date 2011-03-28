@@ -36,6 +36,23 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA.
 \*****************************************************************************/
 
+#if HAVE_CONFIG_H
+/* needed to figure out if HAVE_BG_FILES is set */
+#  include "config.h"
+#endif
+
+#ifdef HAVE_BG_FILES
+/* These need to be the first declared since on line 187 of
+ * /bgsys/drivers/ppcfloor/extlib/include/log4cxx/helpers/transcoder.h
+ * there is a nice generic BUFSIZE declared and the BUFSIZE declared
+ * elsewhere in SLURM will cause errors when compiling.
+ */
+#include <log4cxx/fileappender.h>
+#include <log4cxx/logger.h>
+#include <log4cxx/patternlayout.h>
+
+#endif
+
 extern "C" {
 #include "../ba_bgq/block_allocator.h"
 #include "../bg_record_functions.h"
@@ -57,51 +74,28 @@ static void _setup_ba_mp(ComputeHardware::ConstPtr bgq, ba_mp_t *ba_mp)
 	// int i;
 	Midplane::Coordinates coords = {{ba_mp->coord[A], ba_mp->coord[X],
 					 ba_mp->coord[Y], ba_mp->coord[Z]}};
-	Midplane::ConstPtr mp_ptr = bgq->getMidplane(coords);
+	Midplane::ConstPtr mp_ptr;
+	int i;
+
+	try {
+		mp_ptr = bgq->getMidplane(coords);
+	} catch (const bgsched::InputException& err) {
+		int rc = bridge_handle_input_errors(
+			"ComputeHardware::getMidplane",
+			err.getError().toValue(), NULL);
+		if (rc != SLURM_SUCCESS)
+			return;
+	}
 
 	ba_mp->loc = xstrdup(mp_ptr->getLocation().c_str());
 
-	// info("%s which is %c%c%c%c is setup",
-	//      ba_mp->loc,
-	//      alpha_num[ba_mp->coord[A]],
-	//      alpha_num[ba_mp->coord[X]],
-	//      alpha_num[ba_mp->coord[Y]],
-	//      alpha_num[ba_mp->coord[Z]]);
-	// for (i=0; i < SYSTEM_DIMENSIONS; i++) {
-	// 	Switch::ConstPtr bg_switch = mp_ptr->getSwitch(
-	// 		(bgsched::Dimension::Value)i);
-	// 	switch (bg_switch.getInUse().Value()) {
-	// 	case Switch::NotInUse:
-	// 		ba_mp->axis_switch[i].usage = BG_SWITCH_NONE;
-	// 		break;
-	// 	case Switch::IncludedBothPortsInUse:
-	// 		ba_mp->axis_switch[i].usage = BG_SWITCH_TORUS;
-	// 		break;
-	// 	case Switch::IncludedOutputPortInUse:
-	// 		ba_mp->axis_switch[i].usage =
-	// 			(BG_SWITCH_OUT | BG_SWITCH_OUT_PASS);
-	// 		break;
-	// 	case Switch::IncludedInputPortInUse:
-	// 		ba_mp->axis_switch[i].usage =
-	// 			(BG_SWITCH_IN | BG_SWITCH_IN_PASS);
-	// 		break;
-	// 	case Switch::Wrapped:
-	// 		ba_mp->axis_switch[i].usage = BG_SWITCH_WRAPPED;
-	// 		break;
-	// 	case Switch::Passthrough:
-	// 		ba_mp->axis_switch[i].usage = BG_SWITCH_PASS;
-	// 		break;
-	// 	case Switch::WrappedPassthrough:
-	// 		ba_mp->axis_switch[i].usage = BG_SWITCH_WRAPPED_PASS;
-	// 		break;
-	// 	default:
-	// 		error("unknown switch conf");
-	// 		break;
-	// 	}
-	// 	info("mp %s(%d) usage is %s", ba_mp->coord_str,
-	// 	     i, ba_switch_usage_str(ba_mp->axis_switch[i].usage);
-
-	// }
+	ba_mp->nodecard_loc =
+		(char **)xmalloc(sizeof(char *) * bg_conf->mp_nodecard_cnt);
+	for (i=0; i<bg_conf->mp_nodecard_cnt; i++) {
+		NodeBoard::ConstPtr nodeboard = mp_ptr->getNodeBoard(i);
+		ba_mp->nodecard_loc[i] =
+			xstrdup(nodeboard->getLocation().c_str());
+	}
 }
 #endif
 
@@ -170,9 +164,9 @@ static void _remove_jobs_on_block_and_reset(char *block_id)
 		      bg_record->user_name);
 
 		if (job_remove_failed) {
-			if (bg_record->nodes)
+			if (bg_record->mp_str)
 				slurm_drain_nodes(
-					bg_record->nodes,
+					bg_record->mp_str,
 					(char *)
 					"_term_agent: Couldn't remove job",
 					slurm_get_slurm_user_id());
@@ -201,6 +195,8 @@ extern int bridge_init(char *properties_file)
 		return 0;
 
 #ifdef HAVE_BG_FILES
+	if (!properties_file)
+		properties_file = (char *)"";
 	bgsched::init(properties_file);
 #endif
 	bridge_status_init();
@@ -218,26 +214,11 @@ extern int bridge_fini()
 	return SLURM_SUCCESS;
 }
 
-/*
- * Convert a BG API error code to a string
- * IN inx - error code from any of the BG Bridge APIs
- * RET - string describing the error condition
- */
-extern const char *bridge_err_str(int inx)
-{
-	// switch (inx) {
-	// }
-
-	return "?";
-}
-
 extern int bridge_get_size(int *size)
 {
 #ifdef HAVE_BG_FILES
         Midplane::Coordinates bgq_size;
 	Dimension dim;
-#else
-	int dim;
 #endif
 	if (!bridge_init(NULL))
 		return SLURM_ERROR;
@@ -279,12 +260,12 @@ extern int bridge_setup_system()
 
 extern int bridge_block_create(bg_record_t *bg_record)
 {
-	ListIterator itr = NULL;
 	int rc = SLURM_SUCCESS;
 
 #ifdef HAVE_BG_FILES
 	Block::Ptr block_ptr;
 	Block::Midplanes midplanes;
+	Block::NodeBoards nodecards;
         Block::PassthroughMidplanes pt_midplanes;
         Block::DimensionConnectivity conn_type;
 	Midplane::Ptr midplane;
@@ -294,13 +275,6 @@ extern int bridge_block_create(bg_record_t *bg_record)
 
 	if (!bridge_init(NULL))
 		return SLURM_ERROR;
-
-#ifdef HAVE_BG_FILES
-	if (bg_record->node_cnt < bg_conf->mp_node_cnt) {
-		info("we can't make small blocks yet");
-		return SLURM_ERROR;
-	}
-#endif
 
 	if (!bg_record->ba_mp_list || !list_count(bg_record->ba_mp_list)) {
 		error("There are no midplanes in this block?");
@@ -328,34 +302,93 @@ extern int bridge_block_create(bg_record_t *bg_record)
 
 
 #ifdef HAVE_BG_FILES
-	itr = list_iterator_create(bg_record->ba_mp_list);
-	while ((ba_mp = (ba_mp_t *)list_next(itr))) {
-		if (ba_mp->used)
-			midplanes.push_back(ba_mp->loc);
-		else
-			pt_midplanes.push_back(ba_mp->loc);
-	}
-	list_iterator_destroy(itr);
+	if (bg_record->cnode_cnt < bg_conf->mp_cnode_cnt) {
+		bool use_nc[bg_conf->mp_nodecard_cnt];
+		int i, nc_pos = 0, num_ncards = 0;
 
-        for (dim=Dimension::A; dim<=Dimension::D; dim++) {
-		switch (bg_record->conn_type[dim]) {
-		case SELECT_MESH:
-			conn_type[dim] = Block::Connectivity::Mesh;
-			break;
-		case SELECT_TORUS:
-		default:
-			conn_type[dim] = Block::Connectivity::Torus;
-			break;
+		num_ncards = bg_record->cnode_cnt/bg_conf->nodecard_cnode_cnt;
+		if (num_ncards < 1) {
+			error("You have to have at least 1 nodecard to make "
+			      "a small block I got %d/%d = %d",
+			      bg_record->cnode_cnt, bg_conf->nodecard_cnode_cnt,
+			      num_ncards);
+			return SLURM_ERROR;
 		}
-	}
-	try {
-		block_ptr = Block::create(midplanes, pt_midplanes, conn_type);
-	} catch (const bgsched::InputException& err) {
-		rc = bridge_handle_input_errors("Block::create",
-						err.getError().toValue(),
-						bg_record);
-		if (rc != SLURM_SUCCESS)
-			return rc;
+		memset(use_nc, 0, sizeof(use_nc));
+
+		/* find out how many nodecards to get for each ionode */
+		for (i = 0; i<bg_conf->ionodes_per_mp; i++) {
+			if (bit_test(bg_record->ionode_bitmap, i)) {
+				for (int j=0; j<bg_conf->nc_ratio; j++)
+					use_nc[nc_pos+j] = 1;
+			}
+			nc_pos += bg_conf->nc_ratio;
+		}
+		// char tmp_char[256];
+		// format_node_name(bg_record, tmp_char, sizeof(tmp_char));
+		// info("creating %s %s", bg_record->bg_block_id, tmp_char);
+		ba_mp = (ba_mp_t *)list_peek(bg_record->ba_mp_list);
+		/* Since the nodeboard locations aren't set up in the
+		   copy of this pointer we need to go out a get the
+		   real one from the system and use it.
+		*/
+		ba_mp = coord2ba_mp(ba_mp->coord);
+		for (i=0; i<bg_conf->mp_nodecard_cnt; i++) {
+			if (use_nc[i])
+				nodecards.push_back(ba_mp->nodecard_loc[i]);
+		}
+
+		try {
+			block_ptr = Block::create(nodecards);
+		} catch (const bgsched::InputException& err) {
+			rc = bridge_handle_input_errors(
+				"Block::createSmallBlock",
+				err.getError().toValue(),
+				bg_record);
+			if (rc != SLURM_SUCCESS)
+				return rc;
+		}
+	} else {
+		ListIterator itr = list_iterator_create(bg_record->ba_mp_list);
+		while ((ba_mp = (ba_mp_t *)list_next(itr))) {
+			/* Since the midplane locations aren't set up in the
+			   copy of this pointer we need to go out a get the
+			   real one from the system and use it.
+			*/
+			ba_mp_t *main_mp = coord2ba_mp(ba_mp->coord);
+			info("got %s(%s) %d", main_mp->coord_str,
+			     main_mp->loc, ba_mp->used);
+			if (ba_mp->used)
+				midplanes.push_back(main_mp->loc);
+			else
+				pt_midplanes.push_back(main_mp->loc);
+		}
+		list_iterator_destroy(itr);
+
+		for (dim=Dimension::A; dim<=Dimension::D; dim++) {
+			switch (bg_record->conn_type[dim]) {
+			case SELECT_MESH:
+				conn_type[dim] = Block::Connectivity::Mesh;
+				break;
+			case SELECT_TORUS:
+			default:
+				conn_type[dim] = Block::Connectivity::Torus;
+				break;
+			}
+		}
+		try {
+			block_ptr = Block::create(midplanes,
+						  pt_midplanes, conn_type);
+		} catch (const bgsched::InputException& err) {
+			rc = bridge_handle_input_errors(
+				"Block::create",
+				err.getError().toValue(),
+				bg_record);
+			if (rc != SLURM_SUCCESS) {
+				assert(0);
+				return rc;
+			}
+		}
 	}
 
 	info("block created correctly");
@@ -411,6 +444,64 @@ extern int bridge_block_boot(bg_record_t *bg_record)
 		return SLURM_ERROR;
 
 #ifdef HAVE_BG_FILES
+	/* Lets see if we are connected to the IO. */
+	try {
+		uint32_t avail, unavail;
+		Block::checkIOLinksSummary(bg_record->bg_block_id,
+					   &avail, &unavail);
+	} catch (const bgsched::DatabaseException& err) {
+		rc = bridge_handle_database_errors("Block::checkIOLinksSummary",
+						   err.getError().toValue());
+		if (rc != SLURM_SUCCESS)
+			return rc;
+	} catch (const bgsched::InputException& err) {
+		rc = bridge_handle_input_errors("Block::checkIOLinksSummary",
+						err.getError().toValue(),
+						bg_record);
+		if (rc != SLURM_SUCCESS)
+			return rc;
+	} catch (const bgsched::InternalException& err) {
+		rc = bridge_handle_internal_errors("Block::checkIOLinksSummary",
+						err.getError().toValue());
+		if (rc != SLURM_SUCCESS)
+			return rc;
+	} catch (...) {
+                error("checkIOLinksSummary request failed ... continuing.");
+		rc = SLURM_ERROR;
+	}
+
+	try {
+		std::vector<std::string> mp_vec;
+		if (!Block::isIOConnected(bg_record->bg_block_id, &mp_vec)) {
+			error("block %s is not IOConnected, "
+			      "contact your admin. Midplanes not "
+			      "connected are ...", bg_record->bg_block_id);
+			BOOST_FOREACH(const std::string& mp, mp_vec) {
+				error("%s", mp.c_str());
+			}
+			return SLURM_ERROR;
+		}
+	} catch (const bgsched::DatabaseException& err) {
+		rc = bridge_handle_database_errors("Block::isIOConnected",
+						   err.getError().toValue());
+		if (rc != SLURM_SUCCESS)
+			return rc;
+	} catch (const bgsched::InputException& err) {
+		rc = bridge_handle_input_errors("Block::isIOConnected",
+						err.getError().toValue(),
+						bg_record);
+		if (rc != SLURM_SUCCESS)
+			return rc;
+	} catch (const bgsched::InternalException& err) {
+		rc = bridge_handle_internal_errors("Block::isIOConnected",
+						err.getError().toValue());
+		if (rc != SLURM_SUCCESS)
+			return rc;
+	} catch (...) {
+                error("isIOConnected request failed ... continuing.");
+		rc = SLURM_ERROR;
+	}
+
 	if (bridge_block_set_owner(
 		    bg_record, bg_conf->slurm_user_name) != SLURM_SUCCESS)
 		return SLURM_ERROR;
@@ -559,9 +650,8 @@ extern int bridge_block_add_user(bg_record_t *bg_record, char *user_name)
 		if (rc != SLURM_SUCCESS)
 			return rc;
 	} catch(...) {
-		// FIXME: this should do something, but for now we won't
-//                error("Remove block request failed ... continuing.");
-//		rc = SLURM_ERROR;
+                error("Add block user request failed ... continuing.");
+		rc = SLURM_ERROR;
 	}
 #endif
 	return rc;
@@ -576,14 +666,26 @@ extern int bridge_block_remove_user(bg_record_t *bg_record, char *user_name)
 	if (!bg_record || !bg_record->bg_block_id || !user_name)
 		return SLURM_ERROR;
 
-	info("removing user %s from block %s", user_name, bg_record->bg_block_id);
+	info("removing user %s from block %s",
+	     user_name, bg_record->bg_block_id);
 #ifdef HAVE_BG_FILES
         try {
 		Block::removeUser(bg_record->bg_block_id, user_name);
+	} catch (const bgsched::InputException& err) {
+		rc = bridge_handle_input_errors("Block::removeUser",
+						err.getError().toValue(),
+						bg_record);
+		if (rc != SLURM_SUCCESS)
+			return rc;
+	} catch (const bgsched::RuntimeException& err) {
+		rc = bridge_handle_runtime_errors("Block::removeUser",
+						  err.getError().toValue(),
+						  bg_record);
+		if (rc != SLURM_SUCCESS)
+			return rc;
 	} catch(...) {
- 		// FIXME: this should do something, but for now we won't
-               // error("Remove block request failed ... continuing.");
-	       // 	rc = REMOVE_USER_ERR;
+                error("Remove block user request failed ... continuing.");
+	        	rc = REMOVE_USER_ERR;
 	}
 #endif
 	return rc;
@@ -605,7 +707,20 @@ extern int bridge_block_remove_all_users(bg_record_t *bg_record,
 		return SLURM_ERROR;
 
 #ifdef HAVE_BG_FILES
-	vec = Block::getUsers(bg_record->bg_block_id);
+	try {
+		vec = Block::getUsers(bg_record->bg_block_id);
+	} catch (const bgsched::InputException& err) {
+		bridge_handle_input_errors(
+			"Block::getUsers",
+			err.getError().toValue(), bg_record);
+		return REMOVE_USER_NONE;
+	} catch (const bgsched::RuntimeException& err) {
+		bridge_handle_runtime_errors(
+			"Block::getUsers",
+			err.getError().toValue(), bg_record);
+		return REMOVE_USER_NONE;
+	}
+
 	if (vec.empty())
 		return REMOVE_USER_NONE;
 
@@ -640,12 +755,6 @@ extern int bridge_block_set_owner(bg_record_t *bg_record, char *user_name)
 		rc = bridge_block_add_user(bg_record, user_name);
 
 	return rc;
-}
-
-extern int bridge_block_get_and_set_mps(bg_record_t *bg_record)
-{
-
-	return SLURM_ERROR;
 }
 
 extern int bridge_blocks_load_curr(List curr_block_list)
@@ -692,19 +801,25 @@ extern int bridge_blocks_load_curr(List curr_block_list)
 		bg_record->state = bridge_translate_status(
 			block_ptr->getStatus().toValue());
 
-		if (bg_record->state == BG_BLOCK_BOOTING)
-			bg_record->boot_state = 1;
-
 		debug3("Block %s is in state %d",
 		       bg_record->bg_block_id,
 		       bg_record->state);
 
-		bg_record->node_cnt = block_ptr->getComputeNodeCount();
-		bg_record->cpu_cnt = bg_conf->cpu_ratio * bg_record->node_cnt;
 		bg_record->job_running = NO_JOB_RUNNING;
+		/* we are just going to go and destroy this block so
+		   just throw get the name and continue. */
+		if (!bg_recover)
+			continue;
+
+		if (bg_record->state == BG_BLOCK_BOOTING)
+			bg_record->boot_state = 1;
+
+		bg_record->cnode_cnt = block_ptr->getComputeNodeCount();
+		bg_record->cpu_cnt = bg_conf->cpu_ratio * bg_record->cnode_cnt;
+
 		if (block_ptr->isSmall()) {
 			char bitstring[BITSIZE];
-			int io_cnt, io_start;
+			int io_cnt, io_start, len;
 			Block::NodeBoards nodeboards =
 				block_ptr->getNodeBoards();
 			int nb_cnt = nodeboards.size();
@@ -716,10 +831,9 @@ extern int bridge_blocks_load_curr(List curr_block_list)
 			/* From the first nodecard id we can figure
 			   out where to start from with the alloc of ionodes.
 			*/
-			io_start = atoi((char*)nb_name.c_str()+1)
+			len = nb_name.length()-2;
+			io_start = atoi((char*)nb_name.c_str()+len)
 				* bg_conf->io_ratio;
-			info("got nb name of %s %d %d",
-			     nb_name.c_str(), io_start, nb_cnt);
 
 			bg_record->ionode_bitmap =
 				bit_alloc(bg_conf->ionodes_per_mp);
@@ -727,10 +841,10 @@ extern int bridge_blocks_load_curr(List curr_block_list)
 			bit_nset(bg_record->ionode_bitmap,
 				 io_start, io_start+io_cnt);
 			bit_fmt(bitstring, BITSIZE, bg_record->ionode_bitmap);
-			bg_record->ionodes = xstrdup(bitstring);
+			bg_record->ionode_str = xstrdup(bitstring);
 			debug3("%s uses ionodes %s",
 			       bg_record->bg_block_id,
-			       bg_record->ionodes);
+			       bg_record->ionode_str);
 			bg_record->conn_type[0] = SELECT_SMALL;
 		} else {
 			for (dim=Dimension::A; dim<=Dimension::D; dim++) {
@@ -740,7 +854,7 @@ extern int bridge_blocks_load_curr(List curr_block_list)
 			}
 			/* Set the bitmap blank here if it is a full
 			   node we don't want anything set we also
-			   don't want the bg_record->ionodes set.
+			   don't want the bg_record->ionode_str set.
 			*/
 			bg_record->ionode_bitmap =
 				bit_alloc(bg_conf->ionodes_per_mp);
@@ -763,9 +877,9 @@ extern int bridge_blocks_load_curr(List curr_block_list)
 
 			hostlist_push(hostlist, temp);
 		}
-		bg_record->nodes = hostlist_ranged_string_xmalloc(hostlist);
+		bg_record->mp_str = hostlist_ranged_string_xmalloc(hostlist);
 		hostlist_destroy(hostlist);
-		debug3("got nodes of %s", bg_record->nodes);
+		debug3("got nodes of %s", bg_record->mp_str);
 
 		process_nodes(bg_record, true);
 
@@ -802,11 +916,11 @@ extern int bridge_blocks_load_curr(List curr_block_list)
 			 bg_block_id);
 
 		xfree(bg_block_id);
-		if (strcmp(temp, bg_record->nodes)) {
+		if (strcmp(temp, bg_record->mp_str)) {
 			fatal("bad wiring in preserved state "
 			      "(found %s, but allocated %s) "
 			      "YOU MUST COLDSTART",
-			      bg_record->nodes, temp);
+			      bg_record->mp_str, temp);
 		}
 
 		/* If a user is on the block this will be filled in */
@@ -858,40 +972,100 @@ extern void bridge_block_post_job(char *bg_block_id)
 	_remove_jobs_on_block_and_reset(bg_block_id);
 }
 
-// extern int bridge_set_log_params(char *api_file_name, unsigned int level)
-// {
-// 	static FILE *fp = NULL;
-//         FILE *fp2 = NULL;
-// 	int rc = SLURM_SUCCESS;
+extern int bridge_set_log_params(char *api_file_name, unsigned int level)
+{
+	if (!bridge_init(NULL))
+		return SLURM_ERROR;
 
-// 	if (!bridge_init())
-// 		return SLURM_ERROR;
+	if (!bg_conf->bridge_api_file)
+		return SLURM_SUCCESS;
 
-// 	slurm_mutex_lock(&api_file_mutex);
-// 	if (fp)
-// 		fp2 = fp;
+#ifdef HAVE_BG_FILES
+	// Scheduler APIs use the loggers under ibm.
+	log4cxx::LoggerPtr logger_ptr(log4cxx::Logger::getLogger("ibm"));
+	// Set the pattern for output.
+	log4cxx::LayoutPtr layout_ptr(
+		new log4cxx::PatternLayout(
+			"[%d{yyyy-MM-ddTHH:mm:ss}] %p: %c: %m [%t]%n"));
+	// Set the log file
+	log4cxx::AppenderPtr appender_ptr(
+		new log4cxx::FileAppender(layout_ptr,
+					  bg_conf->bridge_api_file));
+	log4cxx::LevelPtr level_ptr;
 
-// 	fp = fopen(api_file_name, "a");
+	// Get rid of the console appender.
+	logger_ptr->removeAllAppenders();
 
-// 	if (fp == NULL) {
-// 		error("can't open file for bridgeapi.log at %s: %m",
-// 		      api_file_name);
-// 		rc = SLURM_ERROR;
-// 		goto end_it;
-// 	}
+	switch (level) {
+	case 0:
+		level_ptr = log4cxx::Level::getOff();
+		break;
+	case 1:
+		level_ptr = log4cxx::Level::getFatal();
+		break;
+	case 2:
+		level_ptr = log4cxx::Level::getError();
+		break;
+	case 3:
+		level_ptr = log4cxx::Level::getWarn();
+		break;
+	case 4:
+		level_ptr = log4cxx::Level::getInfo();
+		break;
+	case 5:
+		level_ptr = log4cxx::Level::getDebug();
+		break;
+	case 6:
+		level_ptr = log4cxx::Level::getTrace();
+		break;
+	case 7:
+		level_ptr = log4cxx::Level::getAll();
+		break;
+	default:
+		level_ptr = log4cxx::Level::getDebug();
+		break;
+	}
+	// Now set the level of debug
+	logger_ptr->setLevel(level_ptr);
+	// Add the appender to the ibm logger.
+	logger_ptr->addAppender(appender_ptr);
 
+	// for (int i=1; i<7; i++) {
+	// switch (i) {
+	// case 0:
+	// 	level_ptr = log4cxx::Level::getOff();
+	// 	break;
+	// case 1:
+	// 	level_ptr = log4cxx::Level::getFatal();
+	// 	break;
+	// case 2:
+	// 	level_ptr = log4cxx::Level::getError();
+	// 	break;
+	// case 3:
+	// 	level_ptr = log4cxx::Level::getWarn();
+	// 	break;
+	// case 4:
+	// 	level_ptr = log4cxx::Level::getInfo();
+	// 	break;
+	// case 5:
+	// 	level_ptr = log4cxx::Level::getDebug();
+	// 	break;
+	// case 6:
+	// 	level_ptr = log4cxx::Level::getTrace();
+	// 	break;
+	// case 7:
+	// 	level_ptr = log4cxx::Level::getAll();
+	// 	break;
+	// default:
+	// 	level_ptr = log4cxx::Level::getDebug();
+	// 	break;
+	// }
+	// if (logger_ptr->isEnabledFor(level_ptr))
+	// 	info("we are doing %d", i);
+	// }
 
-// 	(*(bridge_api.set_log_params))(fp, level);
-// 	/* In the libraries linked to from the bridge there are stderr
-// 	   messages send which we would miss unless we dup this to the
-// 	   log */
-// 	//(void)dup2(fileno(fp), STDERR_FILENO);
-
-// 	if (fp2)
-// 		fclose(fp2);
-// end_it:
-// 	slurm_mutex_unlock(&api_file_mutex);
-//  	return rc;
-// }
+#endif
+	return SLURM_SUCCESS;
+}
 
 
