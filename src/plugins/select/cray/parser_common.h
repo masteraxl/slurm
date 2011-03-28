@@ -18,14 +18,16 @@ const char *bv_names[BV_MAX] = {	/* Basil Protocol version */
 	[BV_1_0] = "1.0",
 	[BV_1_1] = "1.1",
 	[BV_1_2] = "1.1",
-	[BV_3_1] = "1.1"
+	[BV_3_1] = "1.1",
+	[BV_4_0] = "1.2"
 };
 
 const char *bv_names_long[BV_MAX] = {	/* Actual version name */
 	[BV_1_0] = "1.0",
 	[BV_1_1] = "1.1",
 	[BV_1_2] = "1.2",
-	[BV_3_1] = "3.1"
+	[BV_3_1] = "3.1",
+	[BV_4_0] = "4.0"
 };
 
 /* Basil methods */
@@ -117,6 +119,24 @@ const char *nam_proc[BPT_MAX] = {
 	[BPT_CRAY_X2]	= "cray_x2",
 	[BPT_X86_64]	= "x86_64",
 	[BPT_UNKNOWN]	= "UNKNOWN"
+};
+
+/*
+ * Enum-to-string mapping tables specific to Basil 3.1
+ */
+const char *nam_rsvn_mode[BRM_MAX] = {
+	[BRM_NONE]      = "UNDEFINED",
+	[BRM_EXCLUSIVE] = "EXCLUSIVE",
+	[BRM_SHARE]     = "SHARED",
+	[BRM_UNKNOWN]   = "UNKNOWN"
+};
+
+const char *nam_gpc_mode[BGM_MAX] = {
+	[BGM_NONE]      = "NONE",
+	[BRM_PROCESSOR] = "PROCESSOR",
+	[BRM_LOCAL]     = "LOCAL",
+	[BRM_GLOBAL]    = "GLOBAL",
+	[BGM_UNKNOWN]   = "UNKNOWN"
 };
 
 #endif /* __PARSER_COMMON_H__ */

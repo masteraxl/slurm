@@ -162,8 +162,8 @@ extern int bridge_handle_input_errors(const char *function, const uint32_t err,
 	case bgsched::InputErrors::BlockNotFound:
 		/* Not real error */
 		rc = SLURM_SUCCESS;
-		error("%s: Unknown block %s!",
-		      function, bg_record->bg_block_id);
+		debug2("%s: Unknown block %s!",
+		       function, bg_record->bg_block_id);
 		break;
 	case bgsched::InputErrors::BlockNotAdded:
 		error("%s: For some reason the block was not added.", function);
@@ -179,6 +179,13 @@ extern int bridge_handle_input_errors(const char *function, const uint32_t err,
 		error("%s: Unexpected Input exception value %d",
 		      function, err);
 		rc = SLURM_ERROR;
+	}
+	if (bg_record && (rc == SLURM_SUCCESS)) {
+		/* Make sure we set this to free since if it isn't in
+		   the system and we are waiting for it to be free, we
+		   will be waiting around for a long time ;).
+		*/
+		bg_record->state = BG_BLOCK_FREE;
 	}
 	return rc;
 }

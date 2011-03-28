@@ -35,6 +35,12 @@ documents those changes that are of interest to users and admins.
  -- Add support for jobs to expand in size. Submit additional batch job with
     the option "--dependency=expand:<jobid>". See web page "faq.html#job_size"
     for details. Restrictions to be removed in the future.
+ -- Added --with-alps-emulation to configure, and also an optional cray.conf
+    to setup alps location and database information.
+ -- Modify PMI data types from 16-bits to 32-bits in order to support MPICH2
+    jobs with more than 65,536 tasks. Patch from Hongjia Cao, NUDT.
+ -- Set slurmd's soft process CPU limit equal to it's hard limit and notify the
+    user if the limit is not infinite.
 
 * Changes in SLURM 2.3.0.pre3
 =============================

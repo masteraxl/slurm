@@ -2167,6 +2167,42 @@ extern bool partition_in_use(char *part_name)
 }
 
 /*
+ * allocated_session_in_use - check if an interactive session is already running
+ * IN new_alloc - allocation (alloc_node:alloc_sid) to test for
+ * Returns true if an interactive session of the same node:sid already is in use
+ * by a RUNNING, PENDING, or SUSPENDED job. Provides its own locking.
+ */
+extern bool allocated_session_in_use(job_desc_msg_t *new_alloc)
+{
+	ListIterator job_iter;
+	struct job_record *job_ptr;
+	/* Locks: Read job */
+	slurmctld_lock_t job_read_lock = {
+		NO_LOCK, READ_LOCK, NO_LOCK, NO_LOCK };
+
+	if ((new_alloc->script != NULL) || (new_alloc->alloc_node == NULL))
+		return false;
+
+	lock_slurmctld(job_read_lock);
+	job_iter = list_iterator_create(job_list);
+	if (job_iter == NULL)
+		fatal("list_iterator_create: malloc failure");
+
+	while ((job_ptr = (struct job_record *)list_next(job_iter))) {
+		if (job_ptr->batch_flag || IS_JOB_FINISHED(job_ptr))
+			continue;
+		if (job_ptr->alloc_node &&
+		    (strcmp(job_ptr->alloc_node, new_alloc->alloc_node) == 0) &&
+		    (job_ptr->alloc_sid == new_alloc->alloc_sid))
+			break;
+	}
+	list_iterator_destroy(job_iter);
+	unlock_slurmctld(job_read_lock);
+
+	return job_ptr != NULL;
+}
+
+/*
  * kill_running_job_by_node_name - Given a node name, deallocate RUNNING
  *	or COMPLETING jobs from the node or kill them
  * IN node_name - name of a node
@@ -2894,6 +2930,9 @@ extern int job_signal(uint32_t job_id, uint16_t signal, uint16_t batch_flag,
 
 	if (IS_JOB_FINISHED(job_ptr))
 		return ESLURM_ALREADY_DONE;
+
+	/* let node select plugin do any state-dependent signalling actions */
+	select_g_job_signal(job_ptr, signal);
 
 	/* save user ID of the one who requested the job be cancelled */
 	if (signal == SIGKILL)
@@ -7215,14 +7254,12 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 	if (error_code != SLURM_SUCCESS)
 		goto fini;
 
-#if defined(HAVE_BG) || defined(HAVE_CRAY)
-	if (job_specs->min_nodes != NO_VAL) {
+	if ((job_specs->min_nodes != NO_VAL) && !select_g_job_expand_allow()) {
 		info("Change of size for job %u not supported",
 		     job_specs->job_id);
-		error_code = ESLURM_INVALID_NODE_COUNT;
+		error_code = ESLURM_NOT_SUPPORTED;
 		goto fini;
 	}
-#else
 	if ((job_specs->min_nodes != NO_VAL) &&
 	    (IS_JOB_RUNNING(job_ptr) || IS_JOB_SUSPENDED(job_ptr))) {
 		/* Use req_nodes to change the nodes associated with a running
@@ -7259,14 +7296,6 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 				     job_specs->job_id,
 				     job_ptr->details->expanding_jobid);
 				error_code = ESLURMD_STEP_EXISTS;
-				goto fini;
-			}
-			if (!select_g_job_expand_allow()) {
-				info("Select plugin does not support merging "
-				     "of job %u into job %u",
-				     job_specs->job_id,
-				     job_ptr->details->expanding_jobid);
-				error_code = ESLURM_NOT_SUPPORTED;
 				goto fini;
 			}
 			info("sched: cancelling job %u and moving all "
@@ -7324,7 +7353,6 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 			update_accounting = false;
 		}
 	}
-#endif
 
 	if (job_specs->ntasks_per_node != (uint16_t) NO_VAL) {
 		if ((!IS_JOB_PENDING(job_ptr)) || (detail_ptr == NULL))
@@ -8314,7 +8342,8 @@ extern bool job_epilog_complete(uint32_t job_id, char *node_name,
 	}
 
 	if ((job_ptr->total_nodes == 0) && IS_JOB_COMPLETING(job_ptr)) {
-		/* Job resources moved into another job */
+		/* Job resources moved into another job and
+		 *  tasks already killed */
 		front_end_record_t *front_end_ptr = job_ptr->front_end_ptr;
 		if (front_end_ptr)
 			front_end_ptr->node_state &= (~NODE_STATE_COMPLETING);
