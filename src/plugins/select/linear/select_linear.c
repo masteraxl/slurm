@@ -1508,11 +1508,6 @@ static int _job_expand(struct job_record *from_job_ptr,
 		return SLURM_ERROR;
 	}
 
-	if (from_job_ptr->job_id == to_job_ptr->job_id) {
-		error("select/linear: attempt to merge job %u with self",
-		      from_job_ptr->job_id);
-		return SLURM_ERROR;
-	}
 	if (_test_tot_job(cr_ptr, from_job_ptr->job_id) == 0) {
 		info("select/linear: job %u has no resources allocated",
 		     from_job_ptr->job_id);
@@ -1524,31 +1519,10 @@ static int _job_expand(struct job_record *from_job_ptr,
 		return SLURM_ERROR;
 	}
 
-	if (from_job_ptr->gres_list || to_job_ptr->gres_list) {
-		/* This is possible to add, but very complex and fragile */
-		info("select/linear: attempt to merge job %u with GRES",
-		     from_job_ptr->job_id);
-		return ESLURM_EXPAND_GRES;
-	}
-
 	from_job_resrcs_ptr = from_job_ptr->job_resrcs;
-	if ((from_job_resrcs_ptr == NULL) ||
-	    (from_job_resrcs_ptr->cpus == NULL) ||
-	    (from_job_resrcs_ptr->node_bitmap == NULL)) {
-		error("select/linear: job %u lacks a job_resources struct",
-		      from_job_ptr->job_id);
-		return SLURM_ERROR;
-	}
 	to_job_resrcs_ptr = to_job_ptr->job_resrcs;
-	if ((to_job_resrcs_ptr == NULL) ||
-	    (to_job_resrcs_ptr->cpus == NULL) ||
-	    (to_job_resrcs_ptr->node_bitmap == NULL)) {
-		error("select/linear: job %u lacks a job_resources struct",
-		      to_job_ptr->job_id);
-		return SLURM_ERROR;
-	}
-
 	if (to_job_resrcs_ptr->core_bitmap_used) {
+//IS THIS RIGHT?
 		i = bit_size(to_job_resrcs_ptr->core_bitmap_used);
 		bit_nclear(to_job_resrcs_ptr->core_bitmap_used, 0, i-1);
 	}

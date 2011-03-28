@@ -147,6 +147,7 @@ static void _dump_job_details(struct job_details *detail_ptr,
 static void _dump_job_state(struct job_record *dump_job_ptr, Buf buffer);
 static int  _find_batch_dir(void *x, void *key);
 static void _get_batch_job_dir_ids(List batch_dirs);
+static int  _job_merge_update(struct job_record *job_ptr);
 static void _job_timed_out(struct job_record *job_ptr);
 static int  _job_create(job_desc_msg_t * job_specs, int allocate, int will_run,
 			struct job_record **job_rec_ptr, uid_t submit_uid);
@@ -6259,6 +6260,73 @@ static bool _top_priority(struct job_record *job_ptr)
 	return top;
 }
 
+static int  _job_merge_update(struct job_record *job_ptr)
+{
+	job_resources_t *from_job_resrcs_ptr, *to_job_resrcs_ptr;
+//	job_resources_t *new_job_resrcs_ptr;
+	struct job_record *expand_job_ptr;
+	int rc;
+
+	expand_job_ptr = find_job_record(job_ptr->details->expanding_jobid);
+	if (expand_job_ptr == NULL) {
+		info("Invalid node count (0) for job %u update, job %u "
+		     "to expand not found",
+		     job_ptr->job_id, job_ptr->details->expanding_jobid);
+		return ESLURM_INVALID_JOB_ID;
+	}
+	if (job_ptr->job_id == expand_job_ptr->job_id) {
+		info("Attempt to merge job %u with self", job_ptr->job_id);
+		return ESLURM_INVALID_JOB_ID;
+	}
+	if (job_ptr->gres_list || expand_job_ptr->gres_list) {
+/* FIXME: This is possible to add later */
+		info("Attempt to merge job %u with GRES", job_ptr->job_id);
+		return ESLURM_EXPAND_GRES;
+	}
+	if ((expand_job_ptr->step_list != NULL) &&
+	    (list_count(expand_job_ptr->step_list) != 0)) {
+//FIXME: Remove this restriction
+		info("Attempt to merge job %u into job %u with active steps",
+		     job_ptr->job_id, job_ptr->details->expanding_jobid);
+		return ESLURMD_STEP_EXISTS;
+	}
+	from_job_resrcs_ptr = job_ptr->job_resrcs;
+	if ((from_job_resrcs_ptr == NULL) ||
+	    (from_job_resrcs_ptr->cpus == NULL) ||
+	    (from_job_resrcs_ptr->node_bitmap == NULL)) {
+		info("job %u to merge from lacks a job_resources struct",
+		     job_ptr->job_id);
+		return SLURM_ERROR;
+	}
+	to_job_resrcs_ptr = expand_job_ptr->job_resrcs;
+	if ((to_job_resrcs_ptr == NULL) ||
+	    (to_job_resrcs_ptr->cpus == NULL) ||
+	    (to_job_resrcs_ptr->node_bitmap == NULL)) {
+		info("job %u being merge to lacks a job_resources struct",
+		      expand_job_ptr->job_id);
+		return SLURM_ERROR;
+	}
+	if ((job_ptr->step_list != NULL) &&
+	    (list_count(job_ptr->step_list) != 0)) {
+		info("Attempt to merge job %u with active steps into job %u",
+		     job_ptr->job_id, job_ptr->details->expanding_jobid);
+		return ESLURMD_STEP_EXISTS;
+	}
+	info("sched: cancelling job %u and moving all resources to job %u",
+	     job_ptr->job_id, expand_job_ptr->job_id);
+	job_pre_resize_acctg(job_ptr);
+	job_pre_resize_acctg(expand_job_ptr);
+	_send_job_kill(job_ptr);
+//REBUILD JOB_RESOURCES data struct
+//REBUILD JOB's NODE_BITMAP and NODES
+//REBUILD STEPS NODE_BITMAP
+//FIX STATE IN SELECT PLUGIN
+	rc = select_g_job_expand(job_ptr, expand_job_ptr);
+	job_post_resize_acctg(job_ptr);
+	job_post_resize_acctg(expand_job_ptr);
+
+	return rc;
+}
 
 /*
  * update_job - update a job's parameters per the supplied specifications
@@ -7267,56 +7335,13 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 		if ((job_specs->min_nodes == 0) && IS_JOB_RUNNING(job_ptr) &&
 		    (job_ptr->node_cnt > 0) &&
 		    job_ptr->details && job_ptr->details->expanding_jobid) {
-			struct job_record *expand_job_ptr;
-
-			expand_job_ptr = find_job_record(job_ptr->details->
-							 expanding_jobid);
-			if (expand_job_ptr == NULL) {
-				info("Invalid node count (%u) for job %u "
-				     "update, job %u to expand not found",
-				     job_specs->min_nodes, job_specs->job_id,
-				     job_ptr->details->expanding_jobid);
-				error_code = ESLURM_INVALID_JOB_ID;
-				goto fini;
-			}
-			if ((expand_job_ptr->step_list != NULL) &&
-			    (list_count(expand_job_ptr->step_list) != 0)) {
-				info("Attempt to merge job %u with active "
-				     "steps into job %u",
-				     job_specs->job_id,
-				     job_ptr->details->expanding_jobid);
-				error_code = ESLURMD_STEP_EXISTS;
-				goto fini;
-			}
-			if ((job_ptr->step_list != NULL) &&
-			    (list_count(job_ptr->step_list) != 0)) {
-//FIXME: Remove this restriction
-				info("Attempt to merge job %u into job %u "
-				     "with active steps",
-				     job_specs->job_id,
-				     job_ptr->details->expanding_jobid);
-				error_code = ESLURMD_STEP_EXISTS;
-				goto fini;
-			}
-			info("sched: cancelling job %u and moving all "
-			     "resources to job %u", job_specs->job_id,
-			     expand_job_ptr->job_id);
-			job_pre_resize_acctg(job_ptr);
-			job_pre_resize_acctg(expand_job_ptr);
-			_send_job_kill(job_ptr);
-//REBUILD JOB_RESOURCES data struct
-//REBUILD JOB's NODE_BITMAP and NODES
-//REBUILD STEPS NODE_BITMAP
-//FIX STATE IN SELECT PLUGIN
-			error_code = select_g_job_expand(job_ptr,
-							 expand_job_ptr);
-			job_post_resize_acctg(job_ptr);
-			job_post_resize_acctg(expand_job_ptr);
-			/* Since job_post_resize_acctg will restart
-			 * things don't do it again. */
-			update_accounting = false;
+			error_code = _job_merge_update(job_ptr);
 			if (error_code)
 				goto fini;
+			/* Since job_post_resize_acctg() called from
+			 * _job_merge_update() will restart things,
+			 * don't do it again. */
+			update_accounting = false;
 		} else if ((job_specs->min_nodes == 0) ||
 		           (job_specs->min_nodes > job_ptr->node_cnt)) {
 			info("sched: Invalid node count (%u) for job %u update",
@@ -7332,6 +7357,7 @@ int update_job(job_desc_msg_t * job_specs, uid_t uid)
 			info("sched: update_job: set node count to %u for "
 			     "job_id %u",
 			     job_specs->min_nodes, job_specs->job_id);
+//REBUILD JOB_RESOURCES data struct
 			job_pre_resize_acctg(job_ptr);
 			i_first = bit_ffs(job_ptr->node_bitmap);
 			i_last  = bit_fls(job_ptr->node_bitmap);
@@ -7710,8 +7736,8 @@ static void _send_job_kill(struct job_record *job_ptr)
 	}
 #endif
 	if (agent_args->node_count == 0) {
-		error("Job %u allocated no nodes to be killed on",
-		      job_ptr->job_id);
+		info("Job %u allocated no nodes to be killed on",
+		     job_ptr->job_id);
 		xfree(kill_job->nodes);
 		xfree(kill_job);
 		hostlist_destroy(agent_args->hostlist);

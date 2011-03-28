@@ -906,6 +906,22 @@ extern int set_job_resources_bit(job_resources_t *job_resrcs_ptr,
 	return SLURM_SUCCESS;
 }
 
+/* Take the resources allocated to the "from" structure and add them to the
+ * "to" structure and put the results in the "new" structure.
+ * IN from_job_resrcs_ptr - source of resources to be moved
+ * IN to_job_resrcs_ptr   - destination of resources to be moved, can be
+ *			    freed after the merge and replaced by the "new"
+ *			    structure
+ * OUT new_job_resrcs_ptr - resulting data structure of merged resources
+ * RETURN: SLURM_SUCCESS or an error code
+ */
+extern int job_resources_bits_merge(job_resources_t *from_job_resrcs_ptr,
+				    job_resources_t *to_job_resrcs_ptr,
+				    job_resources_t **new_job_resrcs_ptr)
+{
+	return SLURM_SUCCESS;
+}
+
 /* For every core bitmap and core_bitmap_used set in the "from" resources
  * structure at from_node_offset, set the corresponding bit in the "new"
  * resources structure at new_node_offset */
