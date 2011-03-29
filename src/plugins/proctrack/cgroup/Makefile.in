@@ -104,8 +104,7 @@ am__base_list = \
   sed '$$!N;$$!N;$$!N;$$!N;s/\n/ /g'
 am__installdirs = "$(DESTDIR)$(pkglibdir)"
 LTLIBRARIES = $(pkglib_LTLIBRARIES)
-proctrack_cgroup_la_DEPENDENCIES =  \
-	$(top_builddir)/src/common/libcommon.la
+proctrack_cgroup_la_LIBADD =
 am_proctrack_cgroup_la_OBJECTS = proctrack_cgroup.lo
 proctrack_cgroup_la_OBJECTS = $(am_proctrack_cgroup_la_OBJECTS)
 proctrack_cgroup_la_LINK = $(LIBTOOL) --tag=CC $(AM_LIBTOOLFLAGS) \
@@ -330,7 +329,6 @@ pkglib_LTLIBRARIES = proctrack_cgroup.la
 
 # Process group ID process tracking plugin.
 proctrack_cgroup_la_SOURCES = proctrack_cgroup.c
-proctrack_cgroup_la_LIBADD = $(top_builddir)/src/common/libcommon.la
 proctrack_cgroup_la_LDFLAGS = $(SO_LDFLAGS) $(PLUGIN_FLAGS)
 all: all-am
 

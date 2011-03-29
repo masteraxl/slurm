@@ -12,6 +12,5 @@ pkglib_LTLIBRARIES = task_cgroup.la
 task_cgroup_la_SOURCES = 	task_cgroup.c \
 				task_cgroup_cpuset.h task_cgroup_cpuset.c \
 				task_cgroup_memory.h task_cgroup_memory.c
-task_cgroup_la_LIBADD = $(top_builddir)/src/common/libcommon.la
 task_cgroup_la_CPPFLAGS = $(HWLOC_CPPFLAGS)
 task_cgroup_la_LDFLAGS = $(SO_LDFLAGS) $(PLUGIN_FLAGS) $(HWLOC_LDFLAGS) $(HWLOC_LIBS)
