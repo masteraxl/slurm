@@ -955,8 +955,10 @@ slurm_pid2jobid (pid_t job_pid, uint32_t *jobid)
 	req.job_pid      = job_pid;
 	req_msg.msg_type = REQUEST_JOB_ID;
 	req_msg.data     = &req;
+info("hello4 %d", job_pid);
 
 	rc = slurm_send_recv_node_msg(&req_msg, &resp_msg, 0);
+info("hello5 %d", rc);
 
 	if(rc != 0 || !resp_msg.auth_cred) {
 		error("slurm_pid2jobid: %m");
@@ -964,20 +966,24 @@ slurm_pid2jobid (pid_t job_pid, uint32_t *jobid)
 			g_slurm_auth_destroy(resp_msg.auth_cred);
 		return SLURM_ERROR;
 	}
+info("hello6 %d", ((job_id_response_msg_t *) resp_msg.data)->job_id);
 	if(resp_msg.auth_cred)
 		g_slurm_auth_destroy(resp_msg.auth_cred);
 	switch (resp_msg.msg_type) {
 	case RESPONSE_JOB_ID:
 		*jobid = ((job_id_response_msg_t *) resp_msg.data)->job_id;
+info("hello7 %d", *jobid);
 		slurm_free_job_id_response_msg(resp_msg.data);
 		break;
 	case RESPONSE_SLURM_RC:
 	        rc = ((return_code_msg_t *) resp_msg.data)->return_code;
+info("hello8 %d", rc);
 		slurm_free_return_code_msg(resp_msg.data);
 		if (rc)
 			slurm_seterrno_ret(rc);
 		break;
 	default:
+info("hello9");
 		slurm_seterrno_ret(SLURM_UNEXPECTED_MSG_ERROR);
 		break;
 	}

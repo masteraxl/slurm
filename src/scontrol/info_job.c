@@ -136,8 +136,10 @@ scontrol_pid_info(pid_t job_pid)
 	uint32_t job_id;
 	time_t end_time;
 	long rem_time;
+info("hello1 %d", job_pid);
 
 	error_code = slurm_pid2jobid (job_pid, &job_id);
+info("hello2 %d, %d", job_pid, job_id);
 	if (error_code) {
 		exit_code = 1;
 		if (quiet_flag != 1)
@@ -146,6 +148,7 @@ scontrol_pid_info(pid_t job_pid)
 	}
 
 	error_code = slurm_get_end_time(job_id, &end_time);
+info("hello3 %d, %d", job_pid, error_code);
 	if (error_code) {
 		exit_code = 1;
 		if (quiet_flag != 1)

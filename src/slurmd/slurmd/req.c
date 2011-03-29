@@ -2318,6 +2318,7 @@ static void  _rpc_pid2jid(slurm_msg_t *msg)
 	List         steps;
 	ListIterator i;
 	step_loc_t *stepd;
+info("hello9");
 
 	steps = stepd_available(conf->spooldir, conf->node_name);
 	i = list_iterator_create(steps);
