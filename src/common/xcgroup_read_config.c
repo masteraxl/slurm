@@ -89,7 +89,7 @@ static void _clear_slurm_cgroup_conf(slurm_cgroup_conf_t *slurm_cgroup_conf)
 
 /*
  * read_slurm_cgroup_conf - load the Slurm cgroup configuration from the
- *	cgroup.conf file. 
+ *	cgroup.conf file.
  * RET SLURM_SUCCESS if no error, otherwise an error code
  */
 extern int read_slurm_cgroup_conf(slurm_cgroup_conf_t *slurm_cgroup_conf)
@@ -141,7 +141,7 @@ extern int read_slurm_cgroup_conf(slurm_cgroup_conf_t *slurm_cgroup_conf)
 			       "CgroupSubsystems", tbl);
 		s_p_get_string(&slurm_cgroup_conf->cgroup_release_agent,
 			       "CgroupReleaseAgentDir", tbl);
-		if ( ! slurm_cgroup_conf->cgroup_release_agent )
+		if (! slurm_cgroup_conf->cgroup_release_agent)
 			slurm_cgroup_conf->cgroup_release_agent =
 				xstrdup("/etc/slurm/cgroup");
 

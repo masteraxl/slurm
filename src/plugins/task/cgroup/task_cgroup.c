@@ -98,26 +98,26 @@ extern int init (void)
 {
 
 	/* read cgroup configuration */
-	if ( read_slurm_cgroup_conf(&slurm_cgroup_conf) )
+	if (read_slurm_cgroup_conf(&slurm_cgroup_conf))
 		return SLURM_ERROR;
 
 	/* enable subsystems based on conf */
-	if ( slurm_cgroup_conf.constrain_cores ) {
+	if (slurm_cgroup_conf.constrain_cores) {
 		use_cpuset = true;
 		task_cgroup_cpuset_init(&slurm_cgroup_conf);
 		debug("%s: now constraining jobs allocated cores",
 		      plugin_type);
 	}
 
-	if ( slurm_cgroup_conf.constrain_ram_space ||
-	     slurm_cgroup_conf.constrain_swap_space ) {
+	if (slurm_cgroup_conf.constrain_ram_space ||
+	     slurm_cgroup_conf.constrain_swap_space) {
 		use_memory = true;
 		task_cgroup_memory_init(&slurm_cgroup_conf);
 		debug("%s: now constraining jobs allocated memory",
 		      plugin_type);
 	}
 
-	if ( slurm_cgroup_conf.constrain_devices ) {
+	if (slurm_cgroup_conf.constrain_devices) {
 		use_devices = true;
 		/* here we should initialize the devices subsystem */
 		debug("%s: now constraining jobs allocated devices",
@@ -135,13 +135,13 @@ extern int init (void)
 extern int fini (void)
 {
 
-	if ( use_cpuset ) {
+	if (use_cpuset) {
 		task_cgroup_cpuset_fini(&slurm_cgroup_conf);
 	}
-	if ( use_memory ) {
+	if (use_memory) {
 		task_cgroup_memory_fini(&slurm_cgroup_conf);
 	}
-	if ( use_devices ) {
+	if (use_devices) {
 		;
 	}
 
@@ -212,17 +212,17 @@ extern int task_slurmd_release_resources (uint32_t job_id)
 extern int task_pre_setuid (slurmd_job_t *job)
 {
 
-	if ( use_cpuset ) {
+	if (use_cpuset) {
 		/* we create the cpuset container as we are still root */
 		task_cgroup_cpuset_create(job);
 	}
 
-	if ( use_memory ) {
+	if (use_memory) {
 		/* we create the memory container as we are still root */
 		task_cgroup_memory_create(job);
 	}
 
-	if ( use_devices ) {
+	if (use_devices) {
 		/* here we should create the devices container as we are root */
 	}
 
@@ -237,21 +237,21 @@ extern int task_pre_setuid (slurmd_job_t *job)
 extern int task_pre_launch (slurmd_job_t *job)
 {
 
-	if ( use_cpuset ) {
+	if (use_cpuset) {
 		/* attach the task ? not necessary but in case of future mods */
 		task_cgroup_cpuset_attach_task(job);
 
 		/* set affinity if requested */
-		if ( slurm_cgroup_conf.task_affinity )
+		if (slurm_cgroup_conf.task_affinity)
 			task_cgroup_cpuset_set_task_affinity(job);
 	}
 
-	if ( use_memory ) {
+	if (use_memory) {
 		/* attach the task ? not necessary but in case of future mods */
 		task_cgroup_memory_attach_task(job);
 	}
 
-	if ( use_devices ) {
+	if (use_devices) {
 		;
 	}
 

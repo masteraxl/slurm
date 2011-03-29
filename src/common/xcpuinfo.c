@@ -69,10 +69,10 @@ static int _compute_block_map(uint16_t numproc,
 static int _chk_cpuinfo_str(char *buffer, char *keyword, char **valptr);
 static int _chk_cpuinfo_uint32(char *buffer, char *keyword, uint32_t *val);
 
-static int _ranges_conv(char* lrange,char** prange,int mode);
-static int _range_to_map(char* range,uint16_t *map,uint16_t map_size,
+static int _ranges_conv(char* lrange, char** prange, int mode);
+static int _range_to_map(char* range, uint16_t *map, uint16_t map_size,
 			 int add_threads);
-static int _map_to_range(uint16_t *map,uint16_t map_size,char** prange);
+static int _map_to_range(uint16_t *map, uint16_t map_size, char** prange);
 
 bool     initialized = false;
 uint16_t procs, sockets, cores, threads=1;
